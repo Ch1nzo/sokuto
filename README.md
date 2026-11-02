@@ -1,5 +1,7 @@
 # Sokuto
 
+<p align="center"><img src="docs/images/hero.webp" alt="Sokuto" width="800"></p>
+
 Sokuto(即答)= すぐに答える
 
 Sokuto は、LINE・Facebook Messenger・Instagram で動くチャットボットを、**あなた自身の無料 Cloudflare アカウント**の上で動かすためのオープンソースソフトウェア (MIT) です。「価格とコメントした人に DM で価格を送る」「友だち追加した人にあいさつしてアンケートを取る」といった自動応答を管理画面から作れます。ChatGPT / Claude / Claude Code から MCP で自動化を作ったりテストしたりすることもできます。商用サービス noflow.pro のオープンソース代替として作られており、日本向けに LINE 対応を加えています。
@@ -77,6 +79,8 @@ Sokuto 自体に料金はありません。ただし、次の外部サービス�
 - コメントへのプライベート返信 (DM) は、1 つのコメントにつき 1 回だけです。
 
 ## 仕組み
+
+<p align="center"><img src="docs/images/how-it-works.webp" alt="コメント → DM → 連絡先 → AI レポート" width="900"></p>
 
 ```
 LINE / Messenger / Instagram
