@@ -1,6 +1,22 @@
-import { useEffect, useState } from 'react'
-import { api, errorMessage } from '../lib/api'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  Badge,
+  Banner,
+  Button,
+  SegmentedControl,
+  SegmentedControlItem,
+  Switch,
+  Text,
+  VStack,
+  useToast,
+} from '@channel.io/bezier-react'
+import { CheckCircleFilledIcon, ErrorTriangleFilledIcon, InfoFilledIcon, KeyIcon, LinkCopyIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { ApiError, api, errorMessage } from '../lib/api'
 import { useLang, useT, type Lang } from '../lib/i18n'
+import { useTheme, type ThemePref } from '../lib/theme'
+import { Card, CopyBox, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
+import { ConfirmAction } from '../components/ConfirmAction'
+import './settings.css'
 
 type General = {
   botName: string
@@ -13,28 +29,66 @@ type General = {
 
 type SettingsResponse = { general: General; mcp: { configured: boolean; url: string } }
 
-type Msg = { kind: 'ok' | 'error'; text: string } | null
+type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
 
-function CopyBox({ value, multiline = false }: { value: string; multiline?: boolean }) {
+const FALLBACK_TIMEZONES = ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
+
+function timezoneList(current: string): string[] {
+  let zones: string[] = FALLBACK_TIMEZONES
+  try {
+    if (typeof Intl.supportedValuesOf === 'function') zones = Intl.supportedValuesOf('timeZone')
+  } catch {
+    /* old browser: fallback list */
+  }
+  if (!zones.includes('UTC')) zones = ['UTC', ...zones]
+  return current && !zones.includes(current) ? [current, ...zones] : zones
+}
+
+function toForm(g: General): Form {
+  return {
+    botName: g.botName,
+    language: g.language,
+    timezone: g.timezone,
+    paused: g.paused,
+    keywords: g.handoffKeywords.join(', '),
+    handoffReply: g.handoffReply,
+  }
+}
+
+/** Multi-line monospace snippet with a label and a Copy button. */
+function CodeSnippet({ label, value }: { label: string; value: string }) {
   const t = useT()
-  const [done, setDone] = useState(false)
+  const toast = useToast()
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.addToast(t('copied'), { preset: 'success' })
+    } catch {
+      toast.addToast(t('copy_failed'), { preset: 'error' })
+    }
+  }
   return (
-    <div className="row" style={{ alignItems: 'flex-start' }}>
-      {multiline ? (
-        <pre className="code-box mono" style={{ flex: 1, margin: 0, whiteSpace: 'pre-wrap' }}>{value}</pre>
-      ) : (
-        <code className="code-box" style={{ flex: 1 }}>{value}</code>
-      )}
-      <button
-        className="btn small"
-        onClick={() => {
-          void navigator.clipboard.writeText(value)
-          setDone(true)
-          setTimeout(() => setDone(false), 1500)
-        }}
-      >
-        {done ? t('channels_copied') : t('channels_copy')}
-      </button>
+    <div className="st-code">
+      <div className="st-code__head">
+        <Text typo="13" bold color="txt-black-darker">
+          {label}
+        </Text>
+        <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={LinkCopyIcon} text={t('copy')} onClick={copy} />
+      </div>
+      <pre className="st-code__value" aria-label={label}>
+        {value}
+      </pre>
+    </div>
+  )
+}
+
+function Labeled({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="st-field">
+      <Text as="div" typo="13" bold color="txt-black-darker">
+        {label}
+      </Text>
+      {children}
     </div>
   )
 }
@@ -42,46 +96,59 @@ function CopyBox({ value, multiline = false }: { value: string; multiline?: bool
 export default function Settings() {
   const t = useT()
   const { setLang } = useLang()
+  const { pref, setPref } = useTheme()
+  const toast = useToast()
   const [data, setData] = useState<SettingsResponse | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [form, setForm] = useState<{ botName: string; language: Lang; paused: boolean; keywords: string; handoffReply: string } | null>(null)
-  const [generalMsg, setGeneralMsg] = useState<Msg>(null)
-  const [mcpMsg, setMcpMsg] = useState<Msg>(null)
-  const [pwMsg, setPwMsg] = useState<Msg>(null)
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [form, setForm] = useState<Form | null>(null)
+  const [savingGeneral, setSavingGeneral] = useState(false)
+  const [generalError, setGeneralError] = useState<unknown>(null)
   const [token, setToken] = useState<{ token: string; url: string } | null>(null)
+  const [mcpBusy, setMcpBusy] = useState<'rotate' | 'revoke' | null>(null)
+  const [mcpError, setMcpError] = useState<unknown>(null)
+  const [mcpConfirm, setMcpConfirm] = useState<'rotate' | 'revoke' | null>(null)
+  const [mcpConfirmKind, setMcpConfirmKind] = useState<'rotate' | 'revoke'>('rotate')
   const [pw, setPw] = useState({ current: '', password: '' })
-  const [busy, setBusy] = useState(false)
+  const [pwBusy, setPwBusy] = useState(false)
+  const [pwError, setPwError] = useState<string | null>(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const r = await api.get<SettingsResponse>('/api/settings')
       setData(r)
-      setForm({
-        botName: r.general.botName,
-        language: r.general.language,
-        paused: r.general.paused,
-        keywords: r.general.handoffKeywords.join(', '),
-        handoffReply: r.general.handoffReply,
-      })
+      setForm(toForm(r.general))
+      setLoadError(null)
     } catch (err) {
-      setLoadError(errorMessage(err))
+      setLoadError(err)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [load])
 
-  if (loadError && !data) return <div className="alert error">{loadError}</div>
-  if (!data || !form) return <div className="muted">{t('loading')}</div>
+  const timezones = useMemo(() => timezoneList(form?.timezone ?? '').map((z) => ({ value: z, label: z.replace(/_/g, ' ') })), [form?.timezone])
 
-  const saveGeneral = async () => {
-    setBusy(true)
-    setGeneralMsg(null)
+  if (!data || !form) {
+    return loadError ? (
+      <div className="stack">
+        <PageHeader title={t('settings_title')} />
+        <ErrorBanner error={loadError} onRetry={() => void load()} />
+      </div>
+    ) : (
+      <LoadingState />
+    )
+  }
+
+  const saveGeneral = async (e: FormEvent) => {
+    e.preventDefault()
+    setSavingGeneral(true)
+    setGeneralError(null)
     try {
       const r = await api.put<{ general: General }>('/api/settings', {
         botName: form.botName,
         language: form.language,
+        timezone: form.timezone,
         paused: form.paused,
         handoffKeywords: form.keywords
           .split(/[,、]/)
@@ -90,56 +157,64 @@ export default function Settings() {
         handoffReply: form.handoffReply,
       })
       setData({ ...data, general: r.general })
+      setForm(toForm(r.general))
       setLang(r.general.language)
-      setGeneralMsg({ kind: 'ok', text: t('saved') })
+      toast.addToast(t('saved'), { preset: 'success' })
     } catch (err) {
-      setGeneralMsg({ kind: 'error', text: errorMessage(err) })
+      setGeneralError(err)
     } finally {
-      setBusy(false)
+      setSavingGeneral(false)
     }
   }
 
   const rotate = async () => {
-    if (data.mcp.configured && !confirm(`${t('settings_mcp_regenerate')}?`)) return
-    setBusy(true)
-    setMcpMsg(null)
+    setMcpBusy('rotate')
+    setMcpError(null)
     try {
       const r = await api.post<{ token: string; url: string }>('/api/settings/mcp/rotate')
       setToken(r)
       setData({ ...data, mcp: { configured: true, url: r.url } })
     } catch (err) {
-      setMcpMsg({ kind: 'error', text: errorMessage(err) })
+      setMcpError(err)
     } finally {
-      setBusy(false)
+      setMcpBusy(null)
     }
   }
 
   const revoke = async () => {
-    if (!confirm(t('confirmDelete'))) return
-    setBusy(true)
-    setMcpMsg(null)
+    setMcpBusy('revoke')
+    setMcpError(null)
     try {
       await api.delete('/api/settings/mcp')
       setToken(null)
       setData({ ...data, mcp: { ...data.mcp, configured: false } })
+      toast.addToast(t('settings_mcp_not_configured'), { preset: 'success' })
     } catch (err) {
-      setMcpMsg({ kind: 'error', text: errorMessage(err) })
+      setMcpError(err)
     } finally {
-      setBusy(false)
+      setMcpBusy(null)
     }
   }
 
-  const changePassword = async () => {
-    setBusy(true)
-    setPwMsg(null)
+  const askMcp = (kind: 'rotate' | 'revoke') => {
+    setMcpConfirmKind(kind)
+    setMcpConfirm(kind)
+  }
+
+  const changePassword = async (e: FormEvent) => {
+    e.preventDefault()
+    setPwBusy(true)
+    setPwError(null)
     try {
       await api.post('/api/auth/password', pw)
       setPw({ current: '', password: '' })
-      setPwMsg({ kind: 'ok', text: t('saved') })
+      toast.addToast(t('saved'), { preset: 'success' })
     } catch (err) {
-      setPwMsg({ kind: 'error', text: errorMessage(err) })
+      if (err instanceof ApiError && err.code === 'invalid_password') setPwError(t('login_failed'))
+      else if (err instanceof ApiError && err.code === 'password_too_short') setPwError(t('settings_password_min'))
+      else setPwError(errorMessage(err))
     } finally {
-      setBusy(false)
+      setPwBusy(false)
     }
   }
 
@@ -148,104 +223,166 @@ export default function Settings() {
     ? JSON.stringify({ mcpServers: { sokuto: { url: mcpUrl, headers: { Authorization: `Bearer ${token.token}` } } } }, null, 2)
     : ''
   const cliSnippet = token ? `claude mcp add --transport http sokuto ${mcpUrl} --header "Authorization: Bearer ${token.token}"` : ''
+  const pwTooShort = pw.password.length > 0 && pw.password.length < 8
 
   return (
-    <>
-      <div className="page-title">
-        <h1>{t('settings_title')}</h1>
-      </div>
+    <div className="stack">
+      <PageHeader title={t('settings_title')} />
 
-      <div className="card">
-        <h2>{t('settings_general')}</h2>
-        {generalMsg && <div className={`alert ${generalMsg.kind}`}>{generalMsg.text}</div>}
-        <div className="inline-fields">
-          <div>
-            <label>{t('settings_bot_name')}</label>
-            <input value={form.botName} onChange={(e) => setForm({ ...form, botName: e.target.value })} />
+      <Card title={t('settings_general')}>
+        <VStack as="form" spacing={16} onSubmit={saveGeneral}>
+          <div className="st-form-row">
+            <TextInputField label={t('settings_bot_name')} value={form.botName} onChange={(e) => setForm({ ...form, botName: e.target.value })} required />
+            <SelectField<Lang>
+              label={t('settings_language')}
+              value={form.language}
+              options={[
+                { value: 'ja', label: '日本語' },
+                { value: 'en', label: 'English' },
+              ]}
+              onChange={(v) => setForm({ ...form, language: v })}
+            />
           </div>
-          <div>
-            <label>{t('settings_language')}</label>
-            <select value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value === 'en' ? 'en' : 'ja' })}>
-              <option value="ja">日本語</option>
-              <option value="en">English</option>
-            </select>
+          <div className="st-form-row">
+            <SelectField label={t('settings_timezone')} value={form.timezone} options={timezones} onChange={(v) => setForm({ ...form, timezone: v })} />
           </div>
-        </div>
-        <label className="row" style={{ color: 'var(--text)', marginTop: 12 }}>
-          <input type="checkbox" checked={form.paused} onChange={(e) => setForm({ ...form, paused: e.target.checked })} style={{ width: 'auto' }} />
-          {t('settings_paused')}
-        </label>
-        <label>{t('settings_handoff_keywords')}</label>
-        <input value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} />
-        <label>{t('settings_handoff_reply')}</label>
-        <textarea value={form.handoffReply} onChange={(e) => setForm({ ...form, handoffReply: e.target.value })} />
-        <div style={{ marginTop: 10 }}>
-          <button className="btn primary" disabled={busy} onClick={() => void saveGeneral()}>
-            {t('save')}
-          </button>
-        </div>
-      </div>
+          <div className="st-switch">
+            <label className="st-switch__text" htmlFor="settings-paused">
+              <Text as="span" typo="14" bold color="txt-black-darkest">
+                {t('settings_paused')}
+              </Text>
+              <Text as="span" typo="13" color="txt-black-dark">
+                {t('settings_paused_help')}
+              </Text>
+            </label>
+            <Switch id="settings-paused" checked={form.paused} onCheckedChange={(v) => setForm({ ...form, paused: v })} />
+          </div>
+          <TextInputField
+            label={t('settings_handoff_keywords')}
+            helperText={t('settings_handoff_keywords_help')}
+            value={form.keywords}
+            onChange={(e) => setForm({ ...form, keywords: e.target.value })}
+          />
+          <TextAreaField label={t('settings_handoff_reply')} value={form.handoffReply} onChange={(e) => setForm({ ...form, handoffReply: e.target.value })} maxRows={10} />
+          {generalError !== null && <ErrorBanner error={generalError} />}
+          <div className="st-actions">
+            <Button type="submit" text={t('save')} loading={savingGeneral} />
+          </div>
+        </VStack>
+      </Card>
 
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <h2>{t('settings_mcp')}</h2>
-          <span className={`badge ${data.mcp.configured ? 'live' : 'draft'}`}>
-            {data.mcp.configured ? t('settings_mcp_configured') : t('settings_mcp_not_configured')}
-          </span>
+      <Card title={t('theme')}>
+        <div className="st-theme">
+          <SegmentedControl type="radiogroup" size="m" width={300} value={pref} onValueChange={(v: ThemePref) => setPref(v)} aria-label={t('theme')}>
+            <SegmentedControlItem value="light">{t('theme_light')}</SegmentedControlItem>
+            <SegmentedControlItem value="dark">{t('theme_dark')}</SegmentedControlItem>
+            <SegmentedControlItem value="system">{t('theme_system')}</SegmentedControlItem>
+          </SegmentedControl>
+          <Text as="p" typo="13" color="txt-black-dark">
+            {t('settings_theme_help')}
+          </Text>
         </div>
-        <div className="small muted">{t('settings_mcp_lead')}</div>
-        {mcpMsg && <div className={`alert ${mcpMsg.kind}`}>{mcpMsg.text}</div>}
-        <label>{t('settings_mcp_url')}</label>
-        <CopyBox value={mcpUrl} />
-        {token && (
-          <>
-            <label>{t('settings_mcp_token')}</label>
-            <CopyBox value={token.token} />
-            <div className="alert info small">{t('settings_mcp_how')}</div>
-            <label>Claude Desktop / JSON</label>
-            <CopyBox value={jsonSnippet} multiline />
-            <label>Claude Code</label>
-            <CopyBox value={cliSnippet} multiline />
-          </>
-        )}
-        <div className="row" style={{ marginTop: 10 }}>
-          <button className="btn primary" disabled={busy} onClick={() => void rotate()}>
-            {data.mcp.configured ? t('settings_mcp_regenerate') : t('settings_mcp_generate')}
-          </button>
-          {data.mcp.configured && (
-            <button className="btn danger" disabled={busy} onClick={() => void revoke()}>
-              {t('settings_mcp_revoke')}
-            </button>
+      </Card>
+
+      <Card
+        title={t('settings_mcp')}
+        actions={
+          data.mcp.configured ? (
+            <Badge size="m" variant="green" icon={CheckCircleFilledIcon}>
+              {t('settings_mcp_configured')}
+            </Badge>
+          ) : (
+            <Badge size="m" variant="monochrome-light">
+              {t('settings_mcp_not_configured')}
+            </Badge>
+          )
+        }
+      >
+        <VStack spacing={16}>
+          <Text as="p" typo="14" color="txt-black-darker">
+            {t('settings_mcp_lead')}
+          </Text>
+          <Labeled label={t('settings_mcp_url')}>
+            <CopyBox value={mcpUrl} label={t('settings_mcp_url')} />
+          </Labeled>
+          {token && (
+            <>
+              <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('settings_mcp_token_once')} />
+              <Labeled label={t('settings_mcp_token')}>
+                <CopyBox value={token.token} label={t('settings_mcp_token')} />
+              </Labeled>
+              <Banner className="st-wrap" variant="blue" icon={InfoFilledIcon} content={t('settings_mcp_how')} />
+              <CodeSnippet label="Claude Desktop / JSON" value={jsonSnippet} />
+              <CodeSnippet label="Claude Code" value={cliSnippet} />
+            </>
           )}
-        </div>
-      </div>
+          {mcpError !== null && <ErrorBanner error={mcpError} />}
+          <div className="st-actions">
+            <Button
+              leftContent={KeyIcon}
+              styleVariant={data.mcp.configured ? 'secondary' : 'primary'}
+              colorVariant={data.mcp.configured ? 'monochrome-dark' : 'blue'}
+              text={data.mcp.configured ? t('settings_mcp_regenerate') : t('settings_mcp_generate')}
+              loading={mcpBusy === 'rotate'}
+              disabled={mcpBusy === 'revoke'}
+              onClick={() => (data.mcp.configured ? askMcp('rotate') : void rotate())}
+            />
+            {data.mcp.configured && (
+              <Button
+                leftContent={TrashIcon}
+                styleVariant="secondary"
+                colorVariant="red"
+                text={t('settings_mcp_revoke')}
+                loading={mcpBusy === 'revoke'}
+                disabled={mcpBusy === 'rotate'}
+                onClick={() => askMcp('revoke')}
+              />
+            )}
+          </div>
+        </VStack>
+      </Card>
 
-      <div className="card">
-        <h2>{t('settings_password')}</h2>
-        {pwMsg && <div className={`alert ${pwMsg.kind}`}>{pwMsg.text}</div>}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            void changePassword()
-          }}
-        >
-          <div className="inline-fields">
-            <div>
-              <label>{t('settings_current_password')}</label>
-              <input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-            </div>
-            <div>
-              <label>{t('settings_new_password')}</label>
-              <input type="password" autoComplete="new-password" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} />
-            </div>
+      <Card title={t('settings_password')}>
+        <VStack as="form" spacing={16} onSubmit={changePassword}>
+          {/* Hidden username helps password managers associate the credentials. */}
+          <input type="text" name="username" autoComplete="username" value="admin" readOnly hidden />
+          <div className="st-form-row">
+            <TextInputField
+              label={t('settings_current_password')}
+              type="password"
+              autoComplete="current-password"
+              value={pw.current}
+              onChange={(e) => setPw({ ...pw, current: e.target.value })}
+              required
+            />
+            <TextInputField
+              label={t('settings_new_password')}
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              helperText={t('settings_password_min')}
+              error={pwTooShort ? t('settings_password_min') : undefined}
+              value={pw.password}
+              onChange={(e) => setPw({ ...pw, password: e.target.value })}
+              required
+            />
           </div>
-          <div style={{ marginTop: 10 }}>
-            <button className="btn primary" type="submit" disabled={busy || !pw.current || pw.password.length < 8}>
-              {t('save')}
-            </button>
+          {pwError && <ErrorBanner error={pwError} />}
+          <div className="st-actions">
+            <Button type="submit" text={t('save')} loading={pwBusy} disabled={!pw.current || pw.password.length < 8} />
           </div>
-        </form>
-      </div>
-    </>
+        </VStack>
+      </Card>
+
+      <ConfirmAction
+        show={mcpConfirm !== null}
+        onHide={() => setMcpConfirm(null)}
+        title={mcpConfirmKind === 'rotate' ? `${t('settings_mcp_regenerate')}?` : `${t('settings_mcp_revoke')}?`}
+        description={mcpConfirmKind === 'rotate' ? t('settings_mcp_regenerate_confirm') : t('settings_mcp_revoke_confirm')}
+        confirmText={mcpConfirmKind === 'rotate' ? t('settings_mcp_regenerate') : t('settings_mcp_revoke')}
+        destructive={mcpConfirmKind === 'revoke'}
+        onConfirm={() => void (mcpConfirmKind === 'rotate' ? rotate() : revoke())}
+      />
+    </div>
   )
 }

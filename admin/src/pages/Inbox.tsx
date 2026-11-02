@@ -1,13 +1,53 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  Avatar,
+  Badge,
+  Button,
+  Icon,
+  SegmentedControl,
+  SegmentedControlItem,
+  Switch,
+  Text,
+  TextArea,
+  TextField,
+  useToast,
+} from '@channel.io/bezier-react'
+import {
+  ArrowLeftIcon,
+  CancelSmallIcon,
+  ChatBubbleIcon,
+  ClipIcon,
+  ImageFailedIcon,
+  ImageIcon,
+  InboxIcon,
+  PersonIcon,
+  PlusIcon,
+  SendIcon,
+  VideocamIcon,
+  type BezierIcon,
+} from '@channel.io/bezier-icons'
 import { api, errorMessage } from '../lib/api'
 import { useT, type Key } from '../lib/i18n'
+import {
+  BotStatusBadge,
+  ChannelBadge,
+  ContactName,
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  PageHeader,
+  RelativeTime,
+  contactDisplayName,
+} from '../components'
+import './inbox.css'
 
 type Filter = 'all' | 'unread' | 'paused'
 
 type ContactSummary = {
   id: number
   channel: string
+  channelUserId?: string | null
   displayName: string | null
   username: string | null
   avatarUrl: string | null
@@ -17,19 +57,30 @@ type ContactSummary = {
   lastInboundAt: string | null
 }
 
-type LastMessage = { text: string | null; direction: 'in' | 'out'; source: string; kind: string; createdAt: string }
+type Attachment = { type: string; url?: string }
 
-type Conversation = { contact: ContactSummary; lastMessage: LastMessage | null }
+type OutButton = { label: string; payload?: string; url?: string }
 
-type Button = { label: string; payload?: string; url?: string }
-
+/** Inbound payloads carry `type` / `attachments`; outbound ones are an OutboundMessage (src/channels/types.ts). */
 type MessagePayload = {
   imageUrl?: string
-  buttons?: Button[]
-  quickReplies?: Button[]
+  buttons?: OutButton[]
+  quickReplies?: OutButton[]
   type?: string
-  attachments?: { type: string; url?: string }[]
+  attachments?: Attachment[]
 }
+
+type LastMessage = {
+  text: string | null
+  direction: 'in' | 'out'
+  source: string
+  kind: string
+  payload?: MessagePayload | null
+  error?: string | null
+  createdAt: string
+}
+
+type Conversation = { contact: ContactSummary; lastMessage: LastMessage | null }
 
 type Message = {
   id: number
@@ -45,64 +96,110 @@ type Message = {
 type ContactDetail = ContactSummary & { tags: string[] }
 
 const POLL_MS = 10_000
+/** Tag chips shown in the chat header before "+N". */
+const VISIBLE_TAGS = 5
 
-function shortTime(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const diff = Date.now() - d.getTime()
-  if (diff < 60_000) return 'now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`
-  const now = new Date()
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d`
-  return d.toLocaleDateString()
+const ATTACHMENT_LABELS: Record<string, Key> = {
+  image: 'inbox_att_image',
+  video: 'inbox_att_video',
+  audio: 'inbox_att_audio',
+  file: 'inbox_att_file',
+  sticker: 'inbox_att_sticker',
+  location: 'inbox_att_location',
 }
 
-function contactName(c: { displayName: string | null; username: string | null; id: number }): string {
-  return c.displayName || (c.username ? `@${c.username}` : `#${c.id}`)
-}
-
-function useIsMobile(): boolean {
-  const query = '(max-width: 860px)'
-  const [mobile, setMobile] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const mq = window.matchMedia(query)
-    const onChange = () => setMobile(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return mobile
-}
+const ATTACHMENT_ICONS: Record<string, BezierIcon> = { image: ImageIcon, sticker: ImageIcon, video: VideocamIcon }
 
 function isPaused(c: { botPaused: number | boolean }): boolean {
   return Boolean(c.botPaused)
 }
 
+/** Localized label for a message without text: attachments[0].type, then kind. Never "[message]". */
+function useAttachmentLabel() {
+  const t = useT()
+  return (m: { kind: string; payload?: MessagePayload | null }) => {
+    const type = m.payload?.attachments?.[0]?.type ?? (m.payload?.imageUrl ? 'image' : m.kind)
+    const key = ATTACHMENT_LABELS[type]
+    return key ? t(key) : t('inbox_att_other')
+  }
+}
+
+const segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+
+function firstGrapheme(s: string): string {
+  if (!s) return ''
+  if (segmenter) {
+    const first = segmenter.segment(s)[Symbol.iterator]().next()
+    return first.done ? '' : first.value.segment
+  }
+  return Array.from(s)[0] ?? ''
+}
+
+/** "Maria Garcia" → "MG", "佐藤 美咲" → "佐", "👩🏽‍💻🌸" → "👩🏽‍💻" (whole grapheme cluster), "@aleks" → "A". */
+function initials(name: string): string {
+  const words = name.replace(/^@/, '').trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return ''
+  const a = firstGrapheme(words[0])
+  const b = words.length > 1 ? firstGrapheme(words[1]) : ''
+  const latin = /^[A-Za-z]$/
+  return (latin.test(a) && latin.test(b) ? a + b : a).toUpperCase()
+}
+
+function ContactAvatar({ contact }: { contact: ContactSummary }) {
+  const name = contact.displayName || contact.username || ''
+  if (contact.avatarUrl) return <Avatar className="ibx-avatar-img" avatarUrl={contact.avatarUrl} name={name || String(contact.id)} size="36" />
+  const text = initials(name)
+  return (
+    <span className={`ibx-avatar ibx-avatar--${contact.id % 6}`} aria-hidden="true">
+      {text ? <span className="ibx-avatar__text">{text}</span> : <Icon source={PersonIcon} size="s" />}
+    </span>
+  )
+}
+
+function ChatImage({ url }: { url: string }) {
+  const t = useT()
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <a className="ibx-att" href={url} target="_blank" rel="noreferrer" title={url}>
+        <Icon source={ImageFailedIcon} size="xs" />
+        <span>{t('inbox_image_failed')}</span>
+      </a>
+    )
+  }
+  return (
+    <a className="ibx-image" href={url} target="_blank" rel="noreferrer">
+      <img src={url} alt={t('inbox_att_image')} loading="lazy" onError={() => setFailed(true)} />
+    </a>
+  )
+}
+
 export default function Inbox() {
   const t = useT()
   const navigate = useNavigate()
+  const toast = useToast()
+  const attachmentLabel = useAttachmentLabel()
   const { id } = useParams<{ id: string }>()
   const [filter, setFilter] = useState<Filter>('all')
   const [conversations, setConversations] = useState<Conversation[] | null>(null)
+  const [listError, setListError] = useState<unknown>(null)
   const [contact, setContact] = useState<ContactDetail | null>(null)
   const [messages, setMessages] = useState<Message[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [chatError, setChatError] = useState<unknown>(null)
   const [text, setText] = useState('')
   const [tagInput, setTagInput] = useState('')
+  const [tagsExpanded, setTagsExpanded] = useState(false)
   const [busy, setBusy] = useState(false)
   const messagesRef = useRef<HTMLDivElement>(null)
   const lastCount = useRef(0)
-  const isMobile = useIsMobile()
-
-  const channelLabel = (ch: string) => t(`channel_${ch}` as Key)
 
   const loadList = useCallback(async () => {
     try {
       const r = await api.get<{ conversations: Conversation[] }>(`/api/inbox?filter=${filter}`)
       setConversations(r.conversations)
+      setListError(null)
     } catch (err) {
-      setError(errorMessage(err))
+      setListError(err)
     }
   }, [filter])
 
@@ -115,8 +212,9 @@ export default function Inbox() {
       ])
       setMessages(m.messages)
       setContact(c.contact)
+      setChatError(null)
     } catch (err) {
-      setError(errorMessage(err))
+      setChatError(err)
     }
   }, [id])
 
@@ -129,7 +227,9 @@ export default function Inbox() {
   useEffect(() => {
     setMessages(null)
     setContact(null)
+    setChatError(null)
     setText('')
+    setTagsExpanded(false)
     lastCount.current = 0
     if (!id) return
     void loadConversation()
@@ -147,11 +247,10 @@ export default function Inbox() {
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true)
-    setError(null)
     try {
       await fn()
     } catch (err) {
-      setError(errorMessage(err))
+      toast.addToast(errorMessage(err), { preset: 'error' })
     } finally {
       setBusy(false)
       await Promise.all([loadConversation(), loadList()])
@@ -174,9 +273,9 @@ export default function Inbox() {
     }
   }
 
-  const toggleBot = () => {
+  const setBot = (on: boolean) => {
     if (!contact) return
-    void run(() => api.post(`/api/inbox/${contact.id}/bot`, { paused: !isPaused(contact) }))
+    void run(() => api.post(`/api/inbox/${contact.id}/bot`, { paused: !on }))
   }
 
   const addTag = () => {
@@ -193,170 +292,261 @@ export default function Inbox() {
     void run(() => api.delete(`/api/contacts/${contact.id}/tags/${encodeURIComponent(tag)}`))
   }
 
-  const filters: [Filter, string][] = [
-    ['all', t('inbox_all')],
-    ['unread', t('inbox_unread')],
-    ['paused', t('inbox_paused')],
-  ]
-
   const preview = (m: LastMessage | null) => {
     if (!m) return ''
-    const prefix = m.direction === 'out' ? (m.source === 'human' ? `${t('inbox_source_human')}: ` : `${t('inbox_source_bot')}: `) : ''
-    return prefix + (m.text || `[${m.kind}]`)
+    const prefix = m.direction === 'out' ? `${m.source === 'human' ? t('inbox_source_human') : m.source === 'system' ? t('inbox_source_system') : t('inbox_source_bot')}: ` : ''
+    return prefix + (m.text || attachmentLabel(m))
   }
 
   const renderMessage = (m: Message) => {
     const p = m.payload
     const imageUrl = p?.imageUrl ?? p?.attachments?.find((a) => a.type === 'image' && a.url)?.url
-    const otherAttachments = p?.attachments?.filter((a) => a.url !== imageUrl) ?? []
+    const attachments = (p?.attachments ?? []).filter((a) => !(a.type === 'image' && a.url && a.url === imageUrl))
     const buttons = [...(p?.buttons ?? []), ...(p?.quickReplies ?? [])]
-    const sourceLabel = m.source === 'bot' ? t('inbox_source_bot') : m.source === 'human' ? t('inbox_source_human') : m.source === 'system' ? 'system' : ''
+    const failed = m.direction === 'out' && !!m.error
+    const sourceLabel =
+      m.source === 'bot' ? t('inbox_source_bot') : m.source === 'human' ? t('inbox_source_human') : m.source === 'system' ? t('inbox_source_system') : ''
+    const hasBody = !!m.text || !!imageUrl || attachments.length > 0
     return (
-      <div key={m.id} className={`bubble ${m.direction}${m.error ? ' error' : ''}`}>
-        {imageUrl && (
-          <a href={imageUrl} target="_blank" rel="noreferrer">
-            <img src={imageUrl} alt="" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, display: 'block' }} />
-          </a>
+      <div key={m.id} className={`bubble ${m.direction}${failed ? ' failed' : ''}${m.source === 'system' ? ' ibx-system' : ''}`}>
+        {imageUrl && <ChatImage url={imageUrl} />}
+        {m.text && <div>{m.source === 'system' && m.text === 'follow' ? t('trigger_follow') : m.text}</div>}
+        {attachments.map((a, i) =>
+          a.url ? (
+            <a key={i} className="ibx-att" href={a.url} target="_blank" rel="noreferrer" title={a.url}>
+              <Icon source={ATTACHMENT_ICONS[a.type] ?? ClipIcon} size="xs" />
+              <span>{attachmentLabel({ kind: a.type, payload: { attachments: [a] } })}</span>
+              <span className="ibx-att__url">{decodeURISafe(a.url)}</span>
+            </a>
+          ) : (
+            <span key={i} className="ibx-att">
+              <Icon source={ATTACHMENT_ICONS[a.type] ?? ClipIcon} size="xs" />
+              <span>{attachmentLabel({ kind: a.type, payload: { attachments: [a] } })}</span>
+            </span>
+          ),
         )}
-        {m.text ? <div>{m.text}</div> : !imageUrl && <div className="small">[{p?.type ?? m.kind}]</div>}
-        {otherAttachments.map((a, i) => (
-          <div key={i} className="small">
-            [{a.type}]{a.url && <> <a href={a.url} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>{a.url}</a></>}
-          </div>
-        ))}
+        {!hasBody && (
+          <span className="ibx-att">
+            <Icon source={ATTACHMENT_ICONS[m.kind] ?? ClipIcon} size="xs" />
+            <span>{attachmentLabel(m)}</span>
+          </span>
+        )}
         {buttons.length > 0 && (
           <div className="chips">
             {buttons.map((b, i) => (
-              <button key={i} className="chip" disabled style={m.direction === 'out' ? { color: '#fff', borderColor: '#fff' } : undefined}>
+              <button key={i} type="button" className="chip" disabled title={b.url ?? b.payload}>
                 {b.label}
               </button>
             ))}
           </div>
         )}
-        {m.error && <div className="small" style={{ color: m.direction === 'out' ? '#fff' : 'var(--danger)', fontWeight: 600 }}>{t('error')}: {m.error}</div>}
         <div className="meta">
+          {failed && <>{t('inbox_failed')} · </>}
           {sourceLabel && <>{sourceLabel} · </>}
-          {new Date(m.createdAt).toLocaleString()}
+          <RelativeTime value={m.createdAt} />
         </div>
+        {failed && <div className="bubble-error ibx-error-text">{m.error}</div>}
       </div>
     )
   }
 
-  return (
-    <>
-      <div className="page-title">
-        <h1>{t('inbox_title')}</h1>
-      </div>
-      {error && <div className="alert error">{error}</div>}
-      <div className={`inbox${id ? ' has-selection' : ''}`}>
-        <div className="conv-list">
-          <div className="row" style={{ padding: 10, borderBottom: '1px solid var(--border)' }}>
-            {filters.map(([key, label]) => (
-              <button key={key} className={`btn small${filter === key ? ' primary' : ''}`} onClick={() => setFilter(key)}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {conversations === null ? (
-            <div className="muted small" style={{ padding: 12 }}>{t('loading')}</div>
-          ) : conversations.length === 0 ? (
-            <div className="muted small" style={{ padding: 12 }}>{t('inbox_empty')}</div>
-          ) : (
-            conversations.map(({ contact: c, lastMessage }) => (
-              <div key={c.id} className={`conv${String(c.id) === id ? ' active' : ''}`} onClick={() => navigate(`/inbox/${c.id}`)}>
-                <div className="name">
-                  <span className="row" style={{ gap: 6, minWidth: 0 }}>
-                    {c.unread > 0 && <span className="unread-dot" />}
-                    <span>{contactName(c)}</span>
-                  </span>
-                  <span className="muted small" style={{ fontWeight: 400 }}>{shortTime(lastMessage?.createdAt ?? c.lastInboundAt)}</span>
-                </div>
-                <div className="row" style={{ gap: 4 }}>
-                  <span className="badge">{channelLabel(c.channel)}</span>
-                  {isPaused(c) && <span className="badge draft">{t('inbox_paused')}</span>}
-                </div>
-                <div className="preview">{preview(lastMessage)}</div>
-              </div>
-            ))
-          )}
-        </div>
+  const tags = contact?.tags ?? []
+  const shownTags = tagsExpanded ? tags : tags.slice(0, VISIBLE_TAGS)
+  const hiddenTags = tags.length - shownTags.length
 
-        {!id ? (
-          <div className="chat">
-            <div className="messages muted" style={{ alignItems: 'center', justifyContent: 'center' }}>{t('inbox_select')}</div>
+  return (
+    <div className="stack">
+      <PageHeader title={t('inbox_title')} />
+      <div className={`ibx${id ? ' has-selection' : ''}`}>
+        {/* ---------- conversation list ---------- */}
+        <section className="ibx-pane ibx-list" aria-label={t('inbox_title')}>
+          <div className="ibx-list__filter">
+            <SegmentedControl type="radiogroup" size="s" width="100%" value={filter} onValueChange={(v: Filter) => setFilter(v)} aria-label={t('inbox_title')}>
+              <SegmentedControlItem value="all">{t('inbox_all')}</SegmentedControlItem>
+              <SegmentedControlItem value="unread">{t('inbox_unread')}</SegmentedControlItem>
+              <SegmentedControlItem value="paused">{t('inbox_paused')}</SegmentedControlItem>
+            </SegmentedControl>
           </div>
-        ) : (
-          <div className="chat">
-            <div style={{ padding: 12, borderBottom: '1px solid var(--border)' }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <div className="row">
-                  {isMobile && (
-                    <Link to="/inbox" className="small" onClick={(e) => (e.preventDefault(), navigate('/inbox'))}>
-                      ← {t('inbox_title')}
-                    </Link>
-                  )}
+          <div className="ibx-list__body">
+            {listError !== null && (
+              <div className="ibx-pad">
+                <ErrorBanner error={listError} onRetry={() => void loadList()} />
+              </div>
+            )}
+            {conversations === null ? (
+              listError === null && <LoadingState compact />
+            ) : conversations.length === 0 ? (
+              <EmptyState compact icon={InboxIcon} title={t('inbox_empty')} />
+            ) : (
+              <ul className="ibx-rows">
+                {conversations.map(({ contact: c, lastMessage }) => {
+                  const active = String(c.id) === id
+                  const name = contactDisplayName(c)
+                  return (
+                    <li key={c.id}>
+                      <Link to={`/inbox/${c.id}`} className={`ibx-row${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined}>
+                        <ContactAvatar contact={c} />
+                        <span className="ibx-row__main">
+                          <span className="ibx-row__top">
+                            <span className="ibx-row__name" title={name}>
+                              <ContactName contact={c} bold={c.unread > 0} />
+                            </span>
+                            <span className="ibx-row__time">
+                              {(lastMessage?.createdAt ?? c.lastInboundAt) && <RelativeTime value={(lastMessage?.createdAt ?? c.lastInboundAt)!} />}
+                            </span>
+                          </span>
+                          <span className="ibx-row__badges">
+                            <ChannelBadge channel={c.channel} size="xs" />
+                            {isPaused(c) && (
+                              <Badge size="xs" variant="orange">
+                                {t('inbox_paused')}
+                              </Badge>
+                            )}
+                          </span>
+                          <span className="ibx-row__bottom">
+                            <span className={`ibx-row__preview${lastMessage?.error ? ' is-failed' : ''}`}>
+                              {lastMessage?.error ? `${t('inbox_failed')} · ` : ''}
+                              {preview(lastMessage)}
+                            </span>
+                            <span className="ibx-row__dot">{c.unread > 0 && <span className="ibx-dot" role="img" aria-label={t('inbox_unread')} />}</span>
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* ---------- chat ---------- */}
+        <section className="ibx-pane ibx-chat" aria-label={contact ? contactDisplayName(contact) : t('inbox_select')}>
+          {!id ? (
+            <div className="ibx-placeholder">
+              <EmptyState icon={InboxIcon} title={t('inbox_select')} />
+            </div>
+          ) : (
+            <>
+              <header className="ibx-chat__header">
+                <div className="ibx-chat__title">
+                  <Button
+                    className="ibx-back"
+                    styleVariant="tertiary"
+                    colorVariant="monochrome-dark"
+                    size="s"
+                    leftContent={ArrowLeftIcon}
+                    aria-label={t('inbox_back')}
+                    onClick={() => navigate('/inbox')}
+                  />
                   {contact && (
                     <>
-                      <strong>{contactName(contact)}</strong>
-                      <span className="badge">{channelLabel(contact.channel)}</span>
+                      <ContactAvatar contact={contact} />
+                      <span className="ibx-chat__name">
+                        <ContactName contact={contact} typo="16" bold />
+                        <span className="ibx-chat__badges">
+                          <ChannelBadge channel={contact.channel} size="xs" />
+                          <BotStatusBadge on={!isPaused(contact)} />
+                        </span>
+                      </span>
                     </>
                   )}
                 </div>
                 {contact && (
-                  <div className="row">
-                    <span className={`badge ${isPaused(contact) ? 'draft' : 'live'}`}>{isPaused(contact) ? t('inbox_bot_off') : t('inbox_bot_on')}</span>
-                    <button className="btn small" disabled={busy} onClick={toggleBot}>
-                      {isPaused(contact) ? t('inbox_resume_bot') : t('inbox_pause_bot')}
-                    </button>
-                  </div>
+                  <label className="ibx-chat__bot">
+                    <Text typo="13" color="txt-black-darker">
+                      {t('inbox_bot')}
+                    </Text>
+                    <Switch size="m" checked={!isPaused(contact)} disabled={busy} onCheckedChange={setBot} aria-label={isPaused(contact) ? t('inbox_resume_bot') : t('inbox_pause_bot')} />
+                  </label>
                 )}
-              </div>
-              {contact && (
-                <div className="row" style={{ marginTop: 8 }}>
-                  {contact.tags.map((tag) => (
-                    <span key={tag} className="badge tag">
-                      {tag}{' '}
-                      <a href="#" onClick={(e) => (e.preventDefault(), removeTag(tag))} aria-label={`${t('delete')} ${tag}`}>
-                        ×
-                      </a>
-                    </span>
-                  ))}
-                  <input
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                {contact && (
+                  <div className="ibx-tags">
+                    {shownTags.map((tag) => (
+                      <span key={tag} className="ibx-tag" title={tag}>
+                        <span className="ibx-tag__text">{tag}</span>
+                        <button type="button" className="ibx-tag__remove" disabled={busy} aria-label={t('inbox_remove_tag').replace('{tag}', tag)} onClick={() => removeTag(tag)}>
+                          <Icon source={CancelSmallIcon} size="xs" />
+                        </button>
+                      </span>
+                    ))}
+                    {hiddenTags > 0 && (
+                      <button type="button" className="ibx-tag-more" aria-expanded={false} aria-label={t('inbox_tags_show_all')} title={tags.slice(VISIBLE_TAGS).join(', ')} onClick={() => setTagsExpanded(true)}>
+                        +{hiddenTags}
+                      </button>
+                    )}
+                    {tagsExpanded && tags.length > VISIBLE_TAGS && (
+                      <button type="button" className="ibx-tag-more" aria-expanded onClick={() => setTagsExpanded(false)}>
+                        {t('inbox_tags_less')}
+                      </button>
+                    )}
+                    <form
+                      className="ibx-tag-add"
+                      onSubmit={(e) => {
                         e.preventDefault()
                         addTag()
-                      }
-                    }}
-                    placeholder={t('contacts_add_tag')}
-                    style={{ width: 140, padding: '3px 8px' }}
-                  />
-                  <button className="btn small" disabled={busy || !tagInput.trim()} onClick={addTag}>
-                    +
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="messages" ref={messagesRef}>
-              {messages === null ? <div className="muted">{t('loading')}</div> : messages.map(renderMessage)}
-            </div>
-            <div className="composer">
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={onComposerKey}
-                placeholder={t('inbox_placeholder')}
-                style={{ minHeight: 44 }}
-              />
-              <button className="btn primary" disabled={busy || !text.trim()} onClick={send}>
-                {t('inbox_send')}
-              </button>
-            </div>
-          </div>
-        )}
+                      }}
+                    >
+                      <TextField
+                        size="xs"
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault()
+                        }}
+                        placeholder={t('contacts_add_tag')}
+                        aria-label={t('contacts_add_tag')}
+                      />
+                      <Button type="submit" size="xs" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={PlusIcon} aria-label={t('contacts_add_tag')} disabled={busy || !tagInput.trim()} />
+                    </form>
+                  </div>
+                )}
+              </header>
+
+              <div className="ibx-messages" ref={messagesRef}>
+                {chatError !== null && <ErrorBanner error={chatError} onRetry={() => void loadConversation()} />}
+                {messages === null ? (
+                  chatError === null && <LoadingState compact />
+                ) : messages.length === 0 ? (
+                  <div className="ibx-placeholder">
+                    <EmptyState compact icon={ChatBubbleIcon} title={t('inbox_no_messages')} />
+                  </div>
+                ) : (
+                  messages.map(renderMessage)
+                )}
+              </div>
+
+              <form
+                className="ibx-composer"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  send()
+                }}
+              >
+                <TextArea
+                  className="ibx-composer__input"
+                  minRows={3}
+                  maxRows={6}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={onComposerKey}
+                  placeholder={t('inbox_placeholder')}
+                  aria-label={t('inbox_placeholder')}
+                />
+                <Button type="submit" text={t('inbox_send')} leftContent={SendIcon} loading={busy} disabled={!text.trim()} />
+              </form>
+            </>
+          )}
+        </section>
       </div>
-    </>
+    </div>
   )
+}
+
+function decodeURISafe(url: string): string {
+  try {
+    return decodeURI(url)
+  } catch {
+    return url
+  }
 }

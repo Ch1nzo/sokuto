@@ -1,6 +1,37 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  Badge,
+  Banner,
+  Button,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalHeader,
+  Text,
+  VStack,
+  useToast,
+  type BadgeVariant,
+} from '@channel.io/bezier-react'
+import { InfoFilledIcon, MegaphoneIcon } from '@channel.io/bezier-icons'
 import { api, errorMessage } from '../lib/api'
-import { useT, type Key } from '../lib/i18n'
+import { useLang, useT, type Key } from '../lib/i18n'
+import {
+  Card,
+  ChannelBadge,
+  DataTable,
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  PageHeader,
+  SelectField,
+  TextAreaField,
+  TextInputField,
+  formatDateTime,
+  formatNumber,
+  type Column,
+} from '../components'
+import { ConfirmAction } from '../components/ConfirmAction'
+import './broadcasts.css'
 
 type BroadcastStatus = 'scheduled' | 'running' | 'done' | 'canceled'
 
@@ -10,6 +41,7 @@ type Broadcast = {
   channel: string
   tag: string | null
   text: string
+  imageUrl?: string | null
   status: BroadcastStatus
   total: number
   sent: number
@@ -20,26 +52,52 @@ type Broadcast = {
 
 type Reach = { total: number; reachable: number }
 type TagCount = { tag: string; n: number }
+type Channel = 'any' | 'line' | 'messenger' | 'instagram'
 
-const emptyForm = { name: '', channel: 'any', tag: '', text: '', imageUrl: '', scheduledAt: '' }
+const emptyForm = { name: '', channel: 'any' as Channel, tag: '', text: '', imageUrl: '', scheduledAt: '' }
 
-const statusBadge: Record<BroadcastStatus, string> = { scheduled: 'tag', running: 'live', done: 'draft', canceled: 'draft' }
+/** Soft limit: warn (do not block) above this many characters. */
+const TEXT_SOFT_LIMIT = 1000
+
+const STATUS: Record<BroadcastStatus, { key: Key; variant: BadgeVariant }> = {
+  scheduled: { key: 'bc_status_scheduled', variant: 'blue' },
+  running: { key: 'bc_status_running', variant: 'green' },
+  done: { key: 'bc_status_done', variant: 'monochrome-light' },
+  canceled: { key: 'bc_status_canceled', variant: 'monochrome-dark' },
+}
+
+/** Character count in user-perceived characters (emoji = 1). */
+function charCount(s: string): number {
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    let n = 0
+    for (const _ of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)) n++
+    return n
+  }
+  return Array.from(s).length
+}
 
 export default function Broadcasts() {
   const t = useT()
+  const { lang } = useLang()
+  const fmt = formatNumber(lang)
+  const toast = useToast()
   const [form, setForm] = useState(emptyForm)
   const [broadcasts, setBroadcasts] = useState<Broadcast[] | null>(null)
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [formError, setFormError] = useState<unknown>(null)
   const [tags, setTags] = useState<TagCount[]>([])
-  const [reach, setReach] = useState<Reach | null>(null)
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [reach, setReach] = useState<Reach | null | 'error'>(null)
   const [busy, setBusy] = useState(false)
+  const [pendingCancel, setPendingCancel] = useState<Broadcast | null>(null)
+  const [reading, setReading] = useState<Broadcast | null>(null)
 
   const load = useCallback(async () => {
     try {
       const r = await api.get<{ broadcasts: Broadcast[] }>('/api/broadcasts')
       setBroadcasts(r.broadcasts)
+      setLoadError(null)
     } catch (err) {
-      setMsg({ kind: 'error', text: errorMessage(err) })
+      setLoadError(err)
     }
   }, [])
 
@@ -58,13 +116,14 @@ export default function Broadcasts() {
 
   useEffect(() => {
     let cancelled = false
+    setReach(null)
     const timer = setTimeout(() => {
       const params = new URLSearchParams({ channel: form.channel })
       if (form.tag.trim()) params.set('tag', form.tag.trim())
       api
         .get<Reach>(`/api/broadcasts/reach?${params.toString()}`)
         .then((r) => !cancelled && setReach(r))
-        .catch(() => !cancelled && setReach(null))
+        .catch(() => !cancelled && setReach('error'))
     }, 300)
     return () => {
       cancelled = true
@@ -72,14 +131,16 @@ export default function Broadcasts() {
     }
   }, [form.channel, form.tag])
 
-  const submit = async () => {
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!form.text.trim() || busy) return
     setBusy(true)
-    setMsg(null)
+    setFormError(null)
     try {
       let scheduledAt: string | undefined
       if (form.scheduledAt) {
         const d = new Date(form.scheduledAt)
-        if (Number.isNaN(d.getTime())) throw new Error('invalid_date')
+        if (Number.isNaN(d.getTime())) throw new Error(t('bc_invalid_date'))
         scheduledAt = d.toISOString()
       }
       await api.post('/api/broadcasts', {
@@ -91,128 +152,245 @@ export default function Broadcasts() {
         scheduledAt,
       })
       setForm(emptyForm)
-      setMsg({ kind: 'ok', text: t('saved') })
+      toast.addToast(t('bc_created'), { preset: 'success' })
       await load()
     } catch (err) {
-      setMsg({ kind: 'error', text: errorMessage(err) })
+      setFormError(err)
     } finally {
       setBusy(false)
     }
   }
 
   const cancel = async (b: Broadcast) => {
-    if (!confirm(`${t('bc_cancel')}: ${b.name}?`)) return
     try {
       await api.post(`/api/broadcasts/${b.id}/cancel`)
+      toast.addToast(t('bc_canceled'), { preset: 'success' })
       await load()
     } catch (err) {
-      setMsg({ kind: 'error', text: errorMessage(err) })
+      toast.addToast(errorMessage(err), { preset: 'error' })
     }
   }
 
-  return (
-    <>
-      <div className="page-title">
-        <h1>{t('bc_title')}</h1>
-      </div>
-      {msg && <div className={`alert ${msg.kind}`}>{msg.text}</div>}
+  const chars = charCount(form.text)
+  const tooLong = chars > TEXT_SOFT_LIMIT
+  const reachText =
+    reach === null ? '…' : reach === 'error' ? t('bc_reach_unknown') : `${fmt(reach.total)} / ${fmt(reach.reachable)} ${t('bc_reachable')}`
 
-      <div className="card">
-        <h2>{t('bc_new')}</h2>
-        <div className="alert info small">{t('bc_note')}</div>
-        <div className="inline-fields">
-          <div>
-            <label>{t('bc_name')}</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div>
-            <label>{t('editor_channel')}</label>
-            <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
-              <option value="any">{t('channel_any')}</option>
-              <option value="line">{t('channel_line')}</option>
-              <option value="messenger">{t('channel_messenger')}</option>
-              <option value="instagram">{t('channel_instagram')}</option>
-            </select>
-          </div>
-        </div>
-        <label>{t('bc_tag')}</label>
-        <input list="bc-tags" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} autoComplete="off" />
-        <datalist id="bc-tags">
-          {tags.map((x) => (
-            <option key={x.tag} value={x.tag}>
-              {x.tag} ({x.n})
-            </option>
-          ))}
-        </datalist>
-        <label>{t('bc_text')}</label>
-        <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
-        <div className="inline-fields">
-          <div>
-            <label>{t('bc_image')}</label>
-            <input value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://" />
-          </div>
-          <div>
-            <label>{t('bc_schedule')}</label>
-            <input type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} />
-          </div>
-        </div>
-        <div className="row" style={{ justifyContent: 'space-between', marginTop: 12 }}>
-          <span className="small muted">
-            {t('bc_reach')}: {reach ? `${reach.total} / ${reach.reachable} ${t('bc_reachable')}` : '…'}
-          </span>
-          <button className="btn primary" disabled={busy || !form.text.trim()} onClick={() => void submit()}>
-            {t('create')}
+  const channelOptions: { value: Channel; label: string }[] = [
+    { value: 'any', label: t('channel_any') },
+    { value: 'line', label: t('channel_line') },
+    { value: 'messenger', label: t('channel_messenger') },
+    { value: 'instagram', label: t('channel_instagram') },
+  ]
+
+  const columns: Column<Broadcast>[] = [
+    {
+      key: 'name',
+      header: t('bc_name'),
+      render: (b) => (
+        <div className="bc-name">
+          <Text typo="14" bold color="txt-black-darkest" truncated title={b.name}>
+            {b.name}
+          </Text>
+          <button type="button" className="bc-preview" title={t('bc_show_text')} onClick={() => setReading(b)}>
+            {b.text}
           </button>
         </div>
-      </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: t('bc_status'),
+      nowrap: true,
+      render: (b) => {
+        const s = STATUS[b.status]
+        return (
+          <span className="bc-inline">
+            <Badge size="s" variant={s?.variant ?? 'default'}>
+              {s ? t(s.key) : b.status}
+            </Badge>
+          </span>
+        )
+      },
+    },
+    {
+      key: 'audience',
+      header: t('bc_reach'),
+      hideOnMobile: true,
+      render: (b) => (
+        <div className="bc-audience">
+          <ChannelBadge channel={b.channel} />
+          {b.tag && (
+            <Badge size="s" variant="blue" className="bc-tag" title={b.tag}>
+              {b.tag}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'schedule',
+      header: t('bc_scheduled_at'),
+      nowrap: true,
+      hideOnMobile: true,
+      render: (b) => (
+        <Text typo="13" color="txt-black-darker" className="tabular">
+          {formatDateTime(lang, b.scheduledAt)}
+        </Text>
+      ),
+    },
+    {
+      key: 'result',
+      header: t('bc_result'),
+      numeric: true,
+      nowrap: true,
+      render: (b) => (
+        <div className="bc-result">
+          <Text typo="13" color="txt-black-darkest">
+            {fmt(b.sent)} / {fmt(b.total)} {t('bc_sent')}
+          </Text>
+          <Text typo="12" color={b.failed > 0 ? 'bgtxt-red-normal' : 'txt-black-dark'}>
+            {fmt(b.failed)} {t('bc_failed')}
+          </Text>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: <span className="visually-hidden">{t('bc_cancel')}</span>,
+      nowrap: true,
+      render: (b) =>
+        b.status === 'scheduled' || b.status === 'running' ? (
+          <Button size="s" styleVariant="secondary" colorVariant="red" text={t('bc_cancel')} onClick={() => setPendingCancel(b)} />
+        ) : null,
+    },
+  ]
 
-      <div className="card" style={{ overflowX: 'auto' }}>
+  return (
+    <div className="stack">
+      <PageHeader title={t('bc_title')} />
+
+      <Card title={t('bc_new')}>
+        <VStack as="form" spacing={16} onSubmit={submit}>
+          <Banner variant="blue" icon={InfoFilledIcon} content={t('bc_note')} />
+          <div className="bc-grid">
+            <TextInputField label={t('bc_name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} />
+            <SelectField label={t('editor_channel')} value={form.channel} options={channelOptions} onChange={(v) => setForm({ ...form, channel: v })} />
+          </div>
+          <TextInputField
+            label={t('bc_tag')}
+            value={form.tag}
+            onChange={(e) => setForm({ ...form, tag: e.target.value })}
+            list="bc-tags"
+            autoComplete="off"
+          />
+          <datalist id="bc-tags">
+            {tags.slice(0, 500).map((x) => (
+              <option key={x.tag} value={x.tag}>
+                {x.tag} ({fmt(x.n)})
+              </option>
+            ))}
+          </datalist>
+          <TextAreaField
+            label={t('bc_text')}
+            value={form.text}
+            onChange={(e) => setForm({ ...form, text: e.target.value })}
+            minRows={6}
+            maxRows={16}
+            required
+            helperText={
+              <span className={tooLong ? 'bc-counter is-over' : 'bc-counter'}>
+                <span className="tabular">
+                  {t('bc_chars').replace('{n}', `${fmt(chars)} / ${fmt(TEXT_SOFT_LIMIT)}`)}
+                </span>
+                {tooLong && <span>{t('bc_too_long')}</span>}
+              </span>
+            }
+          />
+          <div className="bc-grid">
+            <TextInputField
+              label={t('bc_image')}
+              type="url"
+              value={form.imageUrl}
+              onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+              placeholder="https://"
+            />
+            <TextInputField
+              label={t('bc_schedule')}
+              // Bezier TextField's type union has no datetime-local; the native input accepts it.
+              {...{ type: 'datetime-local' as 'text' }}
+              value={form.scheduledAt}
+              onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+            />
+          </div>
+          {formError !== null && <ErrorBanner error={formError} />}
+          <div className="bc-submit">
+            <Text typo="13" color="txt-black-darker" className="bc-reach">
+              {t('bc_reach')}: <span className="tabular">{reachText}</span>
+            </Text>
+            <Button type="submit" text={t('create')} loading={busy} disabled={!form.text.trim()} />
+          </div>
+        </VStack>
+      </Card>
+
+      <Card title={t('bc_list')} flush>
         {broadcasts === null ? (
-          <div className="muted">{t('loading')}</div>
-        ) : broadcasts.length === 0 ? (
-          <div className="muted small">—</div>
+          loadError !== null ? (
+            <div className="bc-pad">
+              <ErrorBanner error={loadError} onRetry={() => void load()} />
+            </div>
+          ) : (
+            <LoadingState compact />
+          )
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>{t('bc_name')}</th>
-                <th>{t('editor_channel')}</th>
-                <th>{t('contacts_tags')}</th>
-                <th>{t('bc_schedule')}</th>
-                <th>{t('bc_reach')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {broadcasts.map((b) => (
-                <tr key={b.id}>
-                  <td>
-                    <div>{b.name}</div>
-                    <div className="muted small" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.text}</div>
-                    <span className={`badge ${statusBadge[b.status] ?? ''}`}>{t(`bc_status_${b.status}` as Key)}</span>
-                  </td>
-                  <td>
-                    <span className="badge">{t(`channel_${b.channel}` as Key)}</span>
-                  </td>
-                  <td>{b.tag ? <span className="badge tag">{b.tag}</span> : <span className="muted">—</span>}</td>
-                  <td className="small">{new Date(b.scheduledAt).toLocaleString()}</td>
-                  <td className="small">
-                    <div>{b.sent} {t('bc_sent')} / {b.total}</div>
-                    <div className="muted">{b.failed} {t('bc_failed')}</div>
-                  </td>
-                  <td>
-                    {(b.status === 'scheduled' || b.status === 'running') && (
-                      <button className="btn small danger" onClick={() => void cancel(b)}>
-                        {t('bc_cancel')}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            {loadError !== null && (
+              <div className="bc-pad">
+                <ErrorBanner error={loadError} onRetry={() => void load()} />
+              </div>
+            )}
+            <DataTable
+              columns={columns}
+              rows={broadcasts}
+              rowKey={(b) => b.id}
+              caption={t('bc_list')}
+              empty={<EmptyState compact icon={MegaphoneIcon} title={t('bc_empty')} description={t('bc_empty_desc')} />}
+            />
+          </>
         )}
-      </div>
-    </>
+      </Card>
+
+      <ConfirmAction
+        show={pendingCancel !== null}
+        onHide={() => setPendingCancel(null)}
+        onConfirm={() => {
+          if (pendingCancel) void cancel(pendingCancel)
+        }}
+        title={t('bc_cancel_title')}
+        description={pendingCancel ? t('bc_cancel_desc').replace('{name}', pendingCancel.name) : undefined}
+        confirmText={t('bc_cancel')}
+      />
+
+      <Modal show={reading !== null} onHide={() => setReading(null)}>
+        <ModalContent width="min(560px, 100vw)" showCloseIcon>
+          <ModalHeader title={reading?.name ?? ''} description={reading ? formatDateTime(lang, reading.scheduledAt) : undefined} />
+          <ModalBody>
+            {reading && (
+              <div className="bc-fulltext">
+                {reading.imageUrl && (
+                  <a href={reading.imageUrl} target="_blank" rel="noreferrer" className="bc-fulltext__image">
+                    {reading.imageUrl}
+                  </a>
+                )}
+                <p>{reading.text}</p>
+                <Text typo="12" color="txt-black-dark" className="tabular">
+                  {t('bc_chars').replace('{n}', fmt(charCount(reading.text)))}
+                </Text>
+              </div>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </div>
   )
 }

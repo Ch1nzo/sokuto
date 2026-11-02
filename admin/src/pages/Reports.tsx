@@ -1,6 +1,21 @@
-import { useEffect, useState } from 'react'
-import { api, errorMessage } from '../lib/api'
-import { useT, type Key } from '../lib/i18n'
+import { useCallback, useEffect, useState } from 'react'
+import { Badge, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
+import { ComboChartIcon, GraphIcon } from '@channel.io/bezier-icons'
+import { useLang, useT, type Key, type Lang } from '../lib/i18n'
+import { api } from '../lib/api'
+import {
+  Card,
+  ChannelBadge,
+  DataTable,
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  PageHeader,
+  StatCard,
+  formatNumber,
+  type Column,
+} from '../components'
+import './reports.css'
 
 type FlowReport = {
   id: string | number
@@ -21,6 +36,8 @@ type ReportsResponse = { days: number; flows: FlowReport[]; series: DayPoint[] }
 
 type Metric = 'started' | 'messagesSent' | 'buttonClicks' | 'inputs' | 'completed' | 'errors'
 
+type Period = '7' | '30' | '90'
+
 const METRICS: [Metric, Key][] = [
   ['started', 'reports_started'],
   ['messagesSent', 'reports_messages'],
@@ -29,6 +46,8 @@ const METRICS: [Metric, Key][] = [
   ['completed', 'reports_completed'],
   ['errors', 'reports_errors'],
 ]
+
+const TOTAL_ROW_ID = '__total__'
 
 /** Fill missing days so the chart has one bar per calendar day. */
 function fillDays(series: DayPoint[], days: number): DayPoint[] {
@@ -43,133 +62,189 @@ function fillDays(series: DayPoint[], days: number): DayPoint[] {
   return out
 }
 
+/** "2026-11-03" (UTC day) → "11月3日" / "Nov 3". */
+function formatDay(lang: Lang, day: string): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return day
+  return new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(d)
+}
+
 export default function Reports() {
   const t = useT()
-  const [days, setDays] = useState(30)
+  const { lang } = useLang()
+  const fmt = formatNumber(lang)
+  const [period, setPeriod] = useState<Period>('30')
   const [data, setData] = useState<ReportsResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     api
-      .get<ReportsResponse>(`/api/reports?days=${days}`)
+      .get<ReportsResponse>(`/api/reports?days=${period}`)
       .then((r) => {
         if (!cancelled) {
           setData(r)
           setError(null)
         }
       })
-      .catch((err) => !cancelled && setError(errorMessage(err)))
+      .catch((err) => !cancelled && setError(err))
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [days])
+  }, [period, reload])
 
-  const series = data ? fillDays(data.series, data.days) : []
+  const retry = useCallback(() => setReload((n) => n + 1), [])
+
+  const periodControl = (
+    <SegmentedControl type="radiogroup" size="s" width={240} value={period} onValueChange={(v: Period) => setPeriod(v)} aria-label={t('reports_days')}>
+      {(['7', '30', '90'] as const).map((d) => (
+        <SegmentedControlItem key={d} value={d}>
+          {t('reports_period_days').replace('{n}', d)}
+        </SegmentedControlItem>
+      ))}
+    </SegmentedControl>
+  )
+
+  const header = <PageHeader title={t('reports_title')} actions={periodControl} />
+
+  if (!data) {
+    return (
+      <div className="stack">
+        {header}
+        {error !== null ? <ErrorBanner error={error} onRetry={retry} /> : loading && <LoadingState />}
+      </div>
+    )
+  }
+
+  const series = fillDays(data.series, data.days)
   const max = Math.max(1, ...series.map((p) => p.in + p.out))
-  const totals = METRICS.map(([m]) => (data ? data.flows.reduce((sum, f) => sum + f[m], 0) : 0))
   const sumIn = series.reduce((s, p) => s + p.in, 0)
   const sumOut = series.reduce((s, p) => s + p.out, 0)
   const sumNew = series.reduce((s, p) => s + p.newContacts, 0)
+  const totalRow: FlowReport = {
+    id: TOTAL_ROW_ID,
+    name: t('reports_total'),
+    status: '',
+    channel: '',
+    ...(Object.fromEntries(METRICS.map(([m]) => [m, data.flows.reduce((sum, f) => sum + f[m], 0)])) as Record<Metric, number>),
+  }
+  const hasActivity = sumIn + sumOut + sumNew > 0 || METRICS.some(([m]) => totalRow[m] > 0)
+
+  const columns: Column<FlowReport>[] = [
+    {
+      key: 'name',
+      header: t('editor_name'),
+      render: (f) =>
+        f.id === TOTAL_ROW_ID ? (
+          <Text typo="14" bold color="txt-black-darkest">
+            {f.name}
+          </Text>
+        ) : (
+          <div className="rp-flow">
+            <Text typo="14" color="txt-black-darkest" truncated={2} title={f.name} className="rp-flow__name">
+              {f.name}
+            </Text>
+            <div className="rp-flow__badges">
+              <Badge size="xs" variant={f.status === 'live' ? 'green' : 'monochrome-light'}>
+                {f.status === 'live' ? t('status_live') : t('status_draft')}
+              </Badge>
+              <ChannelBadge channel={f.channel} size="xs" />
+            </div>
+          </div>
+        ),
+    },
+    ...METRICS.map(
+      ([m, key]): Column<FlowReport> => ({
+        key: m,
+        header: t(key),
+        numeric: true,
+        nowrap: true,
+        render: (f) => (
+          <span className={[f.id === TOTAL_ROW_ID && 'rp-total', m === 'errors' && f[m] > 0 && 'rp-error'].filter(Boolean).join(' ') || undefined}>
+            {fmt(f[m])}
+          </span>
+        ),
+      }),
+    ),
+  ]
+
+  const firstDay = series[0]?.day
+  const lastDay = series[series.length - 1]?.day
 
   return (
-    <>
-      <div className="page-title">
-        <h1>{t('reports_title')}</h1>
-        <div className="row">
-          <label style={{ margin: 0 }}>{t('reports_days')}</label>
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ width: 'auto' }}>
-            {[7, 30, 90].map((d) => (
-              <option key={d} value={d}>
-                {d}d
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      {error && <div className="alert error">{error}</div>}
-      {!data ? (
-        loading && <div className="muted">{t('loading')}</div>
+    <div className="stack">
+      {header}
+      {error !== null && <ErrorBanner error={error} onRetry={retry} />}
+
+      {!hasActivity ? (
+        <Card>
+          <EmptyState icon={GraphIcon} title={t('reports_empty')} description={t('reports_empty_desc')} />
+        </Card>
       ) : (
-        <div style={{ opacity: loading ? 0.6 : 1 }}>
-          <div className="grid" style={{ marginBottom: 16 }}>
-            {[
-              [t('reports_in'), sumIn],
-              [t('reports_out'), sumOut],
-              [t('reports_new'), sumNew],
-            ].map(([label, value]) => (
-              <div className="stat" key={String(label)}>
-                <div className="label">{label}</div>
-                <div className="value">{value}</div>
+        <div className={loading ? 'stack rp-body is-loading' : 'stack rp-body'}>
+          <div className="stat-grid">
+            <StatCard label={t('reports_in')} value={sumIn} />
+            <StatCard label={t('reports_out')} value={sumOut} />
+            <StatCard label={t('reports_new')} value={sumNew} />
+            <StatCard label={t('reports_completed')} value={totalRow.completed} />
+          </div>
+
+          <Card
+            title={t('reports_daily')}
+            actions={
+              <div className="rp-legend">
+                <span className="rp-legend__item">
+                  <span className="rp-swatch rp-swatch--in" aria-hidden="true" />
+                  {t('reports_in')}
+                </span>
+                <span className="rp-legend__item">
+                  <span className="rp-swatch rp-swatch--out" aria-hidden="true" />
+                  {t('reports_out')}
+                </span>
               </div>
-            ))}
-          </div>
+            }
+          >
+            {sumIn + sumOut === 0 ? (
+              <EmptyState compact icon={ComboChartIcon} title={t('reports_empty')} />
+            ) : (
+              <figure className="rp-chart" aria-label={t('reports_chart_label')}>
+                <div className="rp-chart__plot">
+                  <span className="rp-chart__max tabular">{t('reports_max').replace('{n}', fmt(max))}</span>
+                  <div className={`rp-bars${series.length > 45 ? ' is-dense' : ''}`}>
+                    {series.map((p) => {
+                      const title = `${formatDay(lang, p.day)}\n${t('reports_in')}: ${fmt(p.in)}\n${t('reports_out')}: ${fmt(p.out)}\n${t('reports_new')}: ${fmt(p.newContacts)}`
+                      return (
+                        <div key={p.day} className="rp-bar" title={title} role="img" aria-label={title.replace(/\n/g, ', ')}>
+                          <div className="rp-bar__seg rp-bar__seg--out" style={{ height: `${(p.out / max) * 100}%` }} />
+                          <div className="rp-bar__seg rp-bar__seg--in" style={{ height: `${(p.in / max) * 100}%` }} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <figcaption className="rp-chart__axis tabular">
+                  <span>{firstDay && formatDay(lang, firstDay)}</span>
+                  <span>{lastDay && formatDay(lang, lastDay)}</span>
+                </figcaption>
+              </figure>
+            )}
+          </Card>
 
-          <div className="card">
-            <h2>{t('reports_daily')}</h2>
-            <div className="bar">
-              {series.map((p) => (
-                <div
-                  key={p.day}
-                  style={{ height: `${((p.in + p.out) / max) * 100}%`, minHeight: p.in + p.out > 0 ? 2 : 0 }}
-                  title={`${p.day}\n${t('reports_in')}: ${p.in}\n${t('reports_out')}: ${p.out}\n${t('reports_new')}: ${p.newContacts}`}
-                />
-              ))}
-            </div>
-            <div className="row small muted" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-              <span>{series[0]?.day}</span>
-              <span className="row" style={{ gap: 6 }}>
-                <span style={{ display: 'inline-block', width: 10, height: 10, background: 'var(--accent)', borderRadius: 2 }} />
-                {t('reports_in')} + {t('reports_out')} (max {max})
-              </span>
-              <span>{series[series.length - 1]?.day}</span>
-            </div>
-          </div>
-
-          <div className="card" style={{ overflowX: 'auto' }}>
-            <h2>{t('nav_flows')}</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>{t('editor_name')}</th>
-                  {METRICS.map(([m, key]) => (
-                    <th key={m} style={{ textAlign: 'right' }}>{t(key)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.flows.map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      <div>{f.name}</div>
-                      <div className="row" style={{ gap: 4 }}>
-                        <span className={`badge ${f.status === 'live' ? 'live' : 'draft'}`}>{f.status === 'live' ? t('status_live') : t('status_draft')}</span>
-                        <span className="badge">{t(`channel_${f.channel}` as Key)}</span>
-                      </div>
-                    </td>
-                    {METRICS.map(([m]) => (
-                      <td key={m} style={{ textAlign: 'right', color: m === 'errors' && f[m] > 0 ? 'var(--danger)' : undefined }}>
-                        {f[m]}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th>Σ</th>
-                  {totals.map((v, i) => (
-                    <th key={METRICS[i][0]} style={{ textAlign: 'right', color: 'var(--text)', fontWeight: 600 }}>{v}</th>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+          <Card title={t('nav_flows')} flush>
+            <DataTable
+              columns={columns}
+              rows={data.flows.length > 0 ? [...data.flows, totalRow] : []}
+              rowKey={(f) => f.id}
+              caption={t('nav_flows')}
+              empty={<EmptyState compact icon={GraphIcon} title={t('reports_flows_empty')} />}
+            />
+          </Card>
         </div>
       )}
-    </>
+    </div>
   )
 }

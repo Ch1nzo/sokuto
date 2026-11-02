@@ -1,0 +1,24 @@
+/* Settings page (pages/Settings.tsx). Bezier tokens only; unlayered class rules. */
+.st-form-row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 860px) { .st-form-row { grid-template-columns: minmax(0, 1fr); } }
+.st-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.st-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.st-wrap { overflow-wrap: anywhere; }
+
+.st-switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
+}
+.st-switch__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; cursor: pointer; }
+
+.st-theme { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; max-width: 100%; }
+.st-theme > :first-child { max-width: 100%; }
+
+.st-code { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.st-code__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.st-code__value {
+  margin: 0; padding: 10px 12px; min-width: 0;
+  background: var(--bg-black-lightest); border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
+  color: var(--txt-black-darkest); font-family: var(--font-family-mono); font-size: 13px; line-height: 20px;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: all;
+}

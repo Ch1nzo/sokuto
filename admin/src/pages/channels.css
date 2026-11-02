@@ -1,0 +1,22 @@
+/* Channels page (pages/Channels.tsx). Bezier tokens only; unlayered class rules. */
+.ch-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; }
+.ch-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ch-account { overflow-wrap: anywhere; margin-top: -4px; }
+.ch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ch-form-row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 860px) { .ch-form-row { grid-template-columns: minmax(0, 1fr); } }
+.ch-result { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ch-guide { padding: 12px; border-radius: var(--radius-8); background: var(--bg-black-lightest); display: flex; flex-direction: column; gap: 8px; }
+.ch-guide__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ch-guide__link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; }
+.ch-guide__steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ch-guide__steps li { display: flex; gap: 8px; align-items: flex-start; }
+.ch-guide__num {
+  flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 1px;
+  border-radius: 50%; background: var(--bgtxt-blue-lightest); color: var(--bgtxt-blue-normal);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ch-guide__text { min-width: 0; font-size: 13px; line-height: 20px; color: var(--txt-black-darker); overflow-wrap: anywhere; }
+/* Cancel the legacy `.card + .card` top margin inside the grid. */
+.ch-grid.ch-grid.ch-grid > .card { margin-top: 0; }
