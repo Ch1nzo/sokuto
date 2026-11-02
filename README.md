@@ -1,10 +1,3 @@
-<!--
-  リポジトリ URL は未確定です。公開前に、このファイルと docs/ 内の
-  "https://github.com/Ch1nzo/sokuto" をすべて実際の URL に置き換えてください。
-  The repository URL is not decided yet. Replace every "https://github.com/Ch1nzo/sokuto"
-  in this file and in docs/ with the real URL before publishing.
--->
-
 # Sokuto
 
 Sokuto(即答)= すぐに答える
@@ -43,7 +36,7 @@ Sokuto は、LINE・Facebook Messenger・Instagram で動くチャットボッ�
 
    [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)
 
-   README に貼るときのコード (`OWNER` は実際のリポジトリに置き換えてください):
+   README に貼るときのコード:
 
    ```markdown
    [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)
@@ -140,7 +133,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 
 ### Install in 5 minutes
 
-1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)` (replace `OWNER`).
+1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)`.
 2. Connect GitHub/GitLab when asked and accept the default names for the Worker, D1 database and KV namespace.
 3. Open `https://<worker-name>.<your-subdomain>.workers.dev` and set the admin password right away (the first visitor sets it).
 4. Connect LINE and/or Facebook/Instagram under **Channels** ([LINE guide](docs/setup-line.md), [Meta guide](docs/setup-meta.md); both in Japanese with English summaries).
