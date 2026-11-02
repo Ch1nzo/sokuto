@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from './lib/api'
 import { LangContext, initialLang, useT, type Lang } from './lib/i18n'
 import Login from './pages/Login'
@@ -60,9 +60,87 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   )
 }
 
+const DEV_DATA_OPTIONS = [
+  ['', 'Demo'],
+  ['worst', 'Worst case'],
+  ['empty', 'Empty'],
+  ['one', 'One'],
+  ['huge', '1,000 rows'],
+] as const
+
+/** Dev-only dataset switch (break-ui). Never rendered in production: see the DEV guard below. */
+function DevDataToggle({ onChange }: { onChange: () => void }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [mode, setMode] = useState(() => new URLSearchParams(location.search).get('data') ?? '')
+
+  // NavLinks drop the query string; put `?data=` back so a reload keeps the dataset.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if ((params.get('data') ?? '') === mode) return
+    if (mode) params.set('data', mode)
+    else params.delete('data')
+    const search = params.toString()
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true })
+  }, [location.pathname, location.search, mode, navigate])
+
+  const select = (next: string) => {
+    void import('./lib/devFixtures').then((m) => {
+      m.setDataMode(next ? (next as (typeof m.DATA_MODES)[number]) : null)
+      setMode(next)
+      onChange()
+    })
+  }
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Dev data"
+      style={{
+        position: 'fixed',
+        bottom: 12,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1000,
+        display: 'flex',
+        gap: 2,
+        padding: 3,
+        background: '#e5e7eb',
+        borderRadius: 999,
+        font: '12px/1 system-ui, sans-serif',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+        maxWidth: 'calc(100vw - 16px)',
+        overflowX: 'auto',
+      }}
+    >
+      {DEV_DATA_OPTIONS.map(([value, label]) => (
+        <button
+          key={value}
+          role="radio"
+          aria-checked={mode === value}
+          onClick={() => select(value)}
+          style={{
+            border: 0,
+            borderRadius: 999,
+            padding: '6px 10px',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            color: '#111827',
+            background: mode === value ? '#ffffff' : 'transparent',
+            boxShadow: mode === value ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function App() {
   const [lang, setLangState] = useState<Lang>(initialLang)
   const [auth, setAuth] = useState<AuthState>({ loading: true, setupRequired: false, authenticated: false })
+  const [devDataKey, setDevDataKey] = useState(0)
   const navigate = useNavigate()
 
   const setLang = useCallback((l: Lang) => {
@@ -107,7 +185,15 @@ export default function App() {
       ) : !auth.authenticated ? (
         <Login setupRequired={auth.setupRequired} onDone={refresh} />
       ) : (
-        <Shell onLogout={logout} />
+        <Shell key={devDataKey} onLogout={logout} />
+      )}
+      {import.meta.env.DEV && (
+        <DevDataToggle
+          onChange={() => {
+            setDevDataKey((k) => k + 1)
+            void refresh()
+          }}
+        />
       )}
     </LangContext.Provider>
   )

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -9,6 +10,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // Dev-only worst-case data (`?data=worst|empty|one|huge`). The DEV guard is replaced by `false`
+  // in production builds, so this branch and the fixture module are dropped from the bundle.
+  if (import.meta.env.DEV && method === 'GET') {
+    const { devFixture } = await import('./devFixtures')
+    const fixture = devFixture(path)
+    if (fixture !== undefined) return fixture as T
+  }
   const res = await fetch(path, {
     method,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
