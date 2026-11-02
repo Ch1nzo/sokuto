@@ -1,0 +1,51 @@
+{
+  "name": "flowmaker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted chatbot for LINE, Facebook Messenger and Instagram that runs on your own free Cloudflare account. Build automations by hand or from ChatGPT / Claude over MCP.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "dev": "vite build && wrangler dev",
+    "dev:ui": "vite",
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:generate": "drizzle-kit generate",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p admin/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "postinstall": "wrangler types --env-interface CloudflareBindings"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "SQLite database (D1) that stores your contacts, conversations and automations. Lives in your own Cloudflare account."
+      },
+      "KV": {
+        "description": "Key-value storage for settings and auto-generated secrets."
+      }
+    }
+  },
+  "dependencies": {
+    "@hono/mcp": "^0.3.5",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.16",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "drizzle-kit": "^0.31.11",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "typescript": "~5.9.0",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.156.2",
+    "@types/node": "^24.0.0"
+  }
+}
