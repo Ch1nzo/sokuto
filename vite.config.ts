@@ -11,6 +11,21 @@ export default defineConfig({
   build: {
     outDir: '../dist/client',
     emptyOutDir: true,
+    // Vite 8 bundles with Rolldown: `codeSplitting.groups` replaces Rollup's `manualChunks`
+    // (Rolldown only supports the deprecated function form). Framework + Bezier go into one
+    // long-lived `vendor` chunk so the small per-page app chunks can change without busting it.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor',
+              test: /[\\/]node_modules[\\/](@channel\.io[\\/]bezier-(react|icons)|react|react-dom|react-router|react-router-dom|scheduler)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

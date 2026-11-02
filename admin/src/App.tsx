@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Icon, NavItem, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
 import {
@@ -21,15 +21,18 @@ import { LangContext, initialLang, useLang, useT, type Key, type Lang } from './
 import { useTheme, type ThemePref } from './lib/theme'
 import { LoadingState, SokutoMark } from './components'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Channels from './pages/Channels'
-import Flows from './pages/Flows'
-import FlowEditor from './pages/FlowEditor'
-import Inbox from './pages/Inbox'
-import Contacts from './pages/Contacts'
-import Broadcasts from './pages/Broadcasts'
-import Reports from './pages/Reports'
-import Settings from './pages/Settings'
+
+// Pages behind the login are split into their own chunks (each page imports its own CSS).
+// Login stays eager: it is the first screen for a signed-out user.
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Channels = lazy(() => import('./pages/Channels'))
+const Flows = lazy(() => import('./pages/Flows'))
+const FlowEditor = lazy(() => import('./pages/FlowEditor'))
+const Inbox = lazy(() => import('./pages/Inbox'))
+const Contacts = lazy(() => import('./pages/Contacts'))
+const Broadcasts = lazy(() => import('./pages/Broadcasts'))
+const Reports = lazy(() => import('./pages/Reports'))
+const Settings = lazy(() => import('./pages/Settings'))
 
 type AuthState = { loading: boolean; setupRequired: boolean; authenticated: boolean }
 
@@ -173,19 +176,21 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </aside>
       <main className="main">
         <div className="main__inner">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inbox" element={<Inbox />} />
-            <Route path="/inbox/:id" element={<Inbox />} />
-            <Route path="/flows" element={<Flows />} />
-            <Route path="/flows/:id" element={<FlowEditor />} />
-            <Route path="/contacts" element={<Contacts />} />
-            <Route path="/broadcasts" element={<Broadcasts />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/channels" element={<Channels />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<LoadingState />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/inbox" element={<Inbox />} />
+              <Route path="/inbox/:id" element={<Inbox />} />
+              <Route path="/flows" element={<Flows />} />
+              <Route path="/flows/:id" element={<FlowEditor />} />
+              <Route path="/contacts" element={<Contacts />} />
+              <Route path="/broadcasts" element={<Broadcasts />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/channels" element={<Channels />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </div>
       </main>
     </div>

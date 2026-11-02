@@ -19,7 +19,7 @@ Ground truth for props is `node_modules/@channel.io/bezier-react/dist/types/comp
 - Bezier puts its CSS in cascade layers (`@layer tokens, base, components`). **Any unlayered rule in our `styles.css` beats any Bezier rule regardless of specificity.** So never write element selectors (`a`, `input`, `button`, `table`…) unlayered: they would restyle Bezier internals. Element defaults go inside `@layer base { … }` (see top of `styles.css`); custom classes stay unlayered.
 - Bezier's base sets `:root { font-size: 62.5% }` → `1rem = 10px`. Use px.
 - Bezier class names are hashed; target Bezier internals only through your own `className` or ARIA attributes (`[role='menuitem']`).
-- `styles.css` has a `LEGACY` block at the bottom for pages not migrated yet. Do not use those classes (`.btn`, `.row`, `.muted`, `.alert`, `.badge`, `.grid`, `.page-title`, `.inline-fields`, `.code-box`, `.list-item`, `.step-card`, `.conv*`, `.editor`, `.bar`, …) in new code; delete a legacy rule when the last page using it is migrated.
+- All pages are migrated; the pre-Bezier `LEGACY` block in `styles.css` is gone. Do not reintroduce generic utility classes (`.btn`, `.row`, `.muted`, `.alert`, `.badge`, `.grid`, …): use Bezier components and page-prefixed classes in `pages/<page>.css`.
 - Useful variables: surfaces `--bg-white-normal` (cards), `--bg-grey-lightest` (page), `--bg-black-lightest` / `--bg-black-lighter` (subtle fills, hover); text `--txt-black-darkest` / `-darker` / `-dark` (primary / secondary / tertiary); borders `--bdr-black-light`; accents `--bgtxt-{blue,red,green,orange,…}-{lightest,lighter,normal,dark}`; radii `--radius-6/8/12/16/32`; shadows `--ev-1…6`; mono `--font-family-mono`.
 
 ## Layout rules
