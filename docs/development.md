@@ -1,6 +1,6 @@
 # 開発ガイド
 
-flowmaker をローカルで動かしたり、改造したり、手動でデプロイしたりする人向けのページです。Deploy to Cloudflare ボタンで使うだけなら、このページは読まなくて構いません。
+Sokuto をローカルで動かしたり、改造したり、手動でデプロイしたりする人向けのページです。Deploy to Cloudflare ボタンで使うだけなら、このページは読まなくて構いません。
 
 ## 必要なもの
 
@@ -19,8 +19,8 @@ flowmaker をローカルで動かしたり、改造したり、手動でデプ�
 ## セットアップ
 
 ```bash
-git clone https://github.com/OWNER/flowmaker.git   # OWNER は実際のリポジトリに置き換え
-cd flowmaker
+git clone https://github.com/OWNER/sokuto.git   # OWNER は実際のリポジトリに置き換え
+cd sokuto
 npm install            # postinstall で wrangler types が実行され、worker-configuration.d.ts が作られます
 npm run migrate:local  # ローカルの D1 にテーブルを作る
 ```
@@ -94,7 +94,7 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
 2. D1 データベースと KV を作ります。
 
    ```bash
-   npx wrangler d1 create flowmaker-db
+   npx wrangler d1 create sokuto-db
    npx wrangler kv namespace create KV
    ```
 
@@ -106,7 +106,7 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
    npm run deploy   # D1 マイグレーションを本番に適用 → wrangler deploy
    ```
 
-5. 表示された `https://flowmaker.<あなたのサブドメイン>.workers.dev` を開き、管理者パスワードを設定します。
+5. 表示された `https://sokuto.<あなたのサブドメイン>.workers.dev` を開き、管理者パスワードを設定します。
 
 ## npm スクリプト一覧
 
@@ -125,7 +125,7 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
 ## ディレクトリ構成
 
 ```
-flowmaker/
+sokuto/
 ├── wrangler.jsonc            # Worker の設定 (D1: DB, KV: KV, Cron 毎分, 静的アセット, META_GRAPH_VERSION)
 ├── package.json              # スクリプトと、Deploy ボタン用のバインディング説明 ("cloudflare.bindings")
 ├── vite.config.ts            # 管理画面のビルド設定 (root: admin, 出力: dist/client)
@@ -178,7 +178,7 @@ flowmaker/
 2. **アダプター**: `src/channels/foo.ts` を作り、次を実装します。
    - 署名検証の関数 (例: `verifyFooSignature`)
    - Webhook 本文を `InboundEvent[]` に変換する関数 (戻り値は `ParsedWebhook`)
-   - `ChannelAdapter` を実装したクラス (`send`, `getProfile`。コメント機能があれば `replyToComment`, `sendPrivateReply`)。`OutboundMessage` のボタン・クイックリプライをサービスの形式に変換します。ボタンの `payload` (`fm:...`) はそのまま返ってくるようにしてください。
+   - `ChannelAdapter` を実装したクラス (`send`, `getProfile`。コメント機能があれば `replyToComment`, `sendPrivateReply`)。`OutboundMessage` のボタン・クイックリプライをサービスの形式に変換します。ボタンの `payload` (`sk:...`) はそのまま返ってくるようにしてください。
 3. **設定**: `src/settings.ts` に `FooConfig` 型を追加し、`ChannelConfigs` に `foo` を加えます。秘密の値のフィールド名を `SECRET_FIELDS` に追加すると、自動で暗号化されます。`configuredChannels` にも追加します。
 4. **レジストリ**: `src/channels/registry.ts` の `getAdapter` で `FooAdapter` を返すようにします。
 5. **Webhook**: `src/routes/webhooks.ts` に `POST /foo` を追加します。署名を検証し、`processAll` に渡してください (処理は `waitUntil` で行い、すぐに 200 を返します)。`/webhooks/*` は `run_worker_first` に含まれているので、`wrangler.jsonc` の変更は不要です。

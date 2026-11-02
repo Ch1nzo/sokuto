@@ -1,4 +1,4 @@
-/** Channels flowmaker can talk to. */
+/** Channels Sokuto can talk to. */
 export type Channel = 'line' | 'messenger' | 'instagram'
 
 export const CHANNELS: Channel[] = ['line', 'messenger', 'instagram']

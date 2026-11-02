@@ -68,7 +68,7 @@ export default function App() {
   const setLang = useCallback((l: Lang) => {
     setLangState(l)
     try {
-      localStorage.setItem('fm:lang', l)
+      localStorage.setItem('sokuto:lang', l)
     } catch {
       /* ignore */
     }
@@ -86,8 +86,8 @@ export default function App() {
   useEffect(() => {
     void refresh()
     const onUnauthorized = () => setAuth((a) => ({ ...a, authenticated: false }))
-    window.addEventListener('fm:unauthorized', onUnauthorized)
-    return () => window.removeEventListener('fm:unauthorized', onUnauthorized)
+    window.addEventListener('sokuto:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('sokuto:unauthorized', onUnauthorized)
   }, [refresh])
 
   useEffect(() => {

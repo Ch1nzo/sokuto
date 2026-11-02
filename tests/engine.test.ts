@@ -173,12 +173,12 @@ describe('renderText', () => {
 describe('buttonPayload / parseButtonPayload', () => {
   it('round trips', () => {
     const p = buttonPayload(12, 'm1', 3)
-    expect(p).toBe('fm:12:m1:3')
+    expect(p).toBe('sk:12:m1:3')
     expect(parseButtonPayload(p)).toEqual({ flowId: 12, stepId: 'm1', index: 3 })
   })
 
   it('rejects garbage', () => {
-    for (const bad of [undefined, '', 'fm', 'fm:1:m1', 'fm:x:m1:0', 'fm:1:m1:y', 'fm:1::0', 'fm:1:a:b:0', 'xx:1:m1:0', 'fm-choice:yes', ' fm:1:m1:0']) {
+    for (const bad of [undefined, '', 'sk', 'sk:1:m1', 'sk:x:m1:0', 'sk:1:m1:y', 'sk:1::0', 'sk:1:a:b:0', 'xx:1:m1:0', 'sk-choice:yes', ' sk:1:m1:0']) {
       expect(parseButtonPayload(bad)).toBeNull()
     }
   })

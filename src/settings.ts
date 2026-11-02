@@ -5,7 +5,7 @@ import { decryptString, encryptString, randomToken } from './crypto'
 import type { Channel } from './channels/types'
 
 /**
- * Secrets that flowmaker generates by itself on first run and keeps in KV.
+ * Secrets that Sokuto generates by itself on first run and keeps in KV.
  * Users never have to configure these.
  */
 export type SecretName = 'session_secret' | 'enc_key' | 'meta_verify_token'
@@ -50,7 +50,7 @@ export type GeneralSettings = {
 }
 
 export const DEFAULT_GENERAL: GeneralSettings = {
-  botName: 'flowmaker',
+  botName: 'Sokuto',
   language: 'ja',
   timezone: 'Asia/Tokyo',
   paused: false,

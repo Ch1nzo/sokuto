@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-flowmaker は 1 つの Cloudflare Worker で動きます。Worker が Webhook の受信、管理画面用の API、MCP サーバー、1 分ごとの定期処理 (Cron) をすべて担当し、データは D1 (SQLite) と KV に保存します。管理画面 (React SPA) は同じ Worker の静的アセットとして配信されます。
+Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の受信、管理画面用の API、MCP サーバー、1 分ごとの定期処理 (Cron) をすべて担当し、データは D1 (SQLite) と KV に保存します。管理画面 (React SPA) は同じ Worker の静的アセットとして配信されます。
 
 ## リクエストの流れ
 
@@ -25,7 +25,7 @@ flowmaker は 1 つの Cloudflare Worker で動きます。Worker が Webhook �
 
 - `wrangler.jsonc` の `assets.run_worker_first` に `/api/*`, `/webhooks/*`, `/mcp`, `/mcp/*`, `/health` が指定されており、これらは Worker のコードが処理します。それ以外のパスは静的アセット (`dist/client`) が返され、見つからないパスは `index.html` (SPA) が返されます。
 - Webhook は署名を検証したらすぐに応答を返し、実際の処理 (連絡先の作成、自動化の実行、送信) は `ctx.waitUntil` でバックグラウンドで行います。LINE / Meta のタイムアウトを避けるためです。
-- `GET /health` は `{ "ok": true, "name": "flowmaker" }` を返します。
+- `GET /health` は `{ "ok": true, "name": "sokuto" }` を返します。
 
 ## データモデル (D1)
 
@@ -78,7 +78,7 @@ KV には次のキーが入ります。
 4. **担当者呼び出しキーワード** (初期値: 担当者・オペレーター・human・agent) を含むメッセージなら、その連絡先のボットを停止し、セッションを消し、通知を作り、設定の返信文を送って終了。
 5. その連絡先のボットが停止中なら終了 (`bot_paused_until` を過ぎていれば自動で再開)。
 6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ。関係のない入力なら 7 へ進む。
-7. **ボタンの payload** (`fm:...`) なら、セッションがなくてもその自動化の続きを実行。
+7. **ボタンの payload** (`sk:...`) なら、セッションがなくてもその自動化の続きを実行。
 8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。
 
 ### セッションと待機
@@ -93,7 +93,7 @@ KV には次のキーが入ります。
 
 ### ボタンの payload
 
-ボタンには `fm:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `fm:12:m1:0`)。質問の選択肢には `fm-choice:<選択肢>` が付きます。
+ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。
 
 payload に自動化とステップの情報が入っているので、**セッションがなくても続きを実行できます**。これは Facebook / Instagram のコメントからの流れで重要です。コメントで始まった自動化の最初のメッセージは、コメントへの「プライベート返信」として Messenger に届きます。コメントの投稿者の ID と Messenger の ID は別物として届くことがあり、セッションとはつながりませんが、お客さんが DM のボタンを押すと payload から自動化とステップがわかるので、Messenger 側で会話を続けられます。
 
@@ -140,9 +140,9 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 - **チャネルのトークンは暗号化して D1 に保存**: LINE のチャネルシークレット・アクセストークン、Meta の app secret・ページアクセストークンは、KV にある鍵を使った **AES-GCM** で暗号化して `settings` テーブルに保存します。D1 のデータだけが漏れてもトークンは読めません。
 - **管理者パスワード**: **PBKDF2-SHA256 (100,000 回、ランダムなソルト)** でハッシュ化して KV に保存します。8 文字以上が必要です。
 - **初回セットアップ**: 管理者パスワードが未設定のとき、最初にアクセスした人がパスワードを設定できます。デプロイ後すぐに設定してください。
-- **セッション**: ログインすると、HMAC-SHA256 で署名された有効期限 30 日のトークンが Cookie (`fm_session`、HttpOnly、SameSite=Lax、HTTPS では Secure) に入ります。サーバー側にセッションの一覧は持ちません。ログアウトは Cookie を消すだけなので、すべてのセッションを無効にしたいときは KV の `secret:session_secret` を削除します (次のアクセスで新しい鍵が作られます)。
+- **セッション**: ログインすると、HMAC-SHA256 で署名された有効期限 30 日のトークンが Cookie (`sokuto_session`、HttpOnly、SameSite=Lax、HTTPS では Secure) に入ります。サーバー側にセッションの一覧は持ちません。ログアウトは Cookie を消すだけなので、すべてのセッションを無効にしたいときは KV の `secret:session_secret` を削除します (次のアクセスで新しい鍵が作られます)。
 - **ログインの試行制限**: IP アドレスごとに、15 分間で 10 回までです (KV で数えます)。
-- **MCP トークン**: `fm_` で始まるランダムな文字列で、KV には SHA-256 ハッシュだけを保存します。MCP (`/mcp`) と管理用 API (`/api/*`) の両方に使えます。再発行と無効化はパスワードでログインしたセッションからだけ行えます。
+- **MCP トークン**: `sk_` で始まるランダムな文字列で、KV には SHA-256 ハッシュだけを保存します。MCP (`/mcp`) と管理用 API (`/api/*`) の両方に使えます。再発行と無効化はパスワードでログインしたセッションからだけ行えます。
 - **Webhook の検証**: LINE は `X-Line-Signature` (チャネルシークレットによる HMAC)、Meta は `X-Hub-Signature-256` (app secret による HMAC) を、定数時間比較で検証します。署名が合わないリクエストは 401 で拒否します。
 - **重複処理の防止**: Webhook の再送で同じイベントが届いても、`processed_events` で 1 回だけ処理します。
 
@@ -150,10 +150,10 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 ## English summary
 
-flowmaker is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
+Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
 - **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows`, `sessions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `fm:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies and private replies, page token inspection and page subscription).
 - **Scheduler**: every minute, resumes up to 25 due delays, sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

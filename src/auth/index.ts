@@ -6,7 +6,7 @@ import { getOrCreateSecret } from '../settings'
 
 export type AppEnv = { Bindings: Env; Variables: { auth: 'session' | 'mcp' } }
 
-const COOKIE = 'fm_session'
+const COOKIE = 'sokuto_session'
 const SESSION_DAYS = 30
 
 export async function hasAdmin(kv: KVNamespace): Promise<boolean> {

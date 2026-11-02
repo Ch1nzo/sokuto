@@ -1,23 +1,25 @@
 <!--
   リポジトリ URL は未確定です。公開前に、このファイルと docs/ 内の
-  "https://github.com/OWNER/flowmaker" をすべて実際の URL に置き換えてください。
-  The repository URL is not decided yet. Replace every "https://github.com/OWNER/flowmaker"
+  "https://github.com/OWNER/sokuto" をすべて実際の URL に置き換えてください。
+  The repository URL is not decided yet. Replace every "https://github.com/OWNER/sokuto"
   in this file and in docs/ with the real URL before publishing.
 -->
 
-# flowmaker
+# Sokuto
 
-flowmaker は、LINE・Facebook Messenger・Instagram で動くチャットボットを、**あなた自身の無料 Cloudflare アカウント**の上で動かすためのオープンソースソフトウェア (MIT) です。「価格とコメントした人に DM で価格を送る」「友だち追加した人にあいさつしてアンケートを取る」といった自動応答を管理画面から作れます。ChatGPT / Claude / Claude Code から MCP で自動化を作ったりテストしたりすることもできます。商用サービス noflow.pro のオープンソース代替として作られており、日本向けに LINE 対応を加えています。
+Sokuto(即答)= すぐに答える
+
+Sokuto は、LINE・Facebook Messenger・Instagram で動くチャットボットを、**あなた自身の無料 Cloudflare アカウント**の上で動かすためのオープンソースソフトウェア (MIT) です。「価格とコメントした人に DM で価格を送る」「友だち追加した人にあいさつしてアンケートを取る」といった自動応答を管理画面から作れます。ChatGPT / Claude / Claude Code から MCP で自動化を作ったりテストしたりすることもできます。商用サービス noflow.pro のオープンソース代替として作られており、日本向けに LINE 対応を加えています。
 
 [English below](#english)
 
 ---
 
-## なぜ flowmaker か
+## なぜ Sokuto か
 
 - **買い切りどころか無料**: ソフトウェアは MIT ライセンスで無料です。Cloudflare の無料プランの範囲で動くように作られているので、月額料金はかかりません。
 - **自分の Cloudflare で動く**: サーバーはあなたの Cloudflare アカウント内の Worker です。サービス終了や値上げの影響を受けません。
-- **データは自分のもの**: 連絡先・会話履歴・設定は、あなたのアカウントの D1 データベースと KV にだけ保存されます。flowmaker の開発者を含め、第三者には送られません。
+- **データは自分のもの**: 連絡先・会話履歴・設定は、あなたのアカウントの D1 データベースと KV にだけ保存されます。Sokuto の開発者を含め、第三者には送られません。
 - **AI から操作できる**: 管理画面で MCP トークンを発行すると、ChatGPT / Claude / Claude Code などに「こういう自動化を作って」と頼めます。AI はスキーマを読み、作成し、テストし、公開まで行えます。
 
 ## できること
@@ -39,12 +41,12 @@ flowmaker は、LINE・Facebook Messenger・Instagram で動くチャットボ�
 
 1. 下の **Deploy to Cloudflare** ボタンを押します。
 
-   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/flowmaker)
+   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)
 
    README に貼るときのコード (`OWNER` は実際のリポジトリに置き換えてください):
 
    ```markdown
-   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/flowmaker)
+   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)
    ```
 
 2. Cloudflare の画面で、GitHub (または GitLab) との接続を求められるので許可します。続いて Worker の名前、D1 データベース、KV の名前を聞かれます。**すべて初期値のままで構いません。** 「デプロイ」を押すと、リポジトリがあなたのアカウントにコピーされ、データベースが作られ、ビルドとデプロイが自動で行われます (数分かかります)。
@@ -56,11 +58,11 @@ flowmaker は、LINE・Facebook Messenger・Instagram で動くチャットボ�
 5. **自動化** → **テンプレートから作る** でテンプレートを選び、文面を自分のお店に合わせて直し、**テスト** で動きを確かめてから **公開する** を押します。
 6. (任意) **設定** → **AI 連携 (MCP)** でトークンを発行し、Claude / ChatGPT などをつなぎます ([docs/mcp.md](docs/mcp.md))。
 
-> パスワードを忘れたとき: Cloudflare ダッシュボード → ストレージとデータベース → KV → flowmaker の KV を開き、キー `admin:password` を削除すると、次にアクセスしたときに再びパスワード設定画面が出ます。削除したらすぐに新しいパスワードを設定してください。
+> パスワードを忘れたとき: Cloudflare ダッシュボード → ストレージとデータベース → KV → Sokuto の KV を開き、キー `admin:password` を削除すると、次にアクセスしたときに再びパスワード設定画面が出ます。削除したらすぐに新しいパスワードを設定してください。
 
 ## 料金と制限
 
-flowmaker 自体に料金はありません。ただし、次の外部サービスの制限があります (数値は執筆時点のものです。最新情報は各社の公式ページで確認してください)。
+Sokuto 自体に料金はありません。ただし、次の外部サービスの制限があります (数値は執筆時点のものです。最新情報は各社の公式ページで確認してください)。
 
 **Cloudflare 無料プラン**
 
@@ -74,11 +76,11 @@ flowmaker 自体に料金はありません。ただし、次の外部サービ�
 
 - 応答メッセージ (お客さんのメッセージへの返信) は無料で、通数に数えられません。
 - プッシュメッセージ (一斉配信、待機ステップのあとの送信、受信箱からの手動返信など) は、LINE 公式アカウントの料金プランの月間通数に数えられます。無料プランは月 200 通です (2026 年時点。最新は LINE 公式の料金ページを確認してください)。
-- flowmaker は 1 つのお客さんのメッセージに対し、最初の 1 回だけ応答メッセージ (reply) を使います。1 回の応答で 2 つ以上のステップを送る自動化では、2 つ目以降はプッシュメッセージとして送られ、通数に数えられます。
+- Sokuto は 1 つのお客さんのメッセージに対し、最初の 1 回だけ応答メッセージ (reply) を使います。1 回の応答で 2 つ以上のステップを送る自動化では、2 つ目以降はプッシュメッセージとして送られ、通数に数えられます。
 
 **Meta (Messenger / Instagram)**
 
-- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。flowmaker の一斉配信は、24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
+- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。Sokuto の一斉配信は、24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
 - コメントへのプライベート返信 (DM) は、1 つのコメントにつき 1 回だけです。
 
 ## 仕組み
@@ -87,7 +89,7 @@ flowmaker 自体に料金はありません。ただし、次の外部サービ�
 LINE / Messenger / Instagram
         │  Webhook (署名を検証)
         ▼
-Cloudflare Worker (flowmaker)  ── 管理画面 (React SPA, 静的アセット)
+Cloudflare Worker (Sokuto)  ── 管理画面 (React SPA, 静的アセット)
    │   │   └── /mcp  ← ChatGPT / Claude (Bearer トークン)
    │   └── Cron (1 分ごと): 待機の再開・一斉配信
    ▼
@@ -102,12 +104,12 @@ D1 (連絡先・会話・自動化・統計)   KV (自動生成された鍵・�
 
 ## noflow との違い
 
-flowmaker は noflow.pro を参考にしたオープンソースの代替ですが、同じものではありません。現時点で正直に言うと:
+Sokuto は noflow.pro を参考にしたオープンソースの代替ですが、同じものではありません。現時点で正直に言うと:
 
 - **ホスト型のインストーラーはまだありません。** Deploy to Cloudflare ボタンで自分の Cloudflare にデプロイする形です。
 - **キャンバス (ノードをつなぐ図) のエディタはありません。** ステップを上から並べるリスト形式のエディタです。複雑な分岐は、AI (MCP) に作ってもらうと楽です。
 - **Meta アプリの設定は手動です。** Facebook / Instagram を使うには、自分で Meta 開発者アプリを作り、一般公開する場合はアプリレビューを通す必要があります ([docs/setup-meta.md](docs/setup-meta.md))。ここが一番手間のかかる部分です。
-- 一方で、**LINE に対応**していること、**ソースコードとデータがすべて自分の手元にある**こと、**費用がかからない**ことは flowmaker の利点です。
+- 一方で、**LINE に対応**していること、**ソースコードとデータがすべて自分の手元にある**こと、**費用がかからない**ことは Sokuto の利点です。
 
 ## ライセンス
 
@@ -119,9 +121,11 @@ MIT License。[LICENSE](LICENSE) を見てください。
 
 ## English
 
-flowmaker is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instagram** that runs entirely on **your own free Cloudflare account** (Workers + D1 + KV + Cron). It ships an admin web app and an MCP server so ChatGPT, Claude and Claude Code can build, test and publish automations. It is an open-source alternative to noflow.pro, with LINE support added for the Japanese market.
+Sokuto (即答) means "instant answer".
 
-### Why flowmaker
+Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instagram** that runs entirely on **your own free Cloudflare account** (Workers + D1 + KV + Cron). It ships an admin web app and an MCP server so ChatGPT, Claude and Claude Code can build, test and publish automations. It is an open-source alternative to noflow.pro, with LINE support added for the Japanese market.
+
+### Why Sokuto
 
 - **Free, not just buy-once**: MIT-licensed, designed to fit Cloudflare's free plan.
 - **Your server**: a Worker in your own Cloudflare account.
@@ -136,7 +140,7 @@ flowmaker is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Ins
 
 ### Install in 5 minutes
 
-1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/flowmaker)` (replace `OWNER`).
+1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)` (replace `OWNER`).
 2. Connect GitHub/GitLab when asked and accept the default names for the Worker, D1 database and KV namespace.
 3. Open `https://<worker-name>.<your-subdomain>.workers.dev` and set the admin password right away (the first visitor sets it).
 4. Connect LINE and/or Facebook/Instagram under **Channels** ([LINE guide](docs/setup-line.md), [Meta guide](docs/setup-meta.md); both in Japanese with English summaries).

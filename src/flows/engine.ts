@@ -38,12 +38,12 @@ export function parseFlow(row: typeof schema.flows.$inferSelect): FlowRecord {
 }
 
 export function buttonPayload(flowId: number, stepId: string, index: number): string {
-  return `fm:${flowId}:${stepId}:${index}`
+  return `sk:${flowId}:${stepId}:${index}`
 }
 
 export function parseButtonPayload(payload: string | undefined): { flowId: number; stepId: string; index: number } | null {
   if (!payload) return null
-  const m = /^fm:(\d+):([^:]+):(\d+)$/.exec(payload)
+  const m = /^sk:(\d+):([^:]+):(\d+)$/.exec(payload)
   if (!m) return null
   return { flowId: Number(m[1]), stepId: m[2]!, index: Number(m[3]) }
 }
@@ -299,7 +299,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
       }
       case 'question': {
         const msg: OutboundMessage = { text: renderText(step.text, ctx.contact, ctx.lastInput) }
-        if (step.choices && step.choices.length > 0) msg.quickReplies = step.choices.map((c) => ({ label: c, payload: `fm-choice:${c}` }))
+        if (step.choices && step.choices.length > 0) msg.quickReplies = step.choices.map((c) => ({ label: c, payload: `sk-choice:${c}` }))
         const result = await deliver(ctx, step, msg)
         if (!result.ok) return endSession(ctx)
         await saveSession(ctx, { stepId: step.id, waiting: 'input', field: step.field })
@@ -375,7 +375,7 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
     return false
   }
   if (session.waiting === 'input' && step.type === 'question') {
-    const raw = event.payload?.startsWith('fm-choice:') ? event.payload.slice('fm-choice:'.length) : (event.text ?? event.payload ?? '')
+    const raw = event.payload?.startsWith('sk-choice:') ? event.payload.slice('sk-choice:'.length) : (event.text ?? event.payload ?? '')
     if (!raw.trim() && !(event.attachments && event.attachments.length)) return false
     const value = raw.trim() || (event.attachments?.[0]?.url ?? event.attachments?.[0]?.type ?? '')
     if (step.choices && step.choices.length > 0 && !step.choices.some((c) => normalize(c) === normalize(value))) {

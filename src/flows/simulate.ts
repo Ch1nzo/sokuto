@@ -43,8 +43,8 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
       const step = liveFlow.definition.steps.find((s) => s.id === ctx.dryRunSession!.stepId)
       if (step && step.type === 'message') {
         const idx = step.buttons?.findIndex((b) => b.label === input.button) ?? -1
-        if (idx >= 0) payload = `fm:${liveFlow.id}:${step.id}:${idx}`
-      } else if (step && step.type === 'question') payload = `fm-choice:${input.button}`
+        if (idx >= 0) payload = `sk:${liveFlow.id}:${step.id}:${idx}`
+      } else if (step && step.type === 'question') payload = `sk-choice:${input.button}`
     }
     const event: InboundEvent = { channel, channelUserId: 'test-user', eventId: `sim-${steps.length}`, type: payload && input.type === 'message' ? 'postback' : input.type, text: input.text, payload, ref: input.ref, commentId: input.type === 'comment' ? 'sim-comment' : undefined, timestamp: Date.now() }
     ctx.lastInput = input.text

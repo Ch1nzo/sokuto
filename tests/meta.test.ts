@@ -34,9 +34,9 @@ describe('parseMetaWebhook (page)', () => {
   })
 
   it('turns a quick reply into a postback with its payload', () => {
-    const body = JSON.stringify({ object: 'page', entry: [{ id: PAGE_ID, messaging: [messaging({ message: { mid: 'mid.2', text: 'Yes', quick_reply: { payload: 'fm:1:m1:0' } } })] }] })
+    const body = JSON.stringify({ object: 'page', entry: [{ id: PAGE_ID, messaging: [messaging({ message: { mid: 'mid.2', text: 'Yes', quick_reply: { payload: 'sk:1:m1:0' } } })] }] })
     const [ev] = parseMetaWebhook(body, cfg).events
-    expect(ev).toMatchObject({ type: 'postback', payload: 'fm:1:m1:0', text: 'Yes', eventId: 'mid.2' })
+    expect(ev).toMatchObject({ type: 'postback', payload: 'sk:1:m1:0', text: 'Yes', eventId: 'mid.2' })
   })
 
   it('parses a plain postback', () => {

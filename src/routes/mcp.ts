@@ -28,7 +28,7 @@ async function flowById(d: Db, id: number) {
 
 export function buildMcpServer(env: Env): McpServer {
   const d = createDb(env.DB)
-  const server = new McpServer({ name: 'flowmaker', version: '0.1.0' })
+  const server = new McpServer({ name: 'sokuto', version: '0.1.0' })
 
   server.registerTool('get_overview', { title: 'Overview', description: 'Bot name, configured channels, live flows and key numbers for the last 7 days.' }, async () => {
     const since7 = new Date(Date.now() - 7 * 86400_000).toISOString()
@@ -221,7 +221,7 @@ export function buildMcpServer(env: Env): McpServer {
 
 mcpRoutes.all('/', async (c) => {
   if (!(await checkBearer(c))) {
-    return c.json({ error: 'unauthorized', hint: 'Send "Authorization: Bearer <token>" with the token from Settings → AI (MCP).' }, 401, { 'WWW-Authenticate': 'Bearer realm="flowmaker"' })
+    return c.json({ error: 'unauthorized', hint: 'Send "Authorization: Bearer <token>" with the token from Settings → AI (MCP).' }, 401, { 'WWW-Authenticate': 'Bearer realm="sokuto"' })
   }
   const server = buildMcpServer(c.env)
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined })

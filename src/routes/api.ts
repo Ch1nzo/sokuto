@@ -481,7 +481,7 @@ apiRoutes.put('/settings', async (c) => {
 
 apiRoutes.post('/settings/mcp/rotate', async (c) => {
   if (c.get('auth') !== 'session') return c.json({ error: 'session_required' }, 403)
-  const token = `fm_${randomToken(32)}`
+  const token = `sk_${randomToken(32)}`
   await c.env.KV.put('mcp:token_hash', await sha256Hex(token))
   return c.json({ token, url: `${baseUrl(c.req.url)}/mcp` })
 })

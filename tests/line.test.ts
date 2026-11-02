@@ -33,7 +33,7 @@ describe('parseLineWebhook', () => {
       events: [
         { type: 'message', webhookEventId: 'e1', timestamp: 1000, replyToken: 'r1', source: src('U1'), message: { id: 'm1', type: 'text', text: 'こんにちは' } },
         { type: 'message', webhookEventId: 'e2', timestamp: 1001, replyToken: 'r2', source: src('U2'), message: { id: 'm2', type: 'sticker', stickerId: '52002734' } },
-        { type: 'postback', webhookEventId: 'e3', timestamp: 1002, replyToken: 'r3', source: src('U3'), postback: { data: 'fm:1:m1:0' } },
+        { type: 'postback', webhookEventId: 'e3', timestamp: 1002, replyToken: 'r3', source: src('U3'), postback: { data: 'sk:1:m1:0' } },
         { type: 'follow', webhookEventId: 'e4', timestamp: 1003, replyToken: 'r4', source: src('U4'), follow: { isUnblocked: false } },
         { type: 'unfollow', webhookEventId: 'e5', timestamp: 1004, source: src('U5') },
       ],
@@ -43,7 +43,7 @@ describe('parseLineWebhook', () => {
     expect(events[0]).toMatchObject({ channel: 'line', channelUserId: 'U1', eventId: 'e1', type: 'message', text: 'こんにちは', timestamp: 1000 })
     expect(events[1]).toMatchObject({ channelUserId: 'U2', eventId: 'e2', type: 'message', attachments: [{ type: 'sticker' }] })
     expect(events[1]!.text).toBeUndefined()
-    expect(events[2]).toMatchObject({ eventId: 'e3', type: 'postback', payload: 'fm:1:m1:0' })
+    expect(events[2]).toMatchObject({ eventId: 'e3', type: 'postback', payload: 'sk:1:m1:0' })
     expect(events[3]).toMatchObject({ eventId: 'e4', type: 'follow', channelUserId: 'U4' })
     expect(events[4]).toMatchObject({ eventId: 'e5', type: 'unfollow', channelUserId: 'U5' })
 
@@ -100,11 +100,11 @@ describe('renderLineMessages', () => {
   })
 
   it('attaches quick replies to the last message as postback actions', () => {
-    const out = renderLineMessages({ text: 'Pick', quickReplies: [{ label: 'Yes', payload: 'fm:1:m1:0' }, { label: 'No' }] })
+    const out = renderLineMessages({ text: 'Pick', quickReplies: [{ label: 'Yes', payload: 'sk:1:m1:0' }, { label: 'No' }] })
     expect(out).toHaveLength(1)
     const qr = (out[0] as { quickReply: { items: { type: string; action: Record<string, string> }[] } }).quickReply
     expect(qr.items).toHaveLength(2)
-    expect(qr.items[0]).toEqual({ type: 'action', action: { type: 'postback', label: 'Yes', data: 'fm:1:m1:0', displayText: 'Yes' } })
+    expect(qr.items[0]).toEqual({ type: 'action', action: { type: 'postback', label: 'Yes', data: 'sk:1:m1:0', displayText: 'Yes' } })
     expect(qr.items[1]!.action).toMatchObject({ type: 'postback', data: 'No' })
   })
 

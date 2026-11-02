@@ -145,9 +145,9 @@ export default function Settings() {
 
   const mcpUrl = token?.url ?? data.mcp.url
   const jsonSnippet = token
-    ? JSON.stringify({ mcpServers: { flowmaker: { url: mcpUrl, headers: { Authorization: `Bearer ${token.token}` } } } }, null, 2)
+    ? JSON.stringify({ mcpServers: { sokuto: { url: mcpUrl, headers: { Authorization: `Bearer ${token.token}` } } } }, null, 2)
     : ''
-  const cliSnippet = token ? `claude mcp add --transport http flowmaker ${mcpUrl} --header "Authorization: Bearer ${token.token}"` : ''
+  const cliSnippet = token ? `claude mcp add --transport http sokuto ${mcpUrl} --header "Authorization: Bearer ${token.token}"` : ''
 
   return (
     <>

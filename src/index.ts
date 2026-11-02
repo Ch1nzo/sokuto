@@ -9,7 +9,7 @@ import type { Env } from './env'
 
 const app = new Hono<AppEnv>()
 
-app.get('/health', (c) => c.json({ ok: true, name: 'flowmaker' }))
+app.get('/health', (c) => c.json({ ok: true, name: 'sokuto' }))
 app.route('/webhooks', webhookRoutes)
 app.route('/api/auth', authRoutes)
 app.use('/api/*', requireAuth)

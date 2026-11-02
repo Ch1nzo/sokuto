@@ -64,8 +64,8 @@ describe('simulateFlow', () => {
     expect(s0.stepId).toBe('m1')
     expect(s0.outputs).toHaveLength(1)
     expect(s0.outputs[0]!.quickReplies?.map((q) => [q.label, q.payload])).toEqual([
-      ['Coffee', 'fm:7:m1:0'],
-      ['Tea', 'fm:7:m1:1'],
+      ['Coffee', 'sk:7:m1:0'],
+      ['Tea', 'sk:7:m1:1'],
     ])
     const s1 = r.steps[1]!
     expect(s1.triggered).toBe(true)
@@ -169,7 +169,7 @@ describe('simulateFlow', () => {
       ],
     })
     const r = await simulateFlow(db, f, [{ type: 'message', text: 'size' }, { type: 'message', button: 'M' }])
-    expect(r.steps[0]!.outputs[0]!.quickReplies?.map((q) => q.payload)).toEqual(['fm-choice:S', 'fm-choice:M', 'fm-choice:L'])
+    expect(r.steps[0]!.outputs[0]!.quickReplies?.map((q) => q.payload)).toEqual(['sk-choice:S', 'sk-choice:M', 'sk-choice:L'])
     expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['Size M noted'])
     expect(r.fields.size).toBe('M')
   })

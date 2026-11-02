@@ -4,7 +4,7 @@ export type Lang = 'ja' | 'en'
 
 const dict = {
   ja: {
-    appName: 'flowmaker',
+    appName: 'Sokuto',
     nav_dashboard: 'ダッシュボード',
     nav_inbox: '受信箱',
     nav_flows: '自動化',
@@ -226,7 +226,7 @@ const dict = {
     action_webhook: 'Webhook を呼ぶ',
   },
   en: {
-    appName: 'flowmaker',
+    appName: 'Sokuto',
     nav_dashboard: 'Dashboard',
     nav_inbox: 'Inbox',
     nav_flows: 'Automations',
@@ -464,7 +464,7 @@ export function useLang() {
 
 export function initialLang(): Lang {
   try {
-    const stored = localStorage.getItem('fm:lang')
+    const stored = localStorage.getItem('sokuto:lang')
     if (stored === 'ja' || stored === 'en') return stored
   } catch {
     /* ignore */

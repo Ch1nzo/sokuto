@@ -24,7 +24,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/')) {
-      window.dispatchEvent(new CustomEvent('fm:unauthorized'))
+      window.dispatchEvent(new CustomEvent('sokuto:unauthorized'))
     }
     throw new ApiError(res.status, String(data.error ?? res.status), data)
   }
