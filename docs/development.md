@@ -19,7 +19,7 @@ Sokuto をローカルで動かしたり、改造したり、手動でデプロ�
 ## セットアップ
 
 ```bash
-git clone https://github.com/OWNER/sokuto.git   # OWNER は実際のリポジトリに置き換え
+git clone https://github.com/Ch1nzo/sokuto.git   # OWNER は実際のリポジトリに置き換え
 cd sokuto
 npm install            # postinstall で wrangler types が実行され、worker-configuration.d.ts が作られます
 npm run migrate:local  # ローカルの D1 にテーブルを作る

@@ -74,7 +74,7 @@ export default function Channels() {
           <li>{ja ? '「チャネル基本設定」のチャネルシークレットと、「Messaging API 設定」で発行したチャネルアクセストークン(長期)を下に貼り付けます。' : 'Paste the channel secret (Basic settings) and a long-lived channel access token (Messaging API tab) below.'}</li>
           <li>{ja ? '保存すると Webhook URL は自動で登録されます。LINE Official Account Manager で「応答メッセージ」をオフ、「Webhook」をオンにしてください。' : 'The webhook URL is registered automatically. In LINE Official Account Manager, turn "Auto-reply messages" off and "Webhooks" on.'}</li>
         </ol>
-        <a className="small" href="https://github.com/OWNER/sokuto/blob/main/docs/setup-line.md" target="_blank" rel="noreferrer">{t('line_guide')}</a>
+        <a className="small" href="https://github.com/Ch1nzo/sokuto/blob/main/docs/setup-line.md" target="_blank" rel="noreferrer">{t('line_guide')}</a>
         <label>{t('channels_webhook')}</label>
         <Copy value={info.webhooks.line} />
         {!info.line.configured ? (
@@ -120,7 +120,7 @@ export default function Channels() {
           <li>{ja ? 'Messenger › 設定で Facebook ページを接続し、ページアクセストークンを生成して貼り付けます。Instagram も同じページに連携したプロアカウントであれば自動で有効になります。' : 'In Messenger › Settings connect your Page, generate a Page access token and paste it. Instagram works automatically when a professional account is linked to that Page.'}</li>
           <li>{ja ? 'Webhooks の「コールバック URL」と「検証トークン」に下の値を入れ、messages / messaging_postbacks / messaging_referrals / messaging_optins / feed(Instagram: messages / comments)を購読します。' : 'In Webhooks set the callback URL and verify token below and subscribe to messages, messaging_postbacks, messaging_referrals, messaging_optins, feed (Instagram: messages, comments).'}</li>
         </ol>
-        <a className="small" href="https://github.com/OWNER/sokuto/blob/main/docs/setup-meta.md" target="_blank" rel="noreferrer">{t('line_guide')}</a>
+        <a className="small" href="https://github.com/Ch1nzo/sokuto/blob/main/docs/setup-meta.md" target="_blank" rel="noreferrer">{t('line_guide')}</a>
         <label>{t('channels_webhook')}</label>
         <Copy value={info.webhooks.meta} />
         <label>{t('channels_verify_token')}</label>

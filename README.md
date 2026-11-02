@@ -1,7 +1,7 @@
 <!--
   リポジトリ URL は未確定です。公開前に、このファイルと docs/ 内の
-  "https://github.com/OWNER/sokuto" をすべて実際の URL に置き換えてください。
-  The repository URL is not decided yet. Replace every "https://github.com/OWNER/sokuto"
+  "https://github.com/Ch1nzo/sokuto" をすべて実際の URL に置き換えてください。
+  The repository URL is not decided yet. Replace every "https://github.com/Ch1nzo/sokuto"
   in this file and in docs/ with the real URL before publishing.
 -->
 
@@ -41,12 +41,12 @@ Sokuto は、LINE・Facebook Messenger・Instagram で動くチャットボッ�
 
 1. 下の **Deploy to Cloudflare** ボタンを押します。
 
-   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)
+   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)
 
    README に貼るときのコード (`OWNER` は実際のリポジトリに置き換えてください):
 
    ```markdown
-   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)
+   [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)
    ```
 
 2. Cloudflare の画面で、GitHub (または GitLab) との接続を求められるので許可します。続いて Worker の名前、D1 データベース、KV の名前を聞かれます。**すべて初期値のままで構いません。** 「デプロイ」を押すと、リポジトリがあなたのアカウントにコピーされ、データベースが作られ、ビルドとデプロイが自動で行われます (数分かかります)。
@@ -140,7 +140,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 
 ### Install in 5 minutes
 
-1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/sokuto)` (replace `OWNER`).
+1. Click **Deploy to Cloudflare**: `[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ch1nzo/sokuto)` (replace `OWNER`).
 2. Connect GitHub/GitLab when asked and accept the default names for the Worker, D1 database and KV namespace.
 3. Open `https://<worker-name>.<your-subdomain>.workers.dev` and set the admin password right away (the first visitor sets it).
 4. Connect LINE and/or Facebook/Instagram under **Channels** ([LINE guide](docs/setup-line.md), [Meta guide](docs/setup-meta.md); both in Japanese with English summaries).
