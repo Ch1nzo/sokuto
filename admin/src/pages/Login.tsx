@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
+import { Button, SegmentedControl, SegmentedControlItem, Text, VStack } from '@channel.io/bezier-react'
 import { api, errorMessage } from '../lib/api'
-import { useLang, useT } from '../lib/i18n'
+import { useLang, useT, type Lang } from '../lib/i18n'
+import { ErrorBanner, SokutoMark, TextInputField } from '../components'
 
 export default function Login({ setupRequired, onDone }: { setupRequired: boolean; onDone: () => void }) {
   const t = useT()
@@ -10,7 +12,7 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     if (setupRequired && password !== confirm) return setError(t('password_mismatch'))
@@ -26,32 +28,59 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
   }
 
   return (
-    <div className="center">
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <h1 style={{ fontSize: 20, margin: 0 }}>{setupRequired ? t('setup_title') : t('login_title')}</h1>
-          <select value={lang} onChange={(e) => setLang(e.target.value as 'ja' | 'en')} style={{ width: 'auto' }}>
-            <option value="ja">日本語</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        {setupRequired && <p className="muted small">{t('setup_lead')}</p>}
-        <form onSubmit={submit}>
-          <label>{t('password')}</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus minLength={8} required />
-          {setupRequired && (
-            <>
-              <label>{t('password_confirm')}</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={8} required />
-            </>
-          )}
-          {error && <div className="alert error">{error}</div>}
-          <div style={{ marginTop: 14 }}>
-            <button className="btn primary" disabled={busy} type="submit">
-              {setupRequired ? t('create') : t('login')}
-            </button>
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-card__top">
+          <div className="auth-card__brand">
+            <SokutoMark size={32} />
+            <Text typo="18" bold color="txt-black-darkest">
+              {t('appName')}
+            </Text>
           </div>
-        </form>
+          <SegmentedControl type="radiogroup" size="xs" width={160} value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
+            <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
+            <SegmentedControlItem value="en">English</SegmentedControlItem>
+          </SegmentedControl>
+        </div>
+
+        <VStack spacing={6}>
+          <Text as="h1" typo="22" bold color="txt-black-darkest">
+            {setupRequired ? t('setup_title') : t('login_title')}
+          </Text>
+          {setupRequired && (
+            <Text as="p" typo="14" color="txt-black-darker">
+              {t('setup_lead')}
+            </Text>
+          )}
+        </VStack>
+
+        <VStack as="form" spacing={16} onSubmit={submit}>
+          <TextInputField
+            label={t('password')}
+            type="password"
+            size="l"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+            autoComplete={setupRequired ? 'new-password' : 'current-password'}
+            minLength={8}
+            required
+          />
+          {setupRequired && (
+            <TextInputField
+              label={t('password_confirm')}
+              type="password"
+              size="l"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          )}
+          {error && <ErrorBanner error={error} />}
+          <Button type="submit" size="l" text={setupRequired ? t('create') : t('login')} loading={busy} className="auth-card__submit" />
+        </VStack>
       </div>
     </div>
   )

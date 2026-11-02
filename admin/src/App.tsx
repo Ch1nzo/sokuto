@@ -1,7 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
+import { Button, Icon, NavItem, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
+import {
+  ChannelsListIcon,
+  GraphIcon,
+  HomeIcon,
+  InboxIcon,
+  LightningIcon,
+  MegaphoneIcon,
+  MoonIcon,
+  OutIcon,
+  PeopleIcon,
+  SettingsIcon,
+  WeatherSunIcon,
+  DesktopIcon,
+  type BezierIcon,
+} from '@channel.io/bezier-icons'
 import { api } from './lib/api'
-import { LangContext, initialLang, useT, type Lang } from './lib/i18n'
+import { LangContext, initialLang, useLang, useT, type Key, type Lang } from './lib/i18n'
+import { useTheme, type ThemePref } from './lib/theme'
+import { LoadingState, SokutoMark } from './components'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Channels from './pages/Channels'
@@ -15,46 +33,160 @@ import Settings from './pages/Settings'
 
 type AuthState = { loading: boolean; setupRequired: boolean; authenticated: boolean }
 
+const NAV: { to: string; label: Key; icon: BezierIcon }[] = [
+  { to: '/', label: 'nav_dashboard', icon: HomeIcon },
+  { to: '/inbox', label: 'nav_inbox', icon: InboxIcon },
+  { to: '/flows', label: 'nav_flows', icon: LightningIcon },
+  { to: '/contacts', label: 'nav_contacts', icon: PeopleIcon },
+  { to: '/broadcasts', label: 'nav_broadcasts', icon: MegaphoneIcon },
+  { to: '/reports', label: 'nav_reports', icon: GraphIcon },
+  { to: '/channels', label: 'nav_channels', icon: ChannelsListIcon },
+  { to: '/settings', label: 'nav_settings', icon: SettingsIcon },
+]
+
+/** Plain left click → client-side navigation; modified clicks keep the native link behaviour. */
+function useLinkClick() {
+  const navigate = useNavigate()
+  return (to: string) => (e?: MouseEvent) => {
+    if (!e || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    navigate(to)
+  }
+}
+
+/** Toggles `data-fade-start/end` on a horizontal scroller so CSS can fade only the edges that overflow. */
+function useOverflowFade<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth
+      el.dataset.fadeStart = String(el.scrollLeft > 1)
+      el.dataset.fadeEnd = String(max - el.scrollLeft > 1)
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', update)
+      ro.disconnect()
+    }
+  }, [])
+  return ref
+}
+
+function Preferences() {
+  const t = useT()
+  const { lang, setLang } = useLang()
+  const { pref, setPref } = useTheme()
+  const themes: [ThemePref, BezierIcon, Key][] = [
+    ['light', WeatherSunIcon, 'theme_light'],
+    ['dark', MoonIcon, 'theme_dark'],
+    ['system', DesktopIcon, 'theme_system'],
+  ]
+  return (
+    <div className="sidebar__prefs">
+      <SegmentedControl type="radiogroup" size="xs" value={pref} onValueChange={setPref} aria-label={t('theme')}>
+        {themes.map(([value, icon, label]) => (
+          <SegmentedControlItem key={value} value={value} title={t(label)} leftContent={<Icon source={icon} size="xxs" />}>
+            {t(label)}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
+      <SegmentedControl type="radiogroup" size="xs" value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
+        <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
+        <SegmentedControlItem value="en">English</SegmentedControlItem>
+      </SegmentedControl>
+    </div>
+  )
+}
+
 function Shell({ onLogout }: { onLogout: () => void }) {
   const t = useT()
-  const nav = [
-    ['/', t('nav_dashboard')],
-    ['/inbox', t('nav_inbox')],
-    ['/flows', t('nav_flows')],
-    ['/contacts', t('nav_contacts')],
-    ['/broadcasts', t('nav_broadcasts')],
-    ['/reports', t('nav_reports')],
-    ['/channels', t('nav_channels')],
-    ['/settings', t('nav_settings')],
-  ] as const
+  const location = useLocation()
+  const linkClick = useLinkClick()
+  const scrollerRef = useOverflowFade<HTMLDivElement>()
+  const isActive = (to: string) => !!matchPath({ path: to, end: to === '/' }, location.pathname) || (to !== '/' && location.pathname.startsWith(`${to}/`))
+
+  // Mobile top bar: keep the active entry visible after navigation.
+  useEffect(() => {
+    scrollerRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [location.pathname, scrollerRef])
+
   return (
-    <div className="layout">
-      <nav className="sidebar">
-        <div className="brand">{t('appName')}</div>
-        {nav.map(([to, label]) => (
-          <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
-            {label}
-          </NavLink>
-        ))}
-        <div className="spacer" />
-        <a href="#" onClick={(e) => (e.preventDefault(), onLogout())}>
-          {t('logout')}
+    <div className="shell">
+      <aside className="sidebar">
+        <a className="sidebar__brand" href="/" onClick={linkClick('/')} aria-label={t('appName')}>
+          <SokutoMark size={28} />
+          <Text typo="17" bold color="txt-black-darkest" className="sidebar__brand-name">
+            {t('appName')}
+          </Text>
         </a>
-      </nav>
+        <div className="sidebar__scroller" ref={scrollerRef}>
+          <nav aria-label={t('nav_label')} className="sidebar__nav">
+            <ul role="menu">
+              {NAV.map(({ to, label, icon }) => {
+                const active = isActive(to)
+                return (
+                  <NavItem
+                    key={to}
+                    name={to}
+                    href={to}
+                    content={t(label)}
+                    leftContent={icon}
+                    active={active}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={linkClick(to)}
+                  />
+                )
+              })}
+            </ul>
+          </nav>
+          <Preferences />
+        </div>
+        <div className="sidebar__logout">
+          <ul role="menu" className="sidebar__logout-full">
+            <NavItem
+              name="logout"
+              href="#logout"
+              content={t('logout')}
+              leftContent={OutIcon}
+              onClick={(e) => {
+                e?.preventDefault()
+                onLogout()
+              }}
+            />
+          </ul>
+          <Button
+            className="sidebar__logout-icon"
+            styleVariant="tertiary"
+            colorVariant="monochrome-dark"
+            size="m"
+            leftContent={OutIcon}
+            aria-label={t('logout')}
+            title={t('logout')}
+            onClick={onLogout}
+          />
+        </div>
+      </aside>
       <main className="main">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/inbox/:id" element={<Inbox />} />
-          <Route path="/flows" element={<Flows />} />
-          <Route path="/flows/:id" element={<FlowEditor />} />
-          <Route path="/contacts" element={<Contacts />} />
-          <Route path="/broadcasts" element={<Broadcasts />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/channels" element={<Channels />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <div className="main__inner">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/inbox/:id" element={<Inbox />} />
+            <Route path="/flows" element={<Flows />} />
+            <Route path="/flows/:id" element={<FlowEditor />} />
+            <Route path="/contacts" element={<Contacts />} />
+            <Route path="/broadcasts" element={<Broadcasts />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/channels" element={<Channels />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </main>
     </div>
   )
@@ -92,47 +224,23 @@ function DevDataToggle({ onChange }: { onChange: () => void }) {
     })
   }
 
+  // Radix radio items cannot have an empty value, so "Demo" ('') is mapped to 'demo' for the control only.
   return (
-    <div
-      role="radiogroup"
-      aria-label="Dev data"
-      style={{
-        position: 'fixed',
-        bottom: 12,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 1000,
-        display: 'flex',
-        gap: 2,
-        padding: 3,
-        background: '#e5e7eb',
-        borderRadius: 999,
-        font: '12px/1 system-ui, sans-serif',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-        maxWidth: 'calc(100vw - 16px)',
-        overflowX: 'auto',
-      }}
-    >
-      {DEV_DATA_OPTIONS.map(([value, label]) => (
-        <button
-          key={value}
-          role="radio"
-          aria-checked={mode === value}
-          onClick={() => select(value)}
-          style={{
-            border: 0,
-            borderRadius: 999,
-            padding: '6px 10px',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            color: '#111827',
-            background: mode === value ? '#ffffff' : 'transparent',
-            boxShadow: mode === value ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
-          }}
-        >
-          {label}
-        </button>
-      ))}
+    <div className="dev-data-toggle">
+      <SegmentedControl
+        type="radiogroup"
+        size="xs"
+        aria-label="Dev data"
+        width={440}
+        value={mode || 'demo'}
+        onValueChange={(v: string) => select(v === 'demo' ? '' : v)}
+      >
+        {DEV_DATA_OPTIONS.map(([value, label]) => (
+          <SegmentedControlItem key={value || 'demo'} value={value || 'demo'}>
+            {label}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
     </div>
   )
 }
@@ -181,7 +289,7 @@ export default function App() {
   return (
     <LangContext.Provider value={{ lang, setLang }}>
       {auth.loading ? (
-        <div className="center muted">…</div>
+        <LoadingState />
       ) : !auth.authenticated ? (
         <Login setupRequired={auth.setupRequired} onDone={refresh} />
       ) : (
