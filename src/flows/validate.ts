@@ -124,5 +124,5 @@ Steps:
 - { "id", "type": "goto", "flowId": 12 }
 - { "id", "type": "comment_reply", "text": "DMを送りました ✓", "next": stepId }  public reply under the triggering comment (comment trigger only)
 
-Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}.
+Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}, {{bot.<key>}} for bot variables set in Settings (keys listed in get_overview → general.botFields).
 Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.`

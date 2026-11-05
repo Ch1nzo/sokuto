@@ -28,6 +28,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - 一斉配信: タグで絞り込み、日時を予約して配信 (1 分ごとに最大 30 通ずつ送信)
 - レポート: 自動化ごとの起動数・送信数・ボタンクリック・回答数・完了数・エラー、日別メッセージ数
 - テスト: 実際には何も送らずに、お客さんの立場で自動化を試せます
+- 設定: ボット変数 (営業時間などを一度登録し、どのメッセージでも `{{bot.hours}}` のように使えます)
 - MCP サーバー: 21 個のツールで自動化・連絡先・受信箱・配信・レポートを AI から操作 ([docs/mcp.md](docs/mcp.md))
 
 ## 5 分でインストール
@@ -134,6 +135,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 - 9 triggers (keyword, comment, first message, LINE follow, any message, ref link/QR, button payload, story mention, story reply)
 - 8 step types (message with image/buttons, question, condition, action, delay, random, goto, public comment reply)
 - 6 templates, a unified inbox with human hand-over, contacts with tags/fields/CSV export, scheduled broadcasts (30 messages per minute), per-flow reports, a dry-run tester and an MCP server with 21 tools.
+- Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
 
 ### Install in 5 minutes
 

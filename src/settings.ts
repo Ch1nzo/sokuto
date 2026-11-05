@@ -47,6 +47,8 @@ export type GeneralSettings = {
   /** Hand-over keywords that pause the bot for a contact. */
   handoffKeywords: string[]
   handoffReply: string
+  /** Bot variables rendered as {{bot.<key>}} in message text. */
+  botFields: Record<string, string>
 }
 
 export const DEFAULT_GENERAL: GeneralSettings = {
@@ -56,6 +58,7 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   paused: false,
   handoffKeywords: ['担当者', 'オペレーター', 'human', 'agent'],
   handoffReply: '担当者におつなぎします。少々お待ちください。',
+  botFields: {},
 }
 
 const SECRET_FIELDS = new Set(['channelSecret', 'channelAccessToken', 'appSecret', 'pageAccessToken'])

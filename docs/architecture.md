@@ -66,7 +66,7 @@ KV には次のキーが入ります。
 
 - トリガー 9 種類: `keyword`, `comment`, `first_message`, `follow`, `any_message`, `ref`, `postback`, `story_mention`, `story_reply`
 - ステップ 8 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`
-- 変数: `{{name}}`, `{{first_name}}`, `{{username}}`, `{{last_input}}`, `{{<フィールド名>}}` (例: `{{phone}}`)
+- 変数: `{{name}}`, `{{first_name}}`, `{{username}}`, `{{last_input}}`, `{{<フィールド名>}}` (例: `{{phone}}`), `{{bot.<キー>}}` (設定の「ボット変数」。例: `{{bot.hours}}`。未定義のものはそのまま残ります)
 
 `src/flows/validate.ts` が Zod で構造を検証し、存在しないステップへの参照や ID の重複をエラーにします。AI 向けの説明文 `FLOW_SCHEMA_DOC` も同じファイルにあり、MCP の `get_flow_schema` で返されます。
 

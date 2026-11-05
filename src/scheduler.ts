@@ -6,11 +6,13 @@ import { getAdapter } from './channels/registry'
 import type { Channel } from './channels/types'
 import { dueSessions } from './inbound'
 import { parseFlow, runFrom, logMessage, type RunContext } from './flows/engine'
+import { getGeneral } from './settings'
 
 const BROADCAST_PER_TICK = 30
 
 export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: number; broadcastSent: number }> {
   let resumed = 0
+  const { timezone, botFields } = await getGeneral(db)
   for (const s of await dueSessions(db)) {
     const contact = await db.select().from(schema.contacts).where(eq(schema.contacts.id, s.contactId)).get()
     const row = await db.select().from(schema.flows).where(eq(schema.flows.id, s.flowId)).get()
@@ -22,7 +24,7 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
     if (!adapter) continue
     const flow = parseFlow(row)
     const step = flow.definition.steps.find((x) => x.id === s.stepId)
-    const ctx: RunContext = { db, adapter, contact, flow }
+    const ctx: RunContext = { db, adapter, contact, flow, timezone, botFields }
     await runFrom(ctx, step && step.type === 'delay' ? step.next : null)
     resumed++
   }

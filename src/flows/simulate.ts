@@ -11,8 +11,10 @@ export type SimulationStep = { input: SimulatedInput; triggered: boolean; output
 
 export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; completed: boolean }
 
+export type SimulateOptions = { botFields?: Record<string, string>; timezone?: string; now?: () => Date }
+
 /** Plays a list of user inputs against a flow without touching channels, contacts or stats. */
-export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedInput[], channel: Channel = flow.channel === 'any' ? 'line' : flow.channel, isNewContact = true): Promise<SimulationResult> {
+export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedInput[], channel: Channel = flow.channel === 'any' ? 'line' : flow.channel, isNewContact = true, opts: SimulateOptions = {}): Promise<SimulationResult> {
   const adapter = new RecordingAdapter(channel)
   const contact: ContactRow = {
     id: -1,
@@ -31,7 +33,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     updatedAt: new Date().toISOString(),
   }
   const liveFlow: FlowRecord = { ...flow, status: 'live' }
-  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [] }
+  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now }
   const steps: SimulationStep[] = []
   let first = isNewContact
   for (const input of inputs) {

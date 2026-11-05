@@ -173,6 +173,14 @@ describe('simulateFlow', () => {
     expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['Size M noted'])
     expect(r.fields.size).toBe('M')
   })
+
+  it('renders bot variables from options', async () => {
+    const f = flow({ triggers: [{ type: 'keyword', keywords: ['hours'] }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'Open {{bot.hours}}' }] })
+    const withOpts = await simulateFlow(db, f, [{ type: 'message', text: 'hours' }], 'line', true, { botFields: { hours: '10:00〜19:00' } })
+    expect(withOpts.steps[0]!.outputs.map((o) => o.text)).toEqual(['Open 10:00〜19:00'])
+    const without = await simulateFlow(db, f, [{ type: 'message', text: 'hours' }])
+    expect(without.steps[0]!.outputs.map((o) => o.text)).toEqual(['Open {{bot.hours}}'])
+  })
 })
 
 describe('numeric conditions on unset fields', () => {

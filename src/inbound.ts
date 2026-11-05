@@ -37,6 +37,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
 
   const general = await getGeneral(db)
   if (general.paused) return
+  const base = { db, adapter, replyToken, timezone: general.timezone, botFields: general.botFields }
 
   // Hand-over keywords pause the bot for this contact and notify the team.
   if (event.type === 'message' && event.text && general.handoffKeywords.some((k) => k && event.text!.toLowerCase().includes(k.toLowerCase()))) {
@@ -59,7 +60,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   if (session && session.waiting !== 'delay') {
     const flow = flows.find((f) => f.id === session.flowId)
     if (flow) {
-      const ctx: RunContext = { db, adapter, contact, flow, replyToken, lastInput: event.text }
+      const ctx: RunContext = { ...base, contact, flow, lastInput: event.text }
       if (await resumeSession(ctx, session, event)) return
       contact = ctx.contact
     } else {
@@ -72,7 +73,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   if (button) {
     const flow = flows.find((f) => f.id === button.flowId)
     if (flow) {
-      const ctx: RunContext = { db, adapter, contact, flow, replyToken }
+      const ctx: RunContext = { ...base, contact, flow }
       if (await resumeFromButton(ctx, event.payload!)) return
     }
   }
@@ -90,7 +91,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
     if (!chosen || (chosen.trigger.type === 'any_message' && trigger.type === 'first_message')) chosen = { flow, trigger }
   }
   if (!chosen) return
-  const ctx: RunContext = { db, adapter, contact, flow: chosen.flow, replyToken, commentId: event.type === 'comment' ? event.commentId : undefined, lastInput: event.text }
+  const ctx: RunContext = { ...base, contact, flow: chosen.flow, commentId: event.type === 'comment' ? event.commentId : undefined, lastInput: event.text }
   await startFlow(ctx, chosen.trigger)
 }
 

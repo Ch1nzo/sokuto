@@ -4,6 +4,8 @@
 .st-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .st-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-wrap { overflow-wrap: anywhere; }
+.st-kv-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
+@media (max-width: 600px) { .st-kv-row { grid-template-columns: minmax(0, 1fr) auto; } .st-kv-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; } }
 
 .st-switch {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;

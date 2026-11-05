@@ -168,6 +168,12 @@ describe('renderText', () => {
   it('tolerates invalid fields JSON', () => {
     expect(renderText('{{phone}} {{name}}', contact({ fields: 'not json' }))).toBe('{{phone}} Taro Yamada')
   })
+
+  it('renders bot variables', () => {
+    const p = contact({ fields: JSON.stringify({ phone: '090' }) })
+    expect(renderText('{{bot.hours}} / {bot.hours} / {{bot.none}} / {{phone}}', p, undefined, { hours: '10-19' })).toBe('10-19 / 10-19 / {{bot.none}} / 090')
+    expect(renderText('{{bot.open-days}}', p, undefined, { 'open-days': 'Mon-Fri' })).toBe('Mon-Fri')
+  })
 })
 
 describe('buttonPayload / parseButtonPayload', () => {

@@ -225,7 +225,8 @@ apiRoutes.post('/flows/:id/test', async (c) => {
     if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
     target = { ...flow, definition: v.definition }
   }
-  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true)
+  const { botFields, timezone } = await getGeneral(d)
+  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true, { botFields, timezone })
   return c.json(result)
 })
 
@@ -467,6 +468,10 @@ apiRoutes.put('/settings', async (c) => {
   const d = db(c.env)
   const body = await c.req.json<Partial<GeneralSettings>>()
   const current = await getGeneral(d)
+  const bf = body.botFields
+  if (bf !== undefined && !(bf && typeof bf === 'object' && !Array.isArray(bf) && Object.keys(bf).length <= 50 && Object.entries(bf).every(([k, v]) => /^[\w-]{1,40}$/.test(k) && typeof v === 'string' && v.length <= 2000))) {
+    return c.json({ error: 'invalid_bot_fields' }, 400)
+  }
   const next: GeneralSettings = {
     botName: typeof body.botName === 'string' && body.botName.trim() ? body.botName.trim() : current.botName,
     language: body.language === 'en' || body.language === 'ja' ? body.language : current.language,
@@ -474,6 +479,7 @@ apiRoutes.put('/settings', async (c) => {
     paused: typeof body.paused === 'boolean' ? body.paused : current.paused,
     handoffKeywords: Array.isArray(body.handoffKeywords) ? body.handoffKeywords.map(String).filter(Boolean) : current.handoffKeywords,
     handoffReply: typeof body.handoffReply === 'string' ? body.handoffReply : current.handoffReply,
+    botFields: bf ?? current.botFields,
   }
   await putSetting(d, 'general', next)
   return c.json({ general: next })

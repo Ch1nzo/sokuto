@@ -127,7 +127,8 @@ export function buildMcpServer(env: Env): McpServer {
     async ({ id, inputs, channel, newContact }) => {
       const flow = await flowById(d, id)
       if (!flow) return fail('not_found')
-      return json(await simulateFlow(d, flow, inputs, channel, newContact))
+      const { botFields, timezone } = await getGeneral(d)
+      return json(await simulateFlow(d, flow, inputs, channel, newContact, { botFields, timezone }))
     },
   )
 

@@ -7,6 +7,7 @@ import {
   SegmentedControlItem,
   Switch,
   Text,
+  TextField,
   VStack,
   useToast,
 } from '@channel.io/bezier-react'
@@ -16,6 +17,7 @@ import { useLang, useT, type Lang } from '../lib/i18n'
 import { useTheme, type ThemePref } from '../lib/theme'
 import { Card, CopyBox, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
+import { AddButton, IconBtn } from './flow-editor/fields'
 import './settings.css'
 
 type General = {
@@ -25,11 +27,15 @@ type General = {
   paused: boolean
   handoffKeywords: string[]
   handoffReply: string
+  botFields: Record<string, string>
 }
 
 type SettingsResponse = { general: General; mcp: { configured: boolean; url: string } }
 
 type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
+
+const MAX_BOT_FIELDS = 50
+const BOT_FIELD_KEY = /^[\w-]{1,40}$/
 
 const FALLBACK_TIMEZONES = ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
 
@@ -103,6 +109,9 @@ export default function Settings() {
   const [form, setForm] = useState<Form | null>(null)
   const [savingGeneral, setSavingGeneral] = useState(false)
   const [generalError, setGeneralError] = useState<unknown>(null)
+  const [botRows, setBotRows] = useState<Array<[string, string]>>([])
+  const [savingBot, setSavingBot] = useState(false)
+  const [botError, setBotError] = useState<unknown>(null)
   const [token, setToken] = useState<{ token: string; url: string } | null>(null)
   const [mcpBusy, setMcpBusy] = useState<'rotate' | 'revoke' | null>(null)
   const [mcpError, setMcpError] = useState<unknown>(null)
@@ -117,6 +126,7 @@ export default function Settings() {
       const r = await api.get<SettingsResponse>('/api/settings')
       setData(r)
       setForm(toForm(r.general))
+      setBotRows(Object.entries(r.general.botFields ?? {}))
       setLoadError(null)
     } catch (err) {
       setLoadError(err)
@@ -166,6 +176,25 @@ export default function Settings() {
       setSavingGeneral(false)
     }
   }
+
+  const saveBotFields = async (e: FormEvent) => {
+    e.preventDefault()
+    setSavingBot(true)
+    setBotError(null)
+    try {
+      const botFields = Object.fromEntries(botRows.map(([k, v]) => [k.trim(), v] as const).filter(([k]) => k))
+      const r = await api.put<{ general: General }>('/api/settings', { botFields })
+      setData({ ...data, general: r.general })
+      setBotRows(Object.entries(r.general.botFields))
+      toast.addToast(t('saved'), { preset: 'success' })
+    } catch (err) {
+      setBotError(err)
+    } finally {
+      setSavingBot(false)
+    }
+  }
+
+  const setBotRow = (i: number, row: [string, string]) => setBotRows(botRows.map((r, j) => (j === i ? row : r)))
 
   const rotate = async () => {
     setMcpBusy('rotate')
@@ -267,6 +296,43 @@ export default function Settings() {
           {generalError !== null && <ErrorBanner error={generalError} />}
           <div className="st-actions">
             <Button type="submit" text={t('save')} loading={savingGeneral} />
+          </div>
+        </VStack>
+      </Card>
+
+      <Card title={t('settings_bot_fields')}>
+        <VStack as="form" spacing={16} onSubmit={saveBotFields}>
+          <Text as="p" typo="13" color="txt-black-dark">
+            {t('settings_bot_fields_help')}
+          </Text>
+          {botRows.map(([k, v], i) => (
+            <div key={i} className="st-kv-row">
+              <TextField
+                size="m"
+                value={k}
+                maxLength={40}
+                hasError={k.trim() !== '' && !BOT_FIELD_KEY.test(k.trim())}
+                placeholder={t('settings_bot_field_key')}
+                aria-label={t('settings_bot_field_key')}
+                onChange={(e) => setBotRow(i, [e.target.value, v])}
+              />
+              <TextField
+                size="m"
+                value={v}
+                maxLength={2000}
+                placeholder={t('settings_bot_field_value')}
+                aria-label={t('settings_bot_field_value')}
+                onChange={(e) => setBotRow(i, [k, e.target.value])}
+              />
+              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${k || t('settings_bot_field_key')}`} onClick={() => setBotRows(botRows.filter((_, j) => j !== i))} />
+            </div>
+          ))}
+          <div>
+            <AddButton text={t('settings_add_bot_field')} disabled={botRows.length >= MAX_BOT_FIELDS} onClick={() => setBotRows([...botRows, ['', '']])} />
+          </div>
+          {botError !== null && <ErrorBanner error={botError} />}
+          <div className="st-actions">
+            <Button type="submit" text={t('save')} loading={savingBot} />
           </div>
         </VStack>
       </Card>

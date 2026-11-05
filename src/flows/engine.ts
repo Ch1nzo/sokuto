@@ -23,6 +23,12 @@ export type RunContext = {
   dryRunSession?: SessionRow | null
   dryRunTags?: Set<string>
   dryRunNotifications?: string[]
+  /** Bot variables from Settings, rendered as {{bot.<key>}}. */
+  botFields?: Record<string, string>
+  /** IANA time zone of the bot (Settings), used by time-based conditions. */
+  timezone?: string
+  /** Clock override for tests. */
+  now?: () => Date
 }
 
 const MAX_STEPS_PER_RUN = 50
@@ -107,8 +113,8 @@ export function matchTrigger(flow: FlowRecord, event: InboundEvent, isFirstMessa
   return fallback
 }
 
-/** Replaces {{name}}, {{first_name}}, {{field}} and {field} placeholders. */
-export function renderText(text: string, contact: ContactRow, lastInput?: string): string {
+/** Replaces {{name}}, {{first_name}}, {{field}}, {{bot.key}} and {field} placeholders; `encode` escapes the substituted values. */
+export function renderText(text: string, contact: ContactRow, lastInput?: string, botFields?: Record<string, string>, encode?: (v: string) => string): string {
   const fields = parseFields(contact)
   const vars: Record<string, string> = {
     ...fields,
@@ -117,10 +123,15 @@ export function renderText(text: string, contact: ContactRow, lastInput?: string
     username: contact.username ?? '',
     last_input: lastInput ?? '',
   }
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}|\{([\w.]+)\}/g, (m, a: string | undefined, b: string | undefined) => {
+  for (const [k, v] of Object.entries(botFields ?? {})) vars[`bot.${k}`] = v
+  return text.replace(/\{\{\s*([\w.-]+)\s*\}\}|\{([\w.-]+)\}/g, (m, a: string | undefined, b: string | undefined) => {
     const key = (a ?? b ?? '').replace(/^field\./, '')
-    return key in vars ? vars[key]! : m
+    return key in vars ? (encode ? encode(vars[key]!) : vars[key]!) : m
   })
+}
+
+function render(ctx: RunContext, text: string, encode?: (v: string) => string): string {
+  return renderText(text, ctx.contact, ctx.lastInput, ctx.botFields, encode)
 }
 
 async function contactTags(ctx: RunContext): Promise<string[]> {
@@ -223,7 +234,7 @@ async function endSession(ctx: RunContext) {
 }
 
 function renderButtons(ctx: RunContext, step: Step & { type: 'message' }, buttons: ButtonDef[]) {
-  return buttons.map((b, i) => ({ label: renderText(b.label, ctx.contact, ctx.lastInput), url: b.url, payload: b.url ? undefined : buttonPayload(ctx.flow.id, step.id, i) }))
+  return buttons.map((b, i) => ({ label: render(ctx, b.label), url: b.url, payload: b.url ? undefined : buttonPayload(ctx.flow.id, step.id, i) }))
 }
 
 export async function performActions(ctx: RunContext, actions: Array<{ type: string } & Record<string, unknown>>) {
@@ -232,10 +243,10 @@ export async function performActions(ctx: RunContext, actions: Array<{ type: str
       ctx.dryRunTags ??= new Set()
       if (a.type === 'add_tag') ctx.dryRunTags.add(String(a.tag ?? ''))
       else if (a.type === 'remove_tag') ctx.dryRunTags.delete(String(a.tag ?? ''))
-      else if (a.type === 'notify') (ctx.dryRunNotifications ??= []).push(renderText(String(a.text ?? `{{name}} → ${ctx.flow.name}`), ctx.contact, ctx.lastInput))
+      else if (a.type === 'notify') (ctx.dryRunNotifications ??= []).push(render(ctx, String(a.text ?? `{{name}} → ${ctx.flow.name}`)))
       else if (a.type === 'set_field') {
         const f = parseFields(ctx.contact)
-        f[String(a.field)] = renderText(String(a.value ?? ''), ctx.contact, ctx.lastInput)
+        f[String(a.field)] = render(ctx, String(a.value ?? ''))
         ctx.contact = { ...ctx.contact, fields: JSON.stringify(f) }
       } else if (a.type === 'pause_bot') ctx.contact = { ...ctx.contact, botPaused: 1 }
       continue
@@ -248,10 +259,10 @@ export async function performActions(ctx: RunContext, actions: Array<{ type: str
         await removeTag(ctx.db, ctx.contact.id, String(a.tag ?? ''))
         break
       case 'set_field':
-        ctx.contact = await setField(ctx.db, ctx.contact, String(a.field), renderText(String(a.value ?? ''), ctx.contact, ctx.lastInput))
+        ctx.contact = await setField(ctx.db, ctx.contact, String(a.field), render(ctx, String(a.value ?? '')))
         break
       case 'notify':
-        await ctx.db.insert(schema.notifications).values({ contactId: ctx.contact.id, text: renderText(String(a.text ?? `{{name}} が自動化「${ctx.flow.name}」に反応しました`), ctx.contact, ctx.lastInput) })
+        await ctx.db.insert(schema.notifications).values({ contactId: ctx.contact.id, text: render(ctx, String(a.text ?? `{{name}} が自動化「${ctx.flow.name}」に反応しました`)) })
         break
       case 'pause_bot':
         await setBotPaused(ctx.db, ctx.contact.id, true, typeof a.minutes === 'number' ? a.minutes : undefined)
@@ -281,7 +292,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
     switch (step.type) {
       case 'message': {
         const buttons = step.buttons?.filter((b) => b.label) ?? []
-        const msg: OutboundMessage = { text: step.text ? renderText(step.text, ctx.contact, ctx.lastInput) : undefined, imageUrl: step.imageUrl || undefined }
+        const msg: OutboundMessage = { text: step.text ? render(ctx, step.text) : undefined, imageUrl: step.imageUrl || undefined }
         if (buttons.length > 0) {
           const rendered = renderButtons(ctx, step, buttons)
           if (buttons.length <= 3 && buttons.some((b) => b.url)) msg.buttons = rendered
@@ -298,7 +309,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         break
       }
       case 'question': {
-        const msg: OutboundMessage = { text: renderText(step.text, ctx.contact, ctx.lastInput) }
+        const msg: OutboundMessage = { text: render(ctx, step.text) }
         if (step.choices && step.choices.length > 0) msg.quickReplies = step.choices.map((c) => ({ label: c, payload: `sk-choice:${c}` }))
         const result = await deliver(ctx, step, msg)
         if (!result.ok) return endSession(ctx)
@@ -348,7 +359,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
       }
       case 'comment_reply': {
         if (ctx.commentId && ctx.adapter.replyToComment) {
-          const res = await ctx.adapter.replyToComment(ctx.commentId, renderText(step.text, ctx.contact, ctx.lastInput))
+          const res = await ctx.adapter.replyToComment(ctx.commentId, render(ctx, step.text))
           if (!ctx.dryRun) await logEvent(ctx.db, { type: res.ok ? 'comment_replied' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: res.ok ? undefined : { error: res.error } })
         }
         current = step.next ?? null
