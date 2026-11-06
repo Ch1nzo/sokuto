@@ -335,6 +335,25 @@ function worstMessages(contactId: number): MessageRow[] {
     { direction: 'in', source: 'user', kind: 'text', text: 'Đặng Thị Ngọc Hân — Cho mình đặt bàn 4 người tối thứ Bảy ạ. ปิ่นมณี ก็ไปด้วยนะคะ', payload: { type: 'message' }, error: null, createdAt: ago(DAY) },
     { direction: 'out', source: 'human', kind: 'text', text: 'Thank you! We have reserved a table for 4 at 19:00 on Saturday.', payload: null, error: META_ERROR, createdAt: ago(DAY - MIN) },
     { direction: 'in', source: 'user', kind: 'text', text: '<script>alert(1)</script> &amp; **bold**', payload: { type: 'message' }, error: null, createdAt: ago(3 * HOUR) },
+    {
+      direction: 'out',
+      source: 'bot',
+      kind: 'cards',
+      text: 'ハロウィン限定のギフトはこちらです。表参道店限定の詰め合わせもございます。',
+      payload: {
+        bot: BOT_NAME_30,
+        faqIds: [1],
+        productIds: [1, 3, 5],
+        // OutboundCard limits: title ≤ 40, subtitle ≤ 60 (src/bot.ts productCards)
+        cards: [
+          { title: fill('Reservierungsänderung Geschenkbox — 季節のフルーツタルト', 40), subtitle: fill('¥0 ギフトに人気の詰め合わせ。季節のフルーツタルトと焼き菓子。', 60), imageUrl: BROKEN_IMAGE, buttons: [{ label: '詳しく見る', url: 'https://example.com/shop/gift' }] },
+          { title: '🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣', subtitle: '₩99,999,999', imageUrl: LOCAL_IMAGE, buttons: [{ label: '詳しく見る', url: 'https://example.com/shop/sushi' }] },
+          { title: 'Jo', buttons: [{ label: '詳しく見る', url: 'https://example.com/shop/jo' }] },
+        ],
+      },
+      error: null,
+      createdAt: ago(2 * HOUR),
+    },
     { direction: 'in', source: 'user', kind: 'text', text: '👍', payload: { type: 'message' }, error: null, createdAt: ago(20 * 1000) },
   ]
   return rows.map((r, i) => ({ id: c * 1000 + i + 1, contactId: c, flowId: null, stepId: null, ...r }))
@@ -740,6 +759,281 @@ function hugeDashboard(days: number) {
   })
 }
 
+/* ---------- Soku (GET /api/bot, /overview, /faqs, /documents, /products) ---------- */
+
+/** `para` repeated and cut to exactly `n` characters. */
+const fill = (para: string, n: number) => para.repeat(Math.ceil(n / para.length)).slice(0, n)
+
+// Loads in dev (served by Vite), so the image path is exercised next to the 404 one.
+const LOCAL_IMAGE = `${window.location.origin}/favicon.svg`
+const BROKEN_IMAGE = 'https://example.com/images/products/missing-404.jpg'
+const BOT_NAME_30 = 'Café Lumière 表参道店 予約とメニューの案内係 Soku'.slice(0, 30)
+
+const BOT_DEFAULTS = {
+  enabled: false,
+  name: 'Soku',
+  channels: ['line', 'messenger', 'instagram'],
+  persona: '',
+  guidelines: [] as string[],
+  guardrails: [] as string[],
+  handoffMessage: '担当者におつなぎします。少々お待ちください。',
+  unknownAction: 'handoff',
+  fallbackMessage: '申し訳ありません、その内容にはお答えできません。担当者が必要な場合は「担当者」と送ってください。',
+  autoClose: true,
+  resolveMessage: '',
+  maxTurns: 10,
+  recommendProducts: true,
+  segmentId: null as number | null,
+  suggestFaqs: false,
+  language: 'auto',
+}
+
+type BotFaq = { id: number; question: string; answer: string; status: 'approved' | 'suggested'; source: 'manual' | 'conversation' | 'document'; documentId: number | null; contactId: number | null; uses: number; createdAt: string; updatedAt: string }
+type BotDoc = { id: number; name: string; url: string | null; status: 'ready' | 'failed'; error: string | null; chars: number; fetchedAt: string | null; createdAt: string }
+type BotProduct = { id: number; name: string; description: string; price: number | null; currency: string; url: string | null; imageUrl: string | null; tags: string[]; sku: string | null; inStock: boolean; createdAt: string; updatedAt: string }
+
+const faq = (id: number, p: Partial<BotFaq>): BotFaq => ({
+  id,
+  question: '営業時間を教えてください',
+  answer: '11:00〜22:00 (L.O. 21:30) です。火曜日は定休日です。',
+  status: 'approved',
+  source: 'manual',
+  documentId: null,
+  contactId: null,
+  uses: 0,
+  createdAt: ago(30 * DAY),
+  updatedAt: ago(id * 3 * HOUR),
+  ...p,
+})
+
+const doc = (id: number, p: Partial<BotDoc>): BotDoc => ({ id, name: 'アクセス', url: 'https://example.com/access', status: 'ready', error: null, chars: 1840, fetchedAt: ago(id * DAY), createdAt: ago(40 * DAY), ...p })
+
+const product = (id: number, p: Partial<BotProduct>): BotProduct => ({
+  id,
+  name: 'ハウスブレンド 200g',
+  description: '深煎りのハウスブレンド。チョコレートのような甘さとナッツの香り。',
+  price: 1280,
+  currency: 'JPY',
+  url: 'https://example.com/shop/house-blend',
+  imageUrl: LOCAL_IMAGE,
+  tags: ['coffee', 'beans'],
+  sku: `CL-${String(id).padStart(4, '0')}`,
+  inStock: true,
+  createdAt: ago(60 * DAY),
+  updatedAt: ago(id * 5 * HOUR),
+  ...p,
+})
+
+const QUESTION_500 = fill('ハロウィン期間中 (10/24〜10/31) の予約で、4 名以上・アレルギー対応 (えび・かに・ナッツ) ・個室希望・キャンセル料の扱い・駐車場の有無について、Reservierungsänderung und Stornierungen も含めて教えてください。🎃 ', 500)
+const ANSWER_4000 = fill('ご予約ありがとうございます。4 名以上のご予約は https://example.com/reserve?store=omotesando&party=4 から承ります。アレルギー対応はスタッフにお申し付けください。個室は 6 名まで、キャンセル料は前日 50%・当日 100% です。駐車場はございませんので近隣のコインパーキングをご利用ください。\n\n', 4000)
+
+function worstFaqs(): BotFaq[] {
+  const crafted = [
+    faq(1, { question: QUESTION_500, answer: ANSWER_4000, uses: 48_213, updatedAt: ago(20 * 1000) }),
+    faq(2, { question: '🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰？', answer: '🎂', source: 'conversation', contactId: 1, uses: 1 }),
+    faq(3, { question: 'Link?', answer: LONG_URL.slice(0, 2000), source: 'document', documentId: 1, uses: 999 }),
+    faq(4, { question: '?', answer: '—', uses: 0 }),
+    faq(5, { question: 'Đặng Thị Ngọc Hân hỏi: cửa hàng có chỗ đậu xe không ạ? ปิ่นมณี ก็อยากรู้เหมือนกัน', answer: 'Không có chỗ đậu xe. ไม่มีที่จอดรถค่ะ', source: 'conversation', uses: 12 }),
+  ]
+  const approved = Array.from({ length: 30 - crafted.length }, (_, i) =>
+    faq(crafted.length + 1 + i, { question: `${POOL_NAMES[i % POOL_NAMES.length]} さんからのよくある質問 #${i + 1}: テイクアウトはできますか？`, answer: 'はい、全メニューでテイクアウトできます。', uses: (i * 37) % 200, source: (['manual', 'conversation', 'document'] as const)[i % 3] }),
+  )
+  const suggested = [
+    faq(101, { status: 'suggested', source: 'conversation', contactId: 2, question: QUESTION_500, answer: ANSWER_4000.slice(0, 1200), updatedAt: ago(5 * MIN) }),
+    faq(102, { status: 'suggested', source: 'document', documentId: 1, question: 'Wi-Fi はありますか？', answer: 'はい、無料 Wi-Fi をご利用いただけます。パスワードは店内に掲示しています。', updatedAt: ago(HOUR) }),
+    faq(103, { status: 'suggested', source: 'document', documentId: 1, question: 'ペット同伴は可能ですか？', answer: 'テラス席のみ小型犬の同伴が可能です。', updatedAt: ago(HOUR) }),
+    faq(104, { status: 'suggested', source: 'conversation', contactId: 3, question: 'Jo', answer: LONG_URL.slice(0, 600), updatedAt: ago(DAY) }),
+    faq(105, { status: 'suggested', source: 'conversation', contactId: 6, question: 'Cho mình hỏi cửa hàng mở cửa lúc mấy giờ ạ?', answer: '11:00〜22:00 です。', updatedAt: ago(2 * DAY) }),
+  ]
+  return [...suggested, ...crafted, ...approved]
+}
+
+function hugeFaqs(): BotFaq[] {
+  return Array.from({ length: 1000 }, (_, i) =>
+    faq(i + 1, { question: `よくある質問 ${i + 1}: ${['営業時間', '予約', '駐車場', 'アレルギー', '支払い方法'][i % 5]}について`, answer: `回答 ${i + 1}: 詳しくは店舗までお問い合わせください。`, status: i % 20 === 0 ? 'suggested' : 'approved', uses: (i * 7919) % 5000 }),
+  )
+}
+
+const DOC_ERROR = `fetch_failed: ${META_ERROR}`.slice(0, 300)
+
+function worstDocs(): BotDoc[] {
+  return [
+    doc(1, { name: 'Reservierungsänderung und Stornierungen — Herbstkampagne 2026 (表参道店・渋谷店 共通、LINE と Instagram の両方で受付) 予約ポリシー全文'.slice(0, 120), url: LONG_URL.slice(0, 200), chars: 200_000, fetchedAt: ago(20 * 1000) }),
+    doc(2, { name: 'Menu PDF', url: 'https://example.com/files/menu-autumn-2026.pdf', status: 'failed', error: 'unsupported_content_type: application/pdf', chars: 0, fetchedAt: ago(HOUR) }),
+    doc(3, { name: 'Old site', url: 'https://old.example.com/access', status: 'failed', error: DOC_ERROR, chars: 0, fetchedAt: ago(3 * DAY) }),
+    doc(4, { name: 'FAQ', url: null, chars: 1, fetchedAt: null, createdAt: ago(10 * DAY) }),
+    doc(5, { name: '🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣', url: 'https://example.com/sushi', chars: 48_213 }),
+    doc(6, { name: 'ปิ่นมณี สาขาสยาม — ข้อมูลร้าน', url: 'https://example.com/th/siam', chars: 999 }),
+  ]
+}
+
+const TAGS_20 = Array.from({ length: 20 }, (_, i) => fill(`tag${i + 1}-autumn-campaign-omotesando`, 30))
+
+function worstProducts(): BotProduct[] {
+  return [
+    product(1, { name: fill('Reservierungsänderung Geschenkbox — 季節のフルーツタルトと焼き菓子の詰め合わせ (12 個入り、表参道店限定) ', 100), description: fill('ギフトに人気の詰め合わせ。', 1000), price: 0, tags: TAGS_20, sku: fill('CL-GIFT-AUTUMN-2026-OMOTESANDO-LIMITED-EDITION-', 64), imageUrl: BROKEN_IMAGE }),
+    product(2, { name: 'Jo', price: null, currency: 'JPY', tags: [], sku: null, url: null, imageUrl: null, description: '' }),
+    product(3, { name: '🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣', price: 99_999_999, currency: 'KRW', inStock: false, tags: ['寿司', 'limited'] }),
+    product(4, { name: 'Single origin — Ethiopia Yirgacheffe', price: 18, currency: 'USD', tags: ['coffee', 'beans', 'single-origin', 'light-roast'] }),
+    product(5, { name: 'Đặng Thị Ngọc Hân Spa voucher', price: 45, currency: 'EUR', url: LONG_URL.slice(0, 300), imageUrl: BROKEN_IMAGE }),
+    product(6, { name: 'ปิ่นมณี ชุดของขวัญ', price: 3200, inStock: false, imageUrl: null }),
+    product(7, { name: 'ハウスブレンド 200g' }),
+    product(8, { name: 'ドリップバッグ 10 個入り', price: 1500, tags: ['coffee'] }),
+  ]
+}
+
+function hugeProducts(): BotProduct[] {
+  return Array.from({ length: 1000 }, (_, i) =>
+    product(i + 1, { name: `商品 ${String(i + 1).padStart(4, '0')}`, price: 300 + ((i * 137) % 9000), imageUrl: i % 3 === 0 ? LOCAL_IMAGE : null, tags: [['coffee', 'tea', 'sweets', 'gift'][i % 4]!], inStock: i % 9 !== 0 }),
+  )
+}
+
+const WORST_KNOWLEDGE = { faqs: 30, suggested: 5, documents: 6, products: 8 }
+const HUGE_KNOWLEDGE = { faqs: 950, suggested: 50, documents: 300, products: 1000 }
+
+function botFixture(mode: DataMode) {
+  switch (mode) {
+    case 'worst':
+      return {
+        aiConfigured: true,
+        counts: WORST_KNOWLEDGE,
+        config: {
+          ...BOT_DEFAULTS,
+          enabled: true,
+          name: BOT_NAME_30,
+          channels: ['line', 'instagram'],
+          persona: fill('あなたは表参道のカフェ「Café Lumière」の案内係です。営業時間・予約・メニュー・アレルギーについて、丁寧かつ簡潔に答えます。 ', 2000),
+          guidelines: Array.from({ length: 20 }, (_, i) => fill(`${i + 1}. 3 文以内で答え、予約やメニューの URL は https://example.com/reserve?store=omotesando&campaign=autumn-2026 のように省略せずに案内する。`, 200)),
+          guardrails: Array.from({ length: 20 }, (_, i) => fill(`${i + 1}. 返金・値引き・在庫の確約をしない。Never promise refunds, discounts or stock. `, 200)),
+          handoffMessage: fill('担当者におつなぎします。少々お待ちください。 ', 500),
+          unknownAction: 'fallback',
+          fallbackMessage: fill('申し訳ありません、その内容にはお答えできません。 ', 500),
+          resolveMessage: fill('ご利用ありがとうございました。 ', 500),
+          maxTurns: 50,
+          segmentId: 1,
+          suggestFaqs: true,
+        },
+      }
+    case 'empty':
+      return { aiConfigured: false, counts: { faqs: 0, suggested: 0, documents: 0, products: 0 }, config: BOT_DEFAULTS }
+    case 'one':
+      return {
+        aiConfigured: true,
+        counts: { faqs: 1, suggested: 0, documents: 1, products: 1 },
+        config: { ...BOT_DEFAULTS, persona: '表参道のカフェの案内係です。', guidelines: ['短く答える'], guardrails: ['返金を約束しない'] },
+      }
+    case 'huge':
+      return { aiConfigured: true, counts: HUGE_KNOWLEDGE, config: { ...BOT_DEFAULTS, enabled: true } }
+  }
+}
+
+function botOverview(mode: DataMode, days: number) {
+  const bot = botFixture(mode)
+  const now = new Date()
+  const series = (point: (i: number) => { replies: number; handoffs: number; resolved: number }) =>
+    Array.from({ length: days }, (_, i) => ({ day: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1 - i))).toISOString().slice(0, 10), ...point(i) }))
+  const totals = (s: { replies: number; handoffs: number; resolved: number }[]) => ({
+    replies: s.reduce((n, p) => n + p.replies, 0),
+    handoffs: s.reduce((n, p) => n + p.handoffs, 0),
+    resolved: s.reduce((n, p) => n + p.resolved, 0),
+  })
+  const base = { days, enabled: bot.config.enabled, name: bot.config.name, aiConfigured: bot.aiConfigured, knowledge: bot.counts }
+  if (mode === 'empty') {
+    const s = series(() => ({ replies: 0, handoffs: 0, resolved: 0 }))
+    return { ...base, handled: 0, replies: 0, handoffs: 0, resolved: 0, resolutionRate: 0, handoffRate: 0, avgTurns: 0, series: s, handoffReasons: [], topFaqs: [], topProducts: [] }
+  }
+  if (mode === 'one') {
+    const s = series((i) => (i === days - 1 ? { replies: 1, handoffs: 0, resolved: 1 } : { replies: 0, handoffs: 0, resolved: 0 }))
+    return { ...base, handled: 1, replies: 1, handoffs: 0, resolved: 1, resolutionRate: 100, handoffRate: 0, avgTurns: 1, series: s, handoffReasons: [], topFaqs: [{ id: 1, question: '営業時間を教えてください', uses: 1 }], topProducts: [{ id: 1, name: 'ハウスブレンド 200g', count: 1 }] }
+  }
+  if (mode === 'worst') {
+    // One 48,213-reply spike two days ago, quiet zero days, almost nothing resolved.
+    const s = series((i) => (i === days - 3 ? { replies: 48_213, handoffs: 1_200, resolved: 0 } : i % 4 === 1 ? { replies: 0, handoffs: 0, resolved: 0 } : { replies: (i * 7) % 40, handoffs: i % 3, resolved: i === days - 1 ? 3 : 0 }))
+    const sum = totals(s)
+    return {
+      ...base,
+      handled: 1284,
+      ...sum,
+      resolutionRate: 0,
+      handoffRate: 100,
+      avgTurns: Math.round((sum.replies / 1284) * 10) / 10,
+      series: s,
+      handoffReasons: [
+        { reason: 'missing_knowledge', count: Math.max(0, sum.handoffs - 290) },
+        { reason: 'customer_request', count: 200 },
+        { reason: 'max_turns', count: 50 },
+        { reason: 'policy', count: 20 },
+        { reason: 'ai_error', count: 19 },
+        { reason: 'other', count: 1 },
+      ],
+      topFaqs: [
+        { id: 1, question: QUESTION_500, uses: 48_213 },
+        { id: 3, question: 'Link?', uses: 999 },
+        { id: 2, question: '🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰？', uses: 1 },
+        { id: 5, question: 'Đặng Thị Ngọc Hân hỏi: cửa hàng có chỗ đậu xe không ạ?', uses: 1 },
+        { id: 4, question: '?', uses: 0 },
+      ],
+      topProducts: worstProducts()
+        .slice(0, 5)
+        .map((p, i) => ({ id: p.id, name: p.name, count: [12_840, 999, 12, 1, 1][i]! })),
+    }
+  }
+  const s = series((i) => {
+    const r = Math.round(1800 * (1 + 0.3 * Math.sin(i / 5)))
+    return { replies: r, handoffs: Math.round(r * 0.06), resolved: Math.round(r * 0.18) }
+  })
+  const sum = totals(s)
+  const handled = Math.round(sum.replies / 3.2)
+  return {
+    ...base,
+    handled,
+    ...sum,
+    resolutionRate: Math.round((sum.resolved / handled) * 100),
+    handoffRate: Math.round((sum.handoffs / handled) * 100),
+    avgTurns: 3.2,
+    series: s,
+    handoffReasons: [
+      { reason: 'customer_request', count: Math.round(sum.handoffs * 0.5) },
+      { reason: 'missing_knowledge', count: Math.round(sum.handoffs * 0.3) },
+      { reason: 'max_turns', count: sum.handoffs - Math.round(sum.handoffs * 0.5) - Math.round(sum.handoffs * 0.3) },
+    ],
+    topFaqs: hugeFaqs()
+      .slice(0, 5)
+      .map((f, i) => ({ id: f.id, question: f.question, uses: 25_000 - i * 3_000 })),
+    topProducts: hugeProducts()
+      .slice(0, 5)
+      .map((p, i) => ({ id: p.id, name: p.name, count: 4_000 - i * 500 })),
+  }
+}
+
+const BOT_LISTS: Record<DataMode, { faqs: () => BotFaq[]; docs: () => BotDoc[]; products: () => BotProduct[] }> = {
+  worst: { faqs: worstFaqs, docs: worstDocs, products: worstProducts },
+  empty: { faqs: () => [], docs: () => [], products: () => [] },
+  one: { faqs: () => [faq(1, { uses: 1 })], docs: () => [doc(1, {})], products: () => [product(1, {})] },
+  huge: {
+    faqs: hugeFaqs,
+    docs: () => Array.from({ length: 300 }, (_, i) => doc(i + 1, { name: `ページ ${i + 1}`, url: `https://example.com/pages/${i + 1}`, status: i % 25 === 0 ? 'failed' : 'ready', error: i % 25 === 0 ? 'fetch_failed: 404' : null, chars: (i * 7919) % 200_000 })),
+    products: hugeProducts,
+  },
+}
+
+/** GET /api/bot* fixtures, or undefined for other paths. */
+function botRoute(mode: DataMode, p: string, q: URLSearchParams): unknown {
+  if (p === '/api/bot') return botFixture(mode)
+  if (p === '/api/bot/overview') return botOverview(mode, Math.min(90, Math.max(1, Math.trunc(Number(q.get('days'))) || 30)))
+  if (p === '/api/bot/faqs') {
+    const status = q.get('status') ?? 'all'
+    return { faqs: BOT_LISTS[mode].faqs().filter((f) => status === 'all' || f.status === status) }
+  }
+  if (p === '/api/bot/documents') return { documents: BOT_LISTS[mode].docs() }
+  if (p === '/api/bot/products') {
+    const term = q.get('q')?.toLowerCase()
+    const rows = BOT_LISTS[mode].products().filter((x) => !term || [x.name, x.sku ?? '', ...x.tags].some((v) => v.toLowerCase().includes(term)))
+    return { products: rows.sort((a, b) => a.name.localeCompare(b.name)) }
+  }
+  return undefined
+}
+
 /* ---------- routing ---------- */
 
 type Dataset = {
@@ -954,6 +1248,7 @@ export function devFixture(path: string): unknown {
   if (p === '/api/snippets') return { snippets: ds.snippets() }
   if (p === '/api/flows') return { flows: ds.flows() }
   if (p === '/api/reports') return ds.reports(Math.min(90, Math.max(1, Number(q.get('days') ?? '30'))))
+  if (p.startsWith('/api/bot')) return botRoute(mode, p, q)
 
   return undefined
 }

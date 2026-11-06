@@ -49,9 +49,15 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
   see `.ibx` in `inbox.css`): Channel.io's panes divided by 1px rules, no outer card.
 - **Width caps** only where reading/forms need it: Settings content column 720px; forms inside wide rows 720px
   (`.ch-row__body form`). Lists, tables and stat tiles use the full width.
-- **Sub-navigation** (Settings): 200px column of `NavItem`s with icons (`.st-subnav`), sticky under the header; the
-  section lives in the URL hash (`/settings#workspaces`) so links and Back work. At ≤ 860px it becomes a horizontal row
-  of pill chips (text only) that scrolls inside itself. Reuse the pattern (and the CSS) for any page with sections.
+- **Sub-navigation** (Settings, Soku): `<SubNav items current onSelect label />` — 200px column of `NavItem`s with icons
+  (`.subnav` in styles.css), sticky under the header; Settings keeps the section in the URL hash (`/settings#workspaces`),
+  Soku in the path (`/bot/rules`), so links and Back work. At ≤ 860px it becomes a horizontal row of pill chips (text
+  only) that scrolls inside itself and centers the current one. Use it for any page with sections.
+- **Soku** (`pages/Bot.tsx` + `pages/bot/*`, `pages/bot.css`, prefix `bot-`): `Bot.tsx` loads `GET /api/bot` once into
+  `useBot()` and routes `/bot`, `/bot/rules`, `/bot/knowledge` (`?tab=documents`, `?status=`), `/bot/products`, `/bot/playground`;
+  each screen renders in `<BotFrame section actions?>` (header "name · screen" + SubNav). Tables put secondary text under
+  the name (FAQ answer, document URL) instead of extra columns; the overview reuses `ChartCard` / `Columns` from
+  `pages/dashboard/ChartCards.tsx` inside `.dash`. The inbox adds draft / send-products (`bot/ProductPicker.tsx`).
 - **Rows instead of card grids**: for a handful of configurable things (channels), use full-width row cards
   (`.ch-row`: 36px tinted icon, name 14 bold + one-line account, status `Badge`, `secondary` s toggle with
   `aria-expanded`/`aria-controls`; the body expands below a rule, no animation).
@@ -107,6 +113,8 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
 | `useCopy()` | `copy(text)` → clipboard + "コピーしました" toast (CopyBox uses it). |
 | `RelativeTime` | `value`, `maxDays?` (default 7, then absolute date). |
 | `SokutoMark` | brand SVG, `size?`. |
+| `SubNav` | `items: { id, href, label, icon }[]`, `current`, `onSelect(id, e)` (plain left clicks only), `label` (nav `aria-label`). |
+| `RowMenu` | "…" button + menu for a table row: `label`, `items: { label, icon, onSelect, danger? }[]`, `disabled?`; clicks never reach the row. |
 | `WorkspaceSwitcher` | shell only. `WorkspaceAvatar` (`workspace`, `size?`: initial on a tint chosen by id), `AddWorkspaceModal` (`show`, `onHide`, `onCreated(ws)`). |
 | `formatNumber(lang)(n)`, `formatDateTime(lang, v)`, `formatRelative(lang, v)`, `middleTruncate(s)` | from `components/format.ts`. |
 

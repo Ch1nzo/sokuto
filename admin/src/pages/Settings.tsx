@@ -5,7 +5,6 @@ import {
   Banner,
   Button,
   ListItem,
-  NavItem,
   SegmentedControl,
   SegmentedControlItem,
   Switch,
@@ -34,7 +33,7 @@ import {
 import { ApiError, api, errorMessage } from '../lib/api'
 import { useLang, useT, type Key, type Lang } from '../lib/i18n'
 import { useTheme, type ThemePref } from '../lib/theme'
-import { Card, CopyBox, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
+import { Card, CopyBox, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectField, SubNav, TextAreaField, TextInputField } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
 import { AddButton, IconBtn } from './flow-editor/fields'
 import { WorkspacesSection } from './settings/WorkspacesSection'
@@ -80,34 +79,6 @@ const SECTIONS: { id: Section; label: Key; icon: BezierIcon }[] = [
 function sectionFromHash(hash: string): Section {
   const id = hash.replace(/^#/, '')
   return SECTIONS.find((s) => s.id === id)?.id ?? 'general'
-}
-
-function SettingsNav({ current }: { current: Section }) {
-  const t = useT()
-  const navigate = useNavigate()
-  return (
-    <nav className="st-subnav" aria-label={t('settings_sections')}>
-      <ul role="menu">
-        {SECTIONS.map((s) => (
-          <NavItem
-            key={s.id}
-            name={s.id}
-            href={`#${s.id}`}
-            content={t(s.label)}
-            leftContent={s.icon}
-            active={s.id === current}
-            aria-current={s.id === current ? 'page' : undefined}
-            onClick={(e) => {
-              // Modified clicks keep the native link behaviour (new tab / window).
-              if (!e || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-              e.preventDefault()
-              navigate({ hash: s.id })
-            }}
-          />
-        ))}
-      </ul>
-    </nav>
-  )
 }
 
 type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
@@ -182,6 +153,7 @@ export default function Settings() {
   const { setLang } = useLang()
   const { pref, setPref } = useTheme()
   const toast = useToast()
+  const navigate = useNavigate()
   const section = sectionFromHash(useLocation().hash)
   const [data, setData] = useState<SettingsResponse | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -240,7 +212,12 @@ export default function Settings() {
     <div className="stack">
       <PageHeader title={t('settings_title')} />
       <div className="st-layout">
-        <SettingsNav current={section} />
+        <SubNav
+          label={t('settings_sections')}
+          items={SECTIONS.map((s) => ({ id: s.id, href: `#${s.id}`, label: t(s.label), icon: s.icon }))}
+          current={section}
+          onSelect={(id) => navigate({ hash: id })}
+        />
         <div className="st-content">{content}</div>
       </div>
     </div>

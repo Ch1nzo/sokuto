@@ -64,7 +64,7 @@ export function ChartCard({ title, description, aside, wide, children }: { title
 }
 
 /** Header legend item: swatch (identity) + label + value; text stays in text colors. */
-function Key({ color, label, value }: { color?: string; label: string; value: string }) {
+export function Key({ color, label, value }: { color?: string; label: string; value: string }) {
   return (
     <span className="dash-key">
       {color && <span className="dash-swatch" style={{ background: color }} aria-hidden="true" />}
@@ -91,11 +91,16 @@ function Fact({ icon, label, value, hint }: { icon: BezierIcon; label: string; v
   )
 }
 
+/** One stacked layer of a daily series: `key` names a numeric field of every point. */
+export type Layer<K extends string> = { key: K; label: string; color: string }
+/** A UTC day plus the layer values (`NoInfer`: the layers decide which keys are read). */
+type DayPoints<K extends string> = ({ day: string } & Record<NoInfer<K>, number>)[]
+
 /**
  * Columns per day (stacked when several layers), y gridlines at clean values, every n-th day labeled.
  * Each column's hit area is the full plot height; its native tooltip lists the day's values.
  */
-function Columns({ series, layers, height, label }: { series: Series; layers: { key: 'in' | 'out' | 'newContacts'; label: string; color: string }[]; height: number; label: string }) {
+export function Columns<K extends string>({ series, layers, height, label }: { series: DayPoints<K>; layers: Layer<K>[]; height: number; label: string }) {
   const { lang } = useLang()
   const fmt = formatNumber(lang)
   const totals = series.map((p) => sum(layers.map((l) => p[l.key])))
@@ -143,7 +148,7 @@ function Columns({ series, layers, height, label }: { series: Series; layers: { 
 }
 
 /** The chart's table view (newest day first), collapsed by default. */
-function SeriesTable({ series, layers }: { series: Series; layers: { key: 'in' | 'out' | 'newContacts'; label: string }[] }) {
+export function SeriesTable<K extends string>({ series, layers }: { series: DayPoints<K>; layers: Omit<Layer<K>, 'color'>[] }) {
   const t = useT()
   const { lang } = useLang()
   const fmt = formatNumber(lang)

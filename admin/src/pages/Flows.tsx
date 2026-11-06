@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Badge, Button, ListItem, Modal, ModalBody, ModalContent, ModalHeader, Overlay, Switch, Text, useToast } from '@channel.io/bezier-react'
-import { CalendarIcon, FlowIcon, MoreIcon, PlusIcon, TemplateIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { Badge, Button, Modal, ModalBody, ModalContent, ModalHeader, Switch, Text, useToast } from '@channel.io/bezier-react'
+import { CalendarIcon, FlowIcon, PlusIcon, TemplateIcon, TrashIcon } from '@channel.io/bezier-icons'
 import { api, errorMessage } from '../lib/api'
 import { useLang, useT } from '../lib/i18n'
 import {
@@ -14,6 +14,7 @@ import {
   LoadingState,
   PageHeader,
   RelativeTime,
+  RowMenu,
   formatNumber,
   type Column,
 } from '../components'
@@ -24,50 +25,6 @@ import type { FlowTemplate } from '@shared/flows/templates'
 import './flows.css'
 
 type FlowListItem = FlowRecord & { runs30d: number }
-
-/** "…" button with a small menu (role="menu"); clicks inside never reach the table row. */
-function RowMenu({ label, onDelete }: { label: string; onDelete: () => void }) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-
-  const close = () => {
-    setOpen(false)
-    buttonRef.current?.focus()
-  }
-
-  return (
-    <span className="fl-menu" onClick={(e) => e.stopPropagation()}>
-      <Button
-        ref={buttonRef}
-        size="s"
-        styleVariant="tertiary"
-        colorVariant="monochrome-light"
-        leftContent={MoreIcon}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      />
-      <Overlay show={open} target={buttonRef.current} position="bottom-right" marginY={4} onHide={close}>
-        {/* The Overlay mounts this after `show`: focus the first item once it exists. */}
-        <div ref={(el) => { if (open) el?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }} role="menu" aria-label={label} className="fl-menu__list">
-          <ListItem
-            role="menuitem"
-            size="m"
-            variant="red"
-            leftContent={TrashIcon}
-            content={t('delete')}
-            onClick={() => {
-              setOpen(false)
-              onDelete()
-            }}
-          />
-        </div>
-      </Overlay>
-    </span>
-  )
-}
 
 export default function Flows() {
   const t = useT()
@@ -216,7 +173,7 @@ export default function Flows() {
       key: 'menu',
       header: <span className="visually-hidden">{t('flows_menu')}</span>,
       width: 48,
-      render: (f) => <RowMenu label={`${t('flows_menu')}: ${f.name}`} onDelete={() => setPendingDelete(f)} />,
+      render: (f) => <RowMenu label={`${t('flows_menu')}: ${f.name}`} items={[{ label: t('delete'), icon: TrashIcon, danger: true, onSelect: () => setPendingDelete(f) }]} />,
     },
   ]
 

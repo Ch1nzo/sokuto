@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Icon, KeyValueItem, Switch, Text, TextArea, TextField, Tooltip, useToast } from '@channel.io/bezier-react'
 import {
+  AiIcon,
   ArrowLeftIcon,
   CalendarIcon,
   CancelSmallIcon,
@@ -19,6 +20,7 @@ import {
   RefreshIcon,
   SearchIcon,
   SendIcon,
+  ShoppingIcon,
   VideocamIcon,
   type BezierIcon,
 } from '@channel.io/bezier-icons'
@@ -42,6 +44,8 @@ import {
   middleTruncate,
   useCopy,
 } from '../components'
+import { ProductPicker } from './bot/ProductPicker'
+import type { BotResponse, Product } from './bot/types'
 import './inbox.css'
 
 type Filter = 'all' | 'open' | 'unread' | 'paused' | 'closed'
@@ -77,13 +81,18 @@ type Attachment = { type: string; url?: string }
 
 type OutButton = { label: string; payload?: string; url?: string }
 
-/** Inbound payloads carry `type` / `attachments`; outbound ones are an OutboundMessage (src/channels/types.ts). */
+/**
+ * Inbound payloads carry `type` / `attachments`; outbound ones are an OutboundMessage (src/channels/types.ts).
+ * Soku replies add `bot` (its name); product cards (Soku or a person) add `cards`.
+ */
 type MessagePayload = {
   imageUrl?: string
   buttons?: OutButton[]
   quickReplies?: OutButton[]
   type?: string
   attachments?: Attachment[]
+  bot?: string
+  cards?: { title: string; subtitle?: string; imageUrl?: string }[]
 }
 
 type LastMessage = {
@@ -243,6 +252,9 @@ export default function Inbox() {
   const [snippets, setSnippets] = useState<Snippet[]>([])
   const [notes, setNotes] = useState('')
   const [infoOpen, setInfoOpen] = useState(false)
+  const [soku, setSoku] = useState<BotResponse | null>(null)
+  const [drafting, setDrafting] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [collapsed, setCollapsed] = useState<Partial<Record<Section, boolean>>>({})
   // Unsaved note edits must survive the 10 s poll.
   const notesDirty = useRef(false)
@@ -287,8 +299,9 @@ export default function Inbox() {
   }, [loadList])
 
   useEffect(() => {
-    // Optional: without snippets the composer simply has no picker.
+    // Optional: without snippets the composer simply has no picker; without Soku, no draft / product buttons.
     api.get<{ snippets: Snippet[] }>('/api/snippets').then((r) => setSnippets(r.snippets), () => {})
+    api.get<BotResponse>('/api/bot').then(setSoku, () => {})
   }, [])
 
   useEffect(() => {
@@ -330,16 +343,13 @@ export default function Inbox() {
     }
   }
 
-  /** Optimistic: the bubble shows at once; on error it stays as a failed bubble with the reason. */
-  const send = () => {
-    const body = text.trim()
-    if (!body || !id) return
+  /** Optimistic: the bubble (`text`) shows at once; on error it stays as a failed bubble with the reason. */
+  const deliver = (body: string, post: () => Promise<unknown>) => {
     const key = Date.now()
     setOutbox((o) => [...o, { key, text: body, createdAt: new Date().toISOString(), error: null }])
-    setText('')
     void (async () => {
       try {
-        await api.post(`/api/inbox/${id}/send`, { text: body })
+        await post()
         await loadConversation()
         setOutbox((o) => o.filter((x) => x.key !== key))
       } catch (err) {
@@ -354,6 +364,35 @@ export default function Inbox() {
       }
       void loadList()
     })()
+  }
+
+  const send = () => {
+    const body = text.trim()
+    if (!body || !id) return
+    setText('')
+    deliver(body, () => api.post(`/api/inbox/${id}/send`, { text: body }))
+  }
+
+  /** Product cards: the optimistic bubble lists the names; the reload brings in the logged cards. */
+  const sendProducts = (products: Product[]) => {
+    if (!id || products.length === 0) return
+    const body = [...products.map((p) => p.name), t('inbox_cards_count').replace('{n}', String(products.length))].join('\n')
+    deliver(body, () => api.post(`/api/inbox/${id}/products`, { productIds: products.map((p) => p.id) }))
+  }
+
+  /** Soku drafts a reply for the person; it lands in the composer (after any text already there). */
+  const draft = async () => {
+    const forId = id
+    if (!forId) return
+    setDrafting(true)
+    try {
+      const r = await api.post<{ draft: string }>(`/api/inbox/${forId}/draft`)
+      if (idRef.current === forId) setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n${r.draft}` : r.draft))
+    } catch (err) {
+      toast.addToast(err instanceof ApiError && err.code === 'ai_not_configured' ? t('bot_ov_no_ai') : errorMessage(err), { preset: 'error' })
+    } finally {
+      setDrafting(false)
+    }
   }
 
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -413,7 +452,7 @@ export default function Inbox() {
 
   const preview = (m: LastMessage | null) => {
     if (!m) return ''
-    const prefix = m.direction === 'out' ? `${sourceLabel(m.source) || t('inbox_source_bot')}: ` : ''
+    const prefix = m.direction === 'out' ? `${m.payload?.bot || sourceLabel(m.source) || t('inbox_source_bot')}: ` : ''
     return prefix + (m.text || attachmentLabel(m))
   }
 
@@ -437,9 +476,10 @@ export default function Inbox() {
     const imageUrl = p?.imageUrl ?? p?.attachments?.find((a) => a.type === 'image' && a.url)?.url
     const attachments = (p?.attachments ?? []).filter((a) => !(a.type === 'image' && a.url && a.url === imageUrl))
     const buttons = [...(p?.buttons ?? []), ...(p?.quickReplies ?? [])]
+    const cards = p?.cards ?? []
     const failed = m.direction === 'out' && !!m.error
     const who = m.direction === 'in' ? 'in' : m.source === 'human' ? 'human' : 'bot'
-    const hasBody = !!m.text || !!imageUrl || attachments.length > 0
+    const hasBody = !!m.text || !!imageUrl || attachments.length > 0 || cards.length > 0
     return (
       <div key={m.id} className={`ibx-msg ibx-msg--${who}${m.pending ? ' is-pending' : ''}`}>
         <div className={`bubble ${m.direction}${failed ? ' failed' : ''}${who === 'bot' ? ' ibx-bubble--bot' : ''}`}>
@@ -465,6 +505,17 @@ export default function Inbox() {
               <span>{attachmentLabel(m)}</span>
             </span>
           )}
+          {cards.length > 0 && (
+            <div className="ibx-cards">
+              {cards.map((c, i) => (
+                <div key={i} className="ibx-card">
+                  {c.imageUrl && <img src={c.imageUrl} alt="" loading="lazy" className="ibx-card__img" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+                  <div className="ibx-card__title">{c.title}</div>
+                  {c.subtitle && <div className="ibx-card__sub">{c.subtitle}</div>}
+                </div>
+              ))}
+            </div>
+          )}
           {buttons.length > 0 && (
             <div className="chips">
               {buttons.map((b, i) => (
@@ -477,7 +528,7 @@ export default function Inbox() {
         </div>
         <div className="ibx-msg__meta">
           {failed && <span className="ibx-msg__failed">{t('inbox_failed')} · </span>}
-          {who !== 'in' && <>{sourceLabel(m.source)} · </>}
+          {who !== 'in' && <>{p?.bot || sourceLabel(m.source)} · </>}
           {m.pending ? t('inbox_sending') : <time className="tabular" dateTime={m.createdAt} title={formatDateTime(lang, m.createdAt)}>{time}</time>}
         </div>
         {failed && <div className="ibx-msg__error">{m.error}</div>}
@@ -845,6 +896,32 @@ export default function Inbox() {
                       <SelectInput value="" options={snippets.map((s) => ({ value: String(s.id), label: s.name }))} onChange={insertSnippet} placeholder={t('inbox_snippet')} aria-label={t('inbox_snippet')} dropdownPosition="top-left" />
                     </div>
                   )}
+                  {soku?.aiConfigured && (
+                    <Button
+                      className="ibx-composer__tool"
+                      size="xs"
+                      styleVariant="tertiary"
+                      colorVariant="monochrome-dark"
+                      leftContent={AiIcon}
+                      text={t('inbox_bot_draft').replace('{name}', soku.config.name)}
+                      title={t('inbox_bot_draft').replace('{name}', soku.config.name)}
+                      loading={drafting}
+                      disabled={drafting}
+                      onClick={() => void draft()}
+                    />
+                  )}
+                  {soku && soku.counts.products > 0 && (
+                    <Button
+                      className="ibx-composer__tool"
+                      size="xs"
+                      styleVariant="tertiary"
+                      colorVariant="monochrome-dark"
+                      leftContent={ShoppingIcon}
+                      text={t('inbox_send_products')}
+                      aria-haspopup="dialog"
+                      onClick={() => setPicking(true)}
+                    />
+                  )}
                   <Text typo="12" color="txt-black-dark" className="ibx-composer__hint">
                     {contact && !isPaused(contact) && <span className="ibx-composer__pause">{t('inbox_hint_pause')}</span>}
                     <span className="ibx-composer__keys">{t('inbox_hint_keys')}</span>
@@ -880,6 +957,7 @@ export default function Inbox() {
           </aside>
         )}
       </div>
+      <ProductPicker show={picking} onHide={() => setPicking(false)} onSend={sendProducts} />
       {!wide && (
         <Drawer show={infoOpen && !!contact} onHide={() => setInfoOpen(false)} title={t('inbox_info')} width={360} sheetOnMobile>
           {info}
