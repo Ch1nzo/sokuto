@@ -91,7 +91,7 @@ export const flowDefinitionSchema = z.object({
 export const flowChannelSchema = z.enum(['any', 'line', 'messenger', 'instagram'])
 export const flowKindSchema = z.enum(['flow', 'sequence'])
 
-const SEQUENCE_STEP_TYPES = new Set(['message', 'condition', 'action', 'delay', 'random'])
+const SEQUENCE_STEP_TYPES = new Set(['message', 'condition', 'action', 'delay', 'random', 'request'])
 
 /** Validates structure and referential integrity. Returns the parsed definition or a list of problems. */
 export function validateFlow(input: unknown, kind: FlowRecord['kind'] = 'flow'): { ok: true; definition: FlowDefinition; warnings: string[] } | { ok: false; errors: string[] } {
@@ -197,4 +197,4 @@ Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{
 Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.
 On Instagram, is_follower can only be checked after the person has sent a DM or tapped a button: put the condition behind a button such as "フォローしました", not right after the comment.
 
-Sequences (drip campaigns): a flow created with kind "sequence" has no triggers ("triggers": []) and only message, condition, action, delay and random steps. Contacts are enrolled with a subscribe action, POST /api/contacts/:id/sequences or the MCP tool subscribe_sequence (live sequences only, once per contact); the first step runs within a minute, and each delay step schedules the next part (e.g. message → delay 86400 → message → delay 172800 → message). Buttons do not pause a sequence: it moves on to "next" right away, and a later tap runs that button's branch like a normal flow. The enrollment ends at the last step, on unsubscribe, when the sequence is unpublished or deleted, or when the contact unfollows. test_flow plays a sequence with the input { "type": "start" } (delays are skipped).`
+Sequences (drip campaigns): a flow created with kind "sequence" has no triggers ("triggers": []) and only message, condition, action, delay, random and request steps. Contacts are enrolled with a subscribe action, POST /api/contacts/:id/sequences or the MCP tool subscribe_sequence (live sequences only, once per contact); the first step runs within a minute, and each delay step schedules the next part (e.g. message → delay 86400 → message → delay 172800 → message). Buttons do not pause a sequence: it moves on to "next" right away, and a later tap runs that button's branch like a normal flow. The enrollment ends at the last step, on unsubscribe, when the sequence is unpublished or deleted, or when the contact unfollows. test_flow plays a sequence with the input { "type": "start" } (delays are skipped).`
