@@ -612,7 +612,7 @@ apiRoutes.post('/broadcasts', async (c) => {
     })
     .returning()
     .get()
-  return c.json({ broadcast: row }, 201)
+  return c.json({ broadcast: { ...row, buttons: parseBroadcastButtons(row.buttons) } }, 201)
 })
 
 apiRoutes.post('/broadcasts/:id/cancel', async (c) => {
