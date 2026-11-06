@@ -139,6 +139,42 @@ describe('renderLineMessages altText limit', () => {
   })
 })
 
+describe('renderLineMessages cards and attachments', () => {
+  const card = (title: string, subtitle?: string) => ({ title, subtitle, imageUrl: 'https://example.com/c.png', buttons: [{ label: 'Buy', payload: 'sk:1:m1:0' }, { label: 'Site', url: 'https://example.com' }] })
+
+  it('renders cards as a carousel after the text', () => {
+    const out = renderLineMessages({ text: 'Pick a plan', cards: [card('A'.repeat(50), 'B'.repeat(70)), card('Plan B')], quickReplies: [{ label: 'Later', payload: 'x' }] })
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({ type: 'text', text: 'Pick a plan' })
+    const tpl = out[1] as { type: string; altText: string; template: { type: string; columns: { thumbnailImageUrl?: string; title: string; text: string; actions: Record<string, string>[] }[] }; quickReply?: unknown }
+    expect(tpl.type).toBe('template')
+    expect(tpl.altText).toBe(`${'A'.repeat(50)} / Plan B`)
+    expect(tpl.template.type).toBe('carousel')
+    expect(tpl.template.columns).toHaveLength(2)
+    expect(tpl.template.columns[0]).toMatchObject({ thumbnailImageUrl: 'https://example.com/c.png', title: 'A'.repeat(40), text: 'B'.repeat(60) })
+    // Without a subtitle the title is the column text.
+    expect(tpl.template.columns[1]!.text).toBe('Plan B')
+    expect(tpl.template.columns[1]!.actions).toEqual([
+      { type: 'postback', label: 'Buy', data: 'sk:1:m1:0', displayText: 'Buy' },
+      { type: 'uri', label: 'Site', uri: 'https://example.com' },
+    ])
+    expect(tpl.quickReply).toBeDefined()
+  })
+
+  it('renders video with a preview and audio with a duration before the text', () => {
+    const video = renderLineMessages({ text: 'Watch', attachment: { type: 'video', url: 'https://example.com/v.mp4', previewImageUrl: 'https://example.com/v.jpg' } })
+    expect(video).toEqual([{ type: 'video', originalContentUrl: 'https://example.com/v.mp4', previewImageUrl: 'https://example.com/v.jpg' }, { type: 'text', text: 'Watch' }])
+    const audio = renderLineMessages({ attachment: { type: 'audio', url: 'https://example.com/a.m4a', durationMs: 30000 } })
+    expect(audio).toEqual([{ type: 'audio', originalContentUrl: 'https://example.com/a.m4a', duration: 30000 }])
+  })
+
+  it('sends files and videos without a preview as a text link', () => {
+    expect(renderLineMessages({ attachment: { type: 'file', url: 'https://example.com/f.pdf' } })).toEqual([{ type: 'text', text: 'https://example.com/f.pdf' }])
+    expect(renderLineMessages({ attachment: { type: 'video', url: 'https://example.com/v.mp4' } })).toEqual([{ type: 'text', text: 'https://example.com/v.mp4' }])
+    expect(renderLineMessages({ attachment: { type: 'audio', url: 'https://example.com/a.m4a' } })).toEqual([{ type: 'text', text: 'https://example.com/a.m4a' }])
+  })
+})
+
 describe('lineLoadingSeconds', () => {
   it('rounds up to a multiple of 5 within 5–60', () => {
     expect([1, 5, 7, 10, 61].map(lineLoadingSeconds)).toEqual([5, 5, 10, 10, 60])

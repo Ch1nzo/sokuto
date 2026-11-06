@@ -29,6 +29,12 @@ export type InboundEvent = {
 
 export type OutboundButton = { label: string; payload?: string; url?: string }
 
+/** One carousel column (LINE carousel / Meta generic template element). */
+export type OutboundCard = { title: string; subtitle?: string; imageUrl?: string; buttons: OutboundButton[] }
+
+/** Video / audio / file sent before the text. LINE needs previewImageUrl (video) and durationMs (audio). */
+export type OutboundAttachment = { type: 'video' | 'audio' | 'file'; url: string; previewImageUrl?: string; durationMs?: number }
+
 /** A normalized outbound message rendered per channel by the adapter. */
 export type OutboundMessage = {
   text?: string
@@ -37,6 +43,9 @@ export type OutboundMessage = {
   quickReplies?: OutboundButton[]
   /** Rendered as a button template where supported. */
   buttons?: OutboundButton[]
+  /** Carousel sent after the text. */
+  cards?: OutboundCard[]
+  attachment?: OutboundAttachment
 }
 
 export type ChannelProfile = {

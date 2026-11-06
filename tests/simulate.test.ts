@@ -73,6 +73,39 @@ describe('simulateFlow', () => {
     expect(r.completed).toBe(true)
   })
 
+  it('card buttons use a global payload index and resume the chosen branch', async () => {
+    const f = flow({
+      triggers: [{ type: 'keyword', keywords: ['menu'] }],
+      entry: 'm1',
+      steps: [
+        {
+          id: 'm1',
+          type: 'message',
+          text: 'Pick one',
+          buttons: [{ label: 'Later', next: 'l' }],
+          cards: [
+            { title: 'Coffee', subtitle: 'Hot', buttons: [{ label: 'Coffee', next: 'c' }] },
+            { title: 'Tea', imageUrl: 'https://example.com/tea.png', buttons: [{ label: 'Tea', next: 't' }] },
+          ],
+        },
+        { id: 'l', type: 'message', text: 'Later then' },
+        { id: 'c', type: 'message', text: 'Coffee it is' },
+        { id: 't', type: 'message', text: 'Tea it is' },
+      ],
+    })
+    const r = await simulateFlow(db, f, [
+      { type: 'message', text: 'menu' },
+      { type: 'message', button: 'Tea' },
+    ])
+    const out = r.steps[0]!.outputs[0]!
+    expect(r.steps[0]!.waiting).toBe('button')
+    expect(out.quickReplies?.map((q) => q.payload)).toEqual(['sk:7:m1:0'])
+    expect(out.cards?.[0]).toEqual({ title: 'Coffee', subtitle: 'Hot', imageUrl: undefined, buttons: [{ label: 'Coffee', url: undefined, payload: 'sk:7:m1:1' }] })
+    expect(out.cards?.[1]!.buttons[0]!.payload).toBe('sk:7:m1:2')
+    expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['Tea it is'])
+    expect(r.completed).toBe(true)
+  })
+
   it('branches on a numeric condition with lte', async () => {
     const f = flow({
       triggers: [{ type: 'keyword', keywords: ['rate'] }],

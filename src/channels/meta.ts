@@ -105,6 +105,9 @@ function linksTemplate(links: OutboundButton[], title: string | undefined): Reco
 export function renderMetaMessages(msg: OutboundMessage, channel: Channel): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = []
   if (msg.imageUrl) out.push({ attachment: { type: 'image', payload: { url: msg.imageUrl, is_reusable: true } } })
+  const a = msg.attachment
+  // Instagram cannot receive files: send the link instead.
+  if (a) out.push(a.type === 'file' && channel === 'instagram' ? { text: a.url } : { attachment: { type: a.type, payload: { url: a.url, is_reusable: true } } })
   const buttons = msg.buttons ?? []
   // Meta quick replies cannot carry URLs: URL entries are rendered as web_url template buttons instead.
   const quick = (msg.quickReplies ?? []).filter((b) => !b.url)
@@ -121,6 +124,10 @@ export function renderMetaMessages(msg: OutboundMessage, channel: Channel): Reco
   } else {
     if (msg.text) out.push({ text: msg.text.slice(0, 2000) })
     if (quickLinks.length > 0) out.push(linksTemplate(quickLinks, msg.text))
+  }
+  if (msg.cards && msg.cards.length > 0) {
+    const elements = msg.cards.slice(0, 10).map((c) => ({ title: c.title.slice(0, 80), subtitle: c.subtitle?.slice(0, 80), image_url: c.imageUrl, buttons: c.buttons.length ? c.buttons.slice(0, 3).map(metaButton) : undefined }))
+    out.push({ attachment: { type: 'template', payload: { template_type: 'generic', elements } } })
   }
   if (quick.length > 0 && out.length > 0) {
     const last = out[out.length - 1]!

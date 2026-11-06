@@ -1,14 +1,19 @@
 import { Badge, Button, HStack, SegmentedControl, SegmentedControlItem, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
 import { ArrowDownIcon, ArrowUpIcon, CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
-import type { Action, ButtonDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
+import type { Action, AttachmentDef, ButtonDef, CardDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
 import { SelectField, SelectInput, TextAreaField, TextInputField } from '../../components'
 import { AddButton, IconBtn, ListInputField, StepPicker } from './fields'
 import {
   ACTION_TYPES,
+  ATTACHMENT_TYPES,
   DELAY_PRESETS,
   MAX_BUTTONS,
   MAX_BUTTON_LABEL,
+  MAX_CARDS,
+  MAX_CARD_BUTTONS,
+  MAX_CARD_SUBTITLE,
+  MAX_CARD_TITLE,
   MAX_CHOICE_LABEL,
   MAX_REPLY_VARIANTS,
   OPS_WITHOUT_VALUE,
@@ -34,49 +39,132 @@ function NumberInput({ value, onChange, min, max, ariaLabel, className }: { valu
   return <TextField className={className} type="number" inputMode="numeric" min={min} max={max} value={value ?? ''} aria-label={ariaLabel} onChange={(e) => onChange(e.target.value)} />
 }
 
+/** Button rows (label / URL / next) shared by the message itself and each carousel card. */
+function ButtonList({ buttons, max, steps, t, onChange }: { buttons: ButtonDef[]; max: number; steps: Step[]; t: TFn; onChange: (bs: ButtonDef[]) => void }) {
+  const setButton = (i: number, b: ButtonDef) => onChange(buttons.map((x, j) => (j === i ? b : x)))
+  return (
+    <VStack spacing={8}>
+      <Text typo="13" bold color="txt-black-darker">
+        {t('editor_buttons')} <span className="fe-count">({buttons.length}/{max})</span>
+      </Text>
+      {buttons.map((b, i) => (
+        <div className="fe-subitem" key={i}>
+          <div className="fe-grid-2">
+            <TextInputField
+              label={t('editor_button_label')}
+              helperText={`${b.label.length}/${MAX_BUTTON_LABEL}`}
+              value={b.label}
+              maxLength={MAX_BUTTON_LABEL}
+              onChange={(e) => setButton(i, { ...b, label: e.target.value })}
+            />
+            <TextInputField
+              label={t('editor_button_url')}
+              type="url"
+              value={b.url ?? ''}
+              placeholder="https://"
+              onChange={(e) => {
+                const url = e.target.value
+                setButton(i, url ? { label: b.label, url } : { label: b.label, next: b.next ?? null })
+              }}
+            />
+          </div>
+          <HStack spacing={8} align="end">
+            <div className="fe-grow">{!b.url && <StepPicker label={t('editor_next')} value={b.next} steps={steps} t={t} onChange={(next) => setButton(i, { ...b, next })} />}</div>
+            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => onChange(buttons.filter((_, j) => j !== i))} />
+          </HStack>
+        </div>
+      ))}
+      <div>
+        <AddButton text={t('editor_add_button')} disabled={buttons.length >= max} onClick={() => onChange([...buttons, { label: '', next: null }])} />
+      </div>
+    </VStack>
+  )
+}
+
+function CardsEditor({ cards, steps, t, onChange }: { cards: CardDef[]; steps: Step[]; t: TFn; onChange: (cs: CardDef[]) => void }) {
+  const setCard = (i: number, c: CardDef) => onChange(cards.map((x, j) => (j === i ? c : x)))
+  const mismatch = new Set(cards.map((c) => c.buttons.length)).size > 1
+  // New cards copy the first card's button count (LINE needs the same count on every card).
+  const newButtons = () => Array.from({ length: cards[0]?.buttons.length || 1 }, (): ButtonDef => ({ label: '', next: null }))
+  return (
+    <VStack spacing={8}>
+      <Text typo="13" bold color="txt-black-darker">
+        {t('editor_cards')} <span className="fe-count">({cards.length}/{MAX_CARDS})</span>
+      </Text>
+      {cards.map((c, i) => (
+        <div className="fe-subitem" key={i}>
+          <HStack spacing={8} align="center" justify="between">
+            <Text typo="12" bold color="txt-black-dark">
+              #{i + 1}
+            </Text>
+            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${c.title || t('editor_card_title')}`} onClick={() => onChange(cards.filter((_, j) => j !== i))} />
+          </HStack>
+          <div className="fe-grid-2">
+            <TextInputField label={t('editor_card_title')} helperText={`${c.title.length}/${MAX_CARD_TITLE}`} value={c.title} maxLength={MAX_CARD_TITLE} onChange={(e) => setCard(i, { ...c, title: e.target.value })} />
+            <TextInputField
+              label={t('editor_card_subtitle')}
+              helperText={`${c.subtitle?.length ?? 0}/${MAX_CARD_SUBTITLE}`}
+              value={c.subtitle ?? ''}
+              maxLength={MAX_CARD_SUBTITLE}
+              onChange={(e) => setCard(i, { ...c, subtitle: e.target.value || undefined })}
+            />
+          </div>
+          <TextInputField label={t('editor_image')} type="url" value={c.imageUrl ?? ''} placeholder="https://" onChange={(e) => setCard(i, { ...c, imageUrl: e.target.value || undefined })} />
+          <ButtonList buttons={c.buttons} max={MAX_CARD_BUTTONS} steps={steps} t={t} onChange={(buttons) => setCard(i, { ...c, buttons })} />
+        </div>
+      ))}
+      {mismatch && (
+        <Text typo="12" color="bgtxt-orange-normal" className="fe-wrap">
+          {t('editor_cards_same_buttons')}
+        </Text>
+      )}
+      <div>
+        <AddButton text={t('editor_add_card')} disabled={cards.length >= MAX_CARDS} onClick={() => onChange([...cards, { title: '', buttons: newButtons() }])} />
+      </div>
+    </VStack>
+  )
+}
+
+function AttachmentFields({ attachment, t, onChange }: { attachment: AttachmentDef | undefined; t: TFn; onChange: (a: AttachmentDef | undefined) => void }) {
+  return (
+    <>
+      <div className="fe-grid-2">
+        <SelectField
+          label={t('editor_attachment')}
+          value={attachment?.type ?? ''}
+          options={[{ value: '', label: t('editor_validate_none') }, ...ATTACHMENT_TYPES.map((v) => ({ value: v, label: t(`attachment_${v}`) }))]}
+          onChange={(type) => onChange(type ? { type, url: attachment?.url ?? '' } : undefined)}
+        />
+        {attachment && <TextInputField label="URL" type="url" value={attachment.url} placeholder="https://" onChange={(e) => onChange({ ...attachment, url: e.target.value })} />}
+      </div>
+      {attachment?.type === 'video' && (
+        <TextInputField label={t('editor_preview_image')} type="url" value={attachment.previewImageUrl ?? ''} placeholder="https://" onChange={(e) => onChange({ ...attachment, previewImageUrl: e.target.value || undefined })} />
+      )}
+      {attachment?.type === 'audio' && (
+        <TextInputField
+          label={t('editor_duration_ms')}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          value={attachment.durationMs ?? ''}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10)
+            onChange({ ...attachment, durationMs: n > 0 ? n : undefined })
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 function MessageBody({ step, onChange, steps, t }: BodyProps<'message'>) {
-  const buttons = step.buttons ?? []
-  const setButtons = (bs: ButtonDef[]) => onChange({ ...step, buttons: bs.length ? bs : undefined })
-  const setButton = (i: number, b: ButtonDef) => setButtons(buttons.map((x, j) => (j === i ? b : x)))
   return (
     <>
       <TextAreaField label={t('editor_text')} value={step.text} maxLength={2000} onChange={(e) => onChange({ ...step, text: e.target.value })} />
       <TextInputField label={t('editor_image')} type="url" value={step.imageUrl ?? ''} placeholder="https://" onChange={(e) => onChange({ ...step, imageUrl: e.target.value || undefined })} />
-      <VStack spacing={8}>
-        <Text typo="13" bold color="txt-black-darker">
-          {t('editor_buttons')} <span className="fe-count">({buttons.length}/{MAX_BUTTONS})</span>
-        </Text>
-        {buttons.map((b, i) => (
-          <div className="fe-subitem" key={i}>
-            <div className="fe-grid-2">
-              <TextInputField
-                label={t('editor_button_label')}
-                helperText={`${b.label.length}/${MAX_BUTTON_LABEL}`}
-                value={b.label}
-                maxLength={MAX_BUTTON_LABEL}
-                onChange={(e) => setButton(i, { ...b, label: e.target.value })}
-              />
-              <TextInputField
-                label={t('editor_button_url')}
-                type="url"
-                value={b.url ?? ''}
-                placeholder="https://"
-                onChange={(e) => {
-                  const url = e.target.value
-                  setButton(i, url ? { label: b.label, url } : { label: b.label, next: b.next ?? null })
-                }}
-              />
-            </div>
-            <HStack spacing={8} align="end">
-              <div className="fe-grow">{!b.url && <StepPicker label={t('editor_next')} value={b.next} steps={steps} t={t} onChange={(next) => setButton(i, { ...b, next })} />}</div>
-              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => setButtons(buttons.filter((_, j) => j !== i))} />
-            </HStack>
-          </div>
-        ))}
-        <div>
-          <AddButton text={t('editor_add_button')} disabled={buttons.length >= MAX_BUTTONS} onClick={() => setButtons([...buttons, { label: '', next: null }])} />
-        </div>
-      </VStack>
+      <AttachmentFields attachment={step.attachment} t={t} onChange={(attachment) => onChange({ ...step, attachment })} />
+      <ButtonList buttons={step.buttons ?? []} max={MAX_BUTTONS} steps={steps} t={t} onChange={(bs) => onChange({ ...step, buttons: bs.length ? bs : undefined })} />
+      <CardsEditor cards={step.cards ?? []} steps={steps} t={t} onChange={(cs) => onChange({ ...step, cards: cs.length ? cs : undefined })} />
       <NextField step={step} onChange={onChange} steps={steps} t={t} />
     </>
   )

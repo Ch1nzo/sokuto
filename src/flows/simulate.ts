@@ -2,7 +2,7 @@ import { RecordingAdapter } from '../channels/adapter'
 import type { Channel, InboundEvent, OutboundMessage } from '../channels/types'
 import type { Db } from '../db'
 import type { ContactRow } from '../contacts'
-import { matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
+import { flattenButtons, matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
 import { SKIP_PAYLOAD } from './inputs'
 import type { FlowRecord } from './types'
 
@@ -47,7 +47,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     if (input.button && ctx.dryRunSession?.stepId) {
       const step = liveFlow.definition.steps.find((s) => s.id === ctx.dryRunSession!.stepId)
       if (step && step.type === 'message') {
-        const idx = step.buttons?.findIndex((b) => b.label === input.button) ?? -1
+        const idx = flattenButtons(step).findIndex((b) => b.label === input.button)
         if (idx >= 0) payload = `sk:${liveFlow.id}:${step.id}:${idx}`
       } else if (step && step.type === 'question') payload = input.button === step.skipLabel ? SKIP_PAYLOAD : `sk-choice:${input.button}`
     }

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
-import type { ChannelProfile, InboundEvent, OutboundMessage } from '../channels/types'
+import type { ChannelProfile, InboundEvent, OutboundButton, OutboundMessage } from '../channels/types'
 import { addTag, firstName, getTags, parseFields, removeTag, setBotPaused, setField, type ContactRow } from '../contacts'
 import { DEFAULT_RETRY_TEXT, SKIP_PAYLOAD, validateInput } from './inputs'
 import { matchRules, normalize } from './rules'
@@ -190,7 +190,7 @@ async function deliver(ctx: RunContext, step: Step, msg: OutboundMessage) {
     result = await ctx.adapter.send(ctx.contact.channelUserId, msg, { replyToken: ctx.replyToken })
   }
   if (ctx.dryRun) return result
-  await logMessage(ctx.db, { contactId: ctx.contact.id, direction: 'out', source: 'bot', kind: msg.imageUrl && !msg.text ? 'image' : 'text', text: msg.text, payload: msg, flowId: ctx.flow.id, stepId: step.id, error: result.ok ? undefined : result.error })
+  await logMessage(ctx.db, { contactId: ctx.contact.id, direction: 'out', source: 'bot', kind: msg.text ? 'text' : msg.cards?.length ? 'cards' : (msg.attachment?.type ?? (msg.imageUrl ? 'image' : 'text')), text: msg.text, payload: msg, flowId: ctx.flow.id, stepId: step.id, error: result.ok ? undefined : result.error })
   await logEvent(ctx.db, { type: result.ok ? 'step_sent' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: result.ok ? undefined : { error: result.error } })
   return result
 }
@@ -216,8 +216,13 @@ async function endSession(ctx: RunContext) {
   await logEvent(ctx.db, { type: 'flow_completed', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id })
 }
 
-function renderButtons(ctx: RunContext, step: Step & { type: 'message' }, buttons: ButtonDef[]) {
-  return buttons.map((b, i) => ({ label: render(ctx, b.label), url: b.url, payload: b.url ? undefined : buttonPayload(ctx.flow.id, step.id, i) }))
+/** Top-level buttons, then each card's buttons: the position here is the index in the button payload. */
+export function flattenButtons(step: Step & { type: 'message' }): ButtonDef[] {
+  return [...(step.buttons ?? []), ...(step.cards ?? []).flatMap((c) => c.buttons)]
+}
+
+function renderButton(ctx: RunContext, step: Step & { type: 'message' }, b: ButtonDef, index: number): OutboundButton {
+  return { label: render(ctx, b.label), url: b.url, payload: b.url ? undefined : buttonPayload(ctx.flow.id, step.id, index) }
 }
 
 /** Choices as quick replies, plus the skip button when the step has one. */
@@ -281,16 +286,20 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
     if (!step) return endSession(ctx)
     switch (step.type) {
       case 'message': {
-        const buttons = step.buttons?.filter((b) => b.label) ?? []
-        const msg: OutboundMessage = { text: step.text ? render(ctx, step.text) : undefined, imageUrl: step.imageUrl || undefined }
+        const buttons = step.buttons ?? []
+        const msg: OutboundMessage = { text: step.text ? render(ctx, step.text) : undefined, imageUrl: step.imageUrl || undefined, attachment: step.attachment }
         if (buttons.length > 0) {
-          const rendered = renderButtons(ctx, step, buttons)
+          const rendered = buttons.map((b, i) => renderButton(ctx, step, b, i))
           if (buttons.length <= 3 && buttons.some((b) => b.url)) msg.buttons = rendered
           else msg.quickReplies = rendered
         }
+        if (step.cards?.length) {
+          let index = buttons.length
+          msg.cards = step.cards.map((c) => ({ title: render(ctx, c.title), subtitle: c.subtitle ? render(ctx, c.subtitle) : undefined, imageUrl: c.imageUrl || undefined, buttons: c.buttons.map((b) => renderButton(ctx, step, b, index++)) }))
+        }
         const result = await deliver(ctx, step, msg)
         if (!result.ok) return endSession(ctx)
-        const waitsForButton = buttons.some((b) => !b.url && b.next)
+        const waitsForButton = flattenButtons(step).some((b) => !b.url && b.next)
         if (waitsForButton) {
           await saveSession(ctx, { stepId: step.id, waiting: 'button' })
           return
@@ -423,7 +432,7 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
   if (session.waiting === 'button' && step.type === 'message') {
     const parsed = parseButtonPayload(event.payload)
     if (!parsed || parsed.flowId !== ctx.flow.id || parsed.stepId !== step.id) return false
-    const button = step.buttons?.[parsed.index]
+    const button = flattenButtons(step)[parsed.index]
     if (!button) return false
     if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
     await runFrom(ctx, button.next)
@@ -438,7 +447,7 @@ export async function resumeFromButton(ctx: RunContext, payload: string): Promis
   if (!parsed || parsed.flowId !== ctx.flow.id) return false
   const step = ctx.flow.definition.steps.find((s) => s.id === parsed.stepId)
   if (!step || step.type !== 'message') return false
-  const button = step.buttons?.[parsed.index]
+  const button = flattenButtons(step)[parsed.index]
   if (!button) return false
   if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
   await runFrom(ctx, button.next)

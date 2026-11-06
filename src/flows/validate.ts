@@ -32,9 +32,11 @@ const actionSchema = z.discriminatedUnion('type', [
 ])
 
 const buttonSchema = z.object({ label: z.string().min(1).max(40), next, url: z.string().url().optional() })
+const cardSchema = z.object({ title: z.string().min(1).max(40), subtitle: z.string().max(60).optional(), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).min(1).max(3) })
+const attachmentSchema = z.object({ type: z.enum(['video', 'audio', 'file']), url: z.string().url().startsWith('https://'), previewImageUrl: z.string().url().optional(), durationMs: z.number().int().positive().optional() })
 
 const stepSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), type: z.literal('message'), text: z.string().max(2000).default(''), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).max(13).optional(), next }),
+  z.object({ id: z.string().min(1), type: z.literal('message'), text: z.string().max(2000).default(''), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).max(13).optional(), cards: z.array(cardSchema).max(10).optional(), attachment: attachmentSchema.optional(), next }),
   z.object({ id: z.string().min(1), type: z.literal('question'), text: z.string().min(1).max(2000), field: z.string().min(1).regex(/^[\w.-]+$/), choices: z.array(z.string().min(1).max(20)).max(13).optional(), validate: z.enum(INPUT_VALIDATIONS).optional(), retryText: z.string().max(2000).optional(), skipLabel: z.string().min(1).max(20).optional(), next }),
   z.object({ id: z.string().min(1), type: z.literal('condition'), rules: z.array(ruleSchema).min(1), mode: z.enum(['all', 'any']).optional(), yes: next, no: next }),
   z.object({ id: z.string().min(1), type: z.literal('action'), actions: z.array(actionSchema).min(1), next }),
@@ -74,7 +76,12 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
       case 'message':
         check(s.next, `step ${s.id}.next`)
         s.buttons?.forEach((b, i) => check(b.next, `step ${s.id}.buttons[${i}].next`))
-        if (!s.text && !s.imageUrl) errors.push(`step ${s.id}: message needs text or imageUrl`)
+        s.cards?.forEach((c, i) => c.buttons.forEach((b, j) => check(b.next, `step ${s.id}.cards[${i}].buttons[${j}].next`)))
+        if (new Set(s.cards?.map((c) => c.buttons.length)).size > 1) errors.push(`step ${s.id}: all cards must have the same number of buttons (LINE carousel)`)
+        if (!s.text && !s.imageUrl && !s.cards?.length && !s.attachment) errors.push(`step ${s.id}: message needs text, imageUrl, cards or attachment`)
+        if (s.attachment?.type === 'video' && !s.attachment.previewImageUrl) warnings.push(`step ${s.id}: video without previewImageUrl is sent as a link on LINE`)
+        if (s.attachment?.type === 'audio' && !s.attachment.durationMs) warnings.push(`step ${s.id}: audio without durationMs is sent as a link on LINE`)
+        if (s.attachment?.type === 'file') warnings.push(`step ${s.id}: files are sent as a link on LINE and Instagram`)
         break
       case 'question':
         check(s.next, `step ${s.id}.next`)
@@ -121,6 +128,9 @@ Triggers (when the flow starts):
 Steps:
 - { "id", "type": "message", "text": "Hi {{first_name}}!", "imageUrl"?: "https://...", "buttons"?: [{ "label": "注文", "next": "q1" } | { "label": "詳細", "url": "https://..." }], "next"?: stepId }
   Buttons with "next" wait for the tap. Without buttons the flow continues to "next" immediately.
+  "cards"?: [{ "title": "Plan A" (≤40), "subtitle"?: "¥1,000 / month" (≤60), "imageUrl"?: "https://...", "buttons": [1–3 buttons as above] }] (≤10) adds a carousel after the text. EVERY card must have the SAME number of buttons (LINE carousel rule). Card buttons with "next" wait for the tap like top-level buttons.
+  "attachment"?: { "type": "video"|"audio"|"file", "url": "https://...", "previewImageUrl"?: "https://..." (video), "durationMs"?: 30000 (audio) } sends a video, audio or file. On LINE a video without previewImageUrl, an audio without durationMs, and any file are sent as a text link; on Instagram a file is sent as a link.
+  A message needs text, imageUrl, cards or attachment. Send order: image → attachment → text (+ buttons) → cards; quick replies go on the last one.
 - { "id", "type": "question", "text": "電話番号は?", "field": "phone", "choices"?: ["1","2","3"], "validate"?: "email"|"phone"|"number"|"url"|"date", "retryText"?: "電話番号の形式で送ってください", "skipLabel"?: "スキップ", "next": stepId }  waits for the answer and saves it to the contact field
   "validate" checks and normalizes the answer before saving (phone: digits with an optional leading +, 8–15 digits, spaces/hyphens/parentheses removed; number: half-width; url: http(s) only; date: saved as YYYY-MM-DD, real days only). An invalid answer gets "retryText" and the question keeps waiting: always write a retryText that says what format is expected (the default is a generic Japanese sentence). "skipLabel" adds a quick reply that moves on to "next" without saving the field; with it, at most 12 choices.
 - { "id", "type": "condition", "rules": [{ "field": "rating", "op": "lte", "value": "2" }], "mode"?: "all"|"any", "yes": stepId, "no": stepId }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buttonPayload, matchTrigger, parseButtonPayload, renderText, startFlow } from '../src/flows/engine'
+import { buttonPayload, flattenButtons, matchTrigger, parseButtonPayload, renderText, startFlow } from '../src/flows/engine'
 import { RecordingAdapter } from '../src/channels/adapter'
 import type { Db } from '../src/db'
 import type { FlowRecord, Trigger } from '../src/flows/types'
@@ -204,6 +204,21 @@ describe('buttonPayload / parseButtonPayload', () => {
     const p = buttonPayload(12, 'm1', 3)
     expect(p).toBe('sk:12:m1:3')
     expect(parseButtonPayload(p)).toEqual({ flowId: 12, stepId: 'm1', index: 3 })
+  })
+
+  it('flattenButtons lists top-level buttons, then card buttons in order', () => {
+    const labels = flattenButtons({
+      id: 'm1',
+      type: 'message',
+      text: '',
+      buttons: [{ label: 'a' }, { label: 'b' }],
+      cards: [
+        { title: 'x', buttons: [{ label: 'c' }, { label: 'd' }] },
+        { title: 'y', buttons: [{ label: 'e' }, { label: 'f' }] },
+      ],
+    }).map((b) => b.label)
+    expect(labels).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(flattenButtons({ id: 'm2', type: 'message', text: 'x' })).toEqual([])
   })
 
   it('rejects garbage', () => {

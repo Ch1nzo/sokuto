@@ -225,6 +225,45 @@ describe('renderMetaMessages', () => {
   })
 })
 
+describe('renderMetaMessages cards and attachments', () => {
+  const cards = [
+    { title: 'T'.repeat(90), subtitle: 'S'.repeat(90), imageUrl: 'https://example.com/c.png', buttons: [{ label: 'Buy', payload: 'sk:1:m1:0' }, { label: 'Site', url: 'https://example.com' }] },
+    { title: 'Plain', buttons: [] },
+  ]
+
+  for (const channel of ['messenger', 'instagram'] as const) {
+    it(`renders cards as a generic template on ${channel}`, () => {
+      const out = renderMetaMessages({ text: 'Plans', cards }, channel)
+      expect(out).toHaveLength(2)
+      expect(out[0]).toEqual({ text: 'Plans' })
+      const payload = (out[1] as { attachment: { type: string; payload: { template_type: string; elements: Record<string, unknown>[] } } }).attachment
+      expect(payload.type).toBe('template')
+      expect(payload.payload.template_type).toBe('generic')
+      expect(payload.payload.elements[0]).toEqual({
+        title: 'T'.repeat(80),
+        subtitle: 'S'.repeat(80),
+        image_url: 'https://example.com/c.png',
+        buttons: [
+          { type: 'postback', title: 'Buy', payload: 'sk:1:m1:0' },
+          { type: 'web_url', title: 'Site', url: 'https://example.com' },
+        ],
+      })
+      expect(payload.payload.elements[1]!.buttons).toBeUndefined()
+    })
+  }
+
+  it('sends video, audio and file as attachments before the text', () => {
+    const out = renderMetaMessages({ text: 'Here', attachment: { type: 'file', url: 'https://example.com/f.pdf' } }, 'messenger')
+    expect(out).toEqual([{ attachment: { type: 'file', payload: { url: 'https://example.com/f.pdf', is_reusable: true } } }, { text: 'Here' }])
+    expect(renderMetaMessages({ attachment: { type: 'video', url: 'https://example.com/v.mp4' } }, 'instagram')).toEqual([{ attachment: { type: 'video', payload: { url: 'https://example.com/v.mp4', is_reusable: true } } }])
+    expect(renderMetaMessages({ attachment: { type: 'audio', url: 'https://example.com/a.m4a', durationMs: 1000 } }, 'messenger')).toEqual([{ attachment: { type: 'audio', payload: { url: 'https://example.com/a.m4a', is_reusable: true } } }])
+  })
+
+  it('sends a file as a link on instagram', () => {
+    expect(renderMetaMessages({ attachment: { type: 'file', url: 'https://example.com/f.pdf' } }, 'instagram')).toEqual([{ text: 'https://example.com/f.pdf' }])
+  })
+})
+
 describe('renderMetaMessages URL quick replies', () => {
   it('renders URL quick replies as web_url buttons and keeps only non-URL quick replies', () => {
     const out = renderMetaMessages({ text: 'x', quickReplies: [{ label: 'Site', url: 'https://x' }, { label: 'A', payload: 'a' }] }, 'messenger')

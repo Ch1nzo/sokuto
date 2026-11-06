@@ -59,20 +59,22 @@ export function parseLineWebhook(body: string): ParsedWebhook {
 
 type LineMessageObject = Record<string, unknown>
 
+function lineAction(b: OutboundButton) {
+  return b.url ? { type: 'uri', label: b.label.slice(0, 20), uri: b.url } : { type: 'postback', label: b.label.slice(0, 20), data: b.payload ?? b.label, displayText: b.label }
+}
+
 function quickReply(items: OutboundButton[]) {
-  return {
-    items: items.slice(0, 13).map((b) => ({
-      type: 'action',
-      action: b.url
-        ? { type: 'uri', label: b.label.slice(0, 20), uri: b.url }
-        : { type: 'postback', label: b.label.slice(0, 20), data: b.payload ?? b.label, displayText: b.label },
-    })),
-  }
+  return { items: items.slice(0, 13).map((b) => ({ type: 'action', action: lineAction(b) })) }
 }
 
 export function renderLineMessages(msg: OutboundMessage): LineMessageObject[] {
   const out: LineMessageObject[] = []
   if (msg.imageUrl) out.push({ type: 'image', originalContentUrl: msg.imageUrl, previewImageUrl: msg.imageUrl })
+  const a = msg.attachment
+  if (a?.type === 'video' && a.previewImageUrl) out.push({ type: 'video', originalContentUrl: a.url, previewImageUrl: a.previewImageUrl })
+  else if (a?.type === 'audio' && a.durationMs) out.push({ type: 'audio', originalContentUrl: a.url, duration: a.durationMs })
+  // ponytail: LINE bots cannot send files, and video/audio need a preview/duration: send the URL as text instead.
+  else if (a) out.push({ type: 'text', text: a.url })
   if (msg.buttons && msg.buttons.length > 0) {
     out.push({
       type: 'template',
@@ -80,13 +82,21 @@ export function renderLineMessages(msg: OutboundMessage): LineMessageObject[] {
       template: {
         type: 'buttons',
         text: (msg.text ?? ' ').slice(0, 160),
-        actions: msg.buttons.slice(0, 4).map((b) =>
-          b.url ? { type: 'uri', label: b.label.slice(0, 20), uri: b.url } : { type: 'postback', label: b.label.slice(0, 20), data: b.payload ?? b.label, displayText: b.label },
-        ),
+        actions: msg.buttons.slice(0, 4).map(lineAction),
       },
     })
   } else if (msg.text) {
     out.push({ type: 'text', text: msg.text.slice(0, 5000) })
+  }
+  if (msg.cards && msg.cards.length > 0) {
+    out.push({
+      type: 'template',
+      altText: msg.cards.map((c) => c.title).join(' / ').slice(0, 400),
+      template: {
+        type: 'carousel',
+        columns: msg.cards.slice(0, 10).map((c) => ({ thumbnailImageUrl: c.imageUrl, title: c.title.slice(0, 40), text: (c.subtitle || c.title).slice(0, 60), actions: c.buttons.slice(0, 3).map(lineAction) })),
+      },
+    })
   }
   if (msg.quickReplies && msg.quickReplies.length > 0 && out.length > 0) {
     out[out.length - 1]!.quickReply = quickReply(msg.quickReplies)

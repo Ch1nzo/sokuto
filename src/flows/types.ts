@@ -1,4 +1,4 @@
-import type { Channel } from '../channels/types'
+import type { Channel, OutboundAttachment } from '../channels/types'
 import type { InputValidation } from './inputs'
 
 /** When an automation starts. */
@@ -32,8 +32,13 @@ export type Action =
 
 export type ButtonDef = { label: string; next?: string | null; url?: string }
 
+/** Carousel card: every card of a step must have the same number of buttons (LINE). */
+export type CardDef = { title: string; subtitle?: string; imageUrl?: string; buttons: ButtonDef[] }
+
+export type AttachmentDef = OutboundAttachment
+
 export type Step =
-  | { id: string; type: 'message'; text: string; imageUrl?: string; buttons?: ButtonDef[]; next?: string | null }
+  | { id: string; type: 'message'; text: string; imageUrl?: string; buttons?: ButtonDef[]; cards?: CardDef[]; attachment?: AttachmentDef; next?: string | null }
   | { id: string; type: 'question'; text: string; field: string; choices?: string[]; validate?: InputValidation; retryText?: string; skipLabel?: string; next?: string | null }
   | { id: string; type: 'condition'; rules: ConditionRule[]; mode?: 'all' | 'any'; yes?: string | null; no?: string | null }
   | { id: string; type: 'action'; actions: Action[]; next?: string | null }

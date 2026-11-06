@@ -1,5 +1,5 @@
 import type { useT } from '../../lib/i18n'
-import type { Action, ConditionRule, FlowRecord, Step, Trigger } from '@shared/flows/types'
+import type { Action, AttachmentDef, ButtonDef, ConditionRule, FlowRecord, Step, Trigger } from '@shared/flows/types'
 import type { Channel, OutboundMessage } from '@shared/channels/types'
 
 /* ---------- Local mirrors of server-only types (src/flows/simulate.ts pulls runtime deps) ---------- */
@@ -38,6 +38,11 @@ export const MAX_BUTTONS = 13
 export const MAX_BUTTON_LABEL = 40
 export const MAX_CHOICE_LABEL = 20
 export const MAX_REPLY_VARIANTS = 4
+export const MAX_CARDS = 10
+export const MAX_CARD_BUTTONS = 3
+export const MAX_CARD_TITLE = 40
+export const MAX_CARD_SUBTITLE = 60
+export const ATTACHMENT_TYPES: AttachmentDef['type'][] = ['video', 'audio', 'file']
 
 const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr' }
 
@@ -102,9 +107,10 @@ export function changeStepType(s: Step, type: StepType): Step {
 /** Replace every pointer to `removedId` in a step with null. */
 export function clearRefs(s: Step, removedId: string): Step {
   const fix = (v: string | null | undefined) => (v === removedId ? null : v)
+  const fixButtons = (bs: ButtonDef[]) => bs.map((b) => ('next' in b ? { ...b, next: fix(b.next) } : b))
   switch (s.type) {
     case 'message':
-      return { ...s, next: fix(s.next), buttons: s.buttons?.map((b) => ('next' in b ? { ...b, next: fix(b.next) } : b)) }
+      return { ...s, next: fix(s.next), buttons: s.buttons && fixButtons(s.buttons), cards: s.cards?.map((c) => ({ ...c, buttons: fixButtons(c.buttons) })) }
     case 'condition':
       return { ...s, yes: fix(s.yes), no: fix(s.no) }
     case 'random':

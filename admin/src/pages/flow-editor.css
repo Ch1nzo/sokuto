@@ -82,6 +82,11 @@
 .fe-out .bubble { max-width: 100%; }
 .fe-out__img { display: block; max-width: 160px; max-height: 120px; border-radius: var(--radius-8); margin-bottom: 6px; }
 .fe-out__chips { justify-content: flex-end; }
+.fe-cards { display: flex; gap: 8px; overflow-x: auto; max-width: 100%; }
+.fe-card { flex: 0 0 180px; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8); background: var(--bg-white-normal); overflow-wrap: anywhere; }
+.fe-card__img { width: 100%; height: 90px; object-fit: cover; border-radius: var(--radius-6); }
+.fe-card__title { font-size: 13px; font-weight: 600; color: var(--txt-black-darkest); }
+.fe-card__sub { font-size: 12px; color: var(--txt-black-dark); }
 a.chip { text-decoration: none; }
 .fe-comment-reply { align-self: flex-end; display: flex; align-items: flex-start; gap: 4px; max-width: 85%; }
 

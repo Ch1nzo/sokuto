@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Divider, HStack, Icon, KeyValueItem, SegmentedControl, SegmentedControlItem, Spinner, Tag, Text, TextField, VStack } from '@channel.io/bezier-react'
 import { CancelIcon, ChatBubbleIcon, CommentIcon, NotificationIcon, PersonAddIcon, RefreshIcon, SendIcon, ArrowRightUpSmallIcon } from '@channel.io/bezier-icons'
 import type { FlowDefinition } from '@shared/flows/types'
-import type { Channel } from '@shared/channels/types'
+import type { Channel, OutboundButton } from '@shared/channels/types'
 import { api } from '../../lib/api'
 import type { Key } from '../../lib/i18n'
 import { ErrorBanner } from '../../components'
@@ -72,6 +72,18 @@ export function TestPanel({ flowId, definition, defaultChannel, onClose, t }: { 
     setError('')
     setText('')
   }
+
+  const chip = (b: OutboundButton, k: number) =>
+    b.url ? (
+      <a key={k} className="chip" href={b.url} target="_blank" rel="noreferrer">
+        {b.label}
+        <Icon source={ArrowRightUpSmallIcon} size="xs" />
+      </a>
+    ) : (
+      <button key={k} type="button" className="chip" disabled={busy} onClick={() => send({ type: 'message', button: b.label })}>
+        {b.label}
+      </button>
+    )
 
   const trimmed = text.trim()
   const lastStep = result?.steps[result.steps.length - 1]
@@ -144,22 +156,24 @@ export function TestPanel({ flowId, definition, defaultChannel, onClose, t }: { 
                       {o.text}
                     </div>
                   )}
-                  {chips.length > 0 && (
-                    <div className="chips fe-out__chips">
-                      {chips.map((b, k) =>
-                        b.url ? (
-                          <a key={k} className="chip" href={b.url} target="_blank" rel="noreferrer">
-                            {b.label}
-                            <Icon source={ArrowRightUpSmallIcon} size="xs" />
-                          </a>
-                        ) : (
-                          <button key={k} type="button" className="chip" disabled={busy} onClick={() => send({ type: 'message', button: b.label })}>
-                            {b.label}
-                          </button>
-                        ),
-                      )}
+                  {o.attachment && (
+                    <a className="bubble out fe-wrap" href={o.attachment.url} target="_blank" rel="noreferrer">
+                      {t(`attachment_${o.attachment.type}`)}: {o.attachment.url}
+                    </a>
+                  )}
+                  {o.cards && o.cards.length > 0 && (
+                    <div className="fe-cards">
+                      {o.cards.map((c, k) => (
+                        <div key={k} className="fe-card">
+                          {c.imageUrl && <img src={c.imageUrl} alt="" className="fe-card__img" />}
+                          <div className="fe-card__title">{c.title}</div>
+                          {c.subtitle && <div className="fe-card__sub">{c.subtitle}</div>}
+                          {c.buttons.length > 0 && <div className="chips">{c.buttons.map(chip)}</div>}
+                        </div>
+                      ))}
                     </div>
                   )}
+                  {chips.length > 0 && <div className="chips fe-out__chips">{chips.map(chip)}</div>}
                 </div>
               )
             })}

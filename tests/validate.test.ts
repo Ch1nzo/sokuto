@@ -87,11 +87,38 @@ describe('validateFlow', () => {
     expect(errors).toContain('entry must name the first step')
   })
 
-  it('rejects a message with neither text nor imageUrl', () => {
+  it('rejects a message with neither text, imageUrl, cards nor attachment', () => {
     const errors = errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', text: '' }] })
-    expect(errors).toContain('step a: message needs text or imageUrl')
+    expect(errors).toContain('step a: message needs text, imageUrl, cards or attachment')
     // text defaults to '' when omitted
-    expect(errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', imageUrl: '' }] })).toContain('step a: message needs text or imageUrl')
+    expect(errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', imageUrl: '' }] })).toContain('step a: message needs text, imageUrl, cards or attachment')
+  })
+
+  it('accepts cards and attachments without text, with warnings for LINE links', () => {
+    const trig = [{ type: 'keyword', keywords: ['a'] }]
+    const cards = [
+      { title: 'A', buttons: [{ label: 'Go', next: 'b' }] },
+      { title: 'B', subtitle: 'sub', imageUrl: '', buttons: [{ label: 'Site', url: 'https://example.com' }] },
+    ]
+    const r = validateFlow({ triggers: trig, entry: 'a', steps: [{ id: 'a', type: 'message', cards }, { id: 'b', type: 'message', attachment: { type: 'video', url: 'https://example.com/v.mp4' } }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.warnings).toEqual(['step b: video without previewImageUrl is sent as a link on LINE'])
+    const ok = validateFlow({ triggers: trig, entry: 'a', steps: [{ id: 'a', type: 'message', attachment: { type: 'audio', url: 'https://example.com/a.m4a', durationMs: 3000 } }] })
+    expect(ok.ok && ok.warnings).toEqual([])
+    const file = validateFlow({ triggers: trig, entry: 'a', steps: [{ id: 'a', type: 'message', attachment: { type: 'file', url: 'https://example.com/f.pdf' } }] })
+    expect(file.ok && file.warnings).toEqual(['step a: files are sent as a link on LINE and Instagram'])
+  })
+
+  it('rejects cards with different button counts, unknown card refs and http attachments', () => {
+    const cards = [
+      { title: 'A', buttons: [{ label: '1', next: 'zz' }] },
+      { title: 'B', buttons: [{ label: '1' }, { label: '2' }] },
+    ]
+    const errors = errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', cards }] })
+    expect(errors).toContain('step a: all cards must have the same number of buttons (LINE carousel)')
+    expect(errors).toContain('step a.cards[0].buttons[0].next points to unknown step "zz"')
+    expect(errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', cards: [{ title: 'A', buttons: [] }] }] }).length).toBeGreaterThan(0)
+    expect(errorsOf({ triggers: [], entry: 'a', steps: [{ id: 'a', type: 'message', attachment: { type: 'file', url: 'http://example.com/f.pdf' } }] }).length).toBeGreaterThan(0)
   })
 
   it('rejects invalid trigger shapes', () => {
