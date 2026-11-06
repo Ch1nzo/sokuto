@@ -294,7 +294,7 @@ export function htmlToText(html: string): { title: string; text: string } {
 export const MAX_DOCUMENT_CHARS = 200_000
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
-async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+export async function readCapped(res: Response, max: number): Promise<Uint8Array> {
   const reader = res.body?.getReader()
   if (!reader) return new Uint8Array()
   const parts: Uint8Array[] = []

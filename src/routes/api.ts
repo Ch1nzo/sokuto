@@ -72,6 +72,8 @@ import {
   saveFaq,
   saveProduct,
   suggestFaqs,
+  publicHttpsUrl,
+  readCapped,
 } from '../bot'
 
 /** Everything here works on the workspace `c.get('ws')` (see resolveWorkspace). */
@@ -251,12 +253,14 @@ apiRoutes.put('/channels/line/richmenu', async (c) => {
   const parsed = lineRichMenuSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: 'invalid_richmenu', errors: zodErrors(parsed.error) }, 400)
   const menu = parsed.data
-  // No redirects: the image must be served directly from the given https URL.
-  const img = await fetch(menu.imageUrl, { redirect: 'manual' }).catch(() => null)
+  // No redirects: the image must be served directly from the given https URL on a public host (same rule as document fetches).
+  if (!publicHttpsUrl(menu.imageUrl)) return c.json({ error: 'invalid_image' }, 400)
+  const img = await fetch(menu.imageUrl, { redirect: 'manual', signal: AbortSignal.timeout(10_000) }).catch(() => null)
   const contentType = img?.headers.get('content-type')?.split(';')[0]!.trim() ?? ''
   if (!img?.ok || (contentType !== 'image/jpeg' && contentType !== 'image/png')) return c.json({ error: 'invalid_image' }, 400)
-  const bytes = await img.arrayBuffer()
-  if (bytes.byteLength > MAX_RICHMENU_IMAGE) return c.json({ error: 'image_too_large' }, 400)
+  if (Number(img.headers.get('content-length')) > MAX_RICHMENU_IMAGE) return c.json({ error: 'image_too_large' }, 400)
+  const bytes = await readCapped(img, MAX_RICHMENU_IMAGE).then((u) => u.buffer as ArrayBuffer, () => null)
+  if (!bytes) return c.json({ error: 'image_too_large' }, 400)
   const token = cfg.channelAccessToken
   const created = await lineCreateRichMenu(token, buildRichMenu(menu))
   if (!created.ok) return c.json({ error: 'line_error', detail: created.error }, 502)
