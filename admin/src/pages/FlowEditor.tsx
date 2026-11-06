@@ -341,7 +341,7 @@ export default function FlowEditor() {
         />
       </div>
 
-      <div className="fe-layout">
+      <div className={['fe-layout', selectedId ? 'has-panel' : ''].filter(Boolean).join(' ')}>
         <div className="fe-canvas" ref={canvasRef}>
           <Canvas
             definition={def}

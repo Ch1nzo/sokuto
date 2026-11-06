@@ -260,7 +260,7 @@ export function Canvas({
     >
       <Background variant={BackgroundVariant.Dots} gap={16} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable />
+      <MiniMap pannable zoomable style={{ width: 140, height: 90 }} />
     </ReactFlow>
   )
 }
