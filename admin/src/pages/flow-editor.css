@@ -1,7 +1,19 @@
 /* Flow editor (pages/FlowEditor.tsx + pages/flow-editor/*). Unlayered class rules only; see components/README.md. */
 
-/* The canvas wants the whole width and height of the main area. */
-.main__inner:has(> .fe-page) { max-width: none; padding-bottom: var(--page-pad-y); }
+/* Full-bleed editor (Channel.io style): beside the app sidebar the canvas fills the whole viewport, and the
+   header (name, status, channel, save/publish/delete), the toolbar and any banners float over it as cards. */
+.main__inner:has(> .fe-page) { max-width: none; padding: 0; }
+.fe-page { position: relative; height: 100vh; height: 100dvh; gap: 8px; padding: 16px; pointer-events: none; }
+.fe-page > :not(.fe-layout):not(.fe-side) {
+  pointer-events: auto; position: relative; z-index: 2;
+  width: fit-content; max-width: 100%;
+  margin: 0; padding: 10px 12px;
+  background: var(--bg-white-normal); border: 1px solid var(--bdr-black-light);
+  border-radius: var(--radius-12); box-shadow: var(--ev-2);
+}
+.fe-page:has(.fe-layout.has-panel) > :not(.fe-layout):not(.fe-side) { max-width: calc(100% - 380px - 16px); }
+.fe-page > .page-header { gap: 8px 16px; }
+.fe-side { pointer-events: auto; }
 
 /* ---------- header ---------- */
 .fe-name { width: 100%; max-width: 560px; }
@@ -16,17 +28,16 @@
 .fe-toolbar__select { width: 200px; }
 
 /* The side panel only takes space while a node is selected (Channel.io style): otherwise the canvas gets the full width. */
-.fe-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; height: calc(100vh - 208px); height: calc(100dvh - 208px); min-height: 480px; }
+.fe-layout { position: absolute; inset: 0; z-index: 1; pointer-events: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .fe-layout.has-panel { grid-template-columns: minmax(0, 1fr) 380px; }
 .fe-panel:not(.is-open) { display: none; }
 .fe-canvas {
   min-width: 0; height: 100%; overflow: hidden; isolation: isolate;
-  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
 }
 .fe-panel {
   min-width: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain;
   padding: 16px;
-  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
+  border-left: 1px solid var(--bdr-black-light);
   background: var(--bg-white-normal);
 }
 .fe-panel__head { display: flex; align-items: center; gap: 8px; }
@@ -164,7 +175,10 @@ a.chip { text-decoration: none; }
 
 /* ---------- mobile: canvas fills the screen, the side panel is a bottom sheet ---------- */
 @media (max-width: 860px) {
-  .fe-layout { grid-template-columns: minmax(0, 1fr); height: calc(100vh - 120px); height: calc(100dvh - 120px); min-height: 360px; }
+  .fe-page { height: calc(100vh - 52px); height: calc(100dvh - 52px); padding: 12px; }
+  /* The panel is a bottom sheet here, so it never takes a grid column and the floating cards keep the full width. */
+  .fe-layout, .fe-layout.has-panel { grid-template-columns: minmax(0, 1fr); }
+  .fe-page > :not(.fe-layout):not(.fe-side), .fe-page:has(.fe-layout.has-panel) > :not(.fe-layout):not(.fe-side) { width: auto; max-width: 100%; }
   .fe-panel {
     display: none;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 800;
