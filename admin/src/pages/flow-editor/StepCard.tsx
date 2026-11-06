@@ -14,6 +14,7 @@ import {
   OPS_WITHOUT_VALUE,
   RULE_OPS,
   STEP_TYPES,
+  VALIDATE_TYPES,
   changeStepType,
   defaultAction,
   type ActionType,
@@ -83,7 +84,7 @@ function MessageBody({ step, onChange, steps, t }: BodyProps<'message'>) {
 
 function QuestionBody({ step, onChange, steps, t }: BodyProps<'question'>) {
   const tooLong = (step.choices ?? []).filter((c) => c.length > MAX_CHOICE_LABEL)
-  const problem = (step.choices?.length ?? 0) > MAX_BUTTONS || tooLong.length > 0
+  const problem = (step.choices?.length ?? 0) + (step.skipLabel ? 1 : 0) > MAX_BUTTONS || tooLong.length > 0
   return (
     <>
       <TextAreaField label={t('editor_text')} value={step.text} maxLength={2000} onChange={(e) => onChange({ ...step, text: e.target.value })} />
@@ -102,6 +103,16 @@ function QuestionBody({ step, onChange, steps, t }: BodyProps<'question'>) {
           {tooLong.length > 0 ? `: ${tooLong.join(', ')}` : ''}
         </Text>
       )}
+      <div className="fe-grid-2">
+        <SelectField
+          label={t('editor_validate')}
+          value={step.validate ?? ''}
+          options={[{ value: '', label: t('editor_validate_none') }, ...VALIDATE_TYPES.map((v) => ({ value: v, label: t(`editor_validate_${v}`) }))]}
+          onChange={(v) => onChange(v ? { ...step, validate: v, retryText: step.retryText || t('editor_retry_default') } : { ...step, validate: undefined, retryText: undefined })}
+        />
+        <TextInputField label={t('editor_skip_label')} value={step.skipLabel ?? ''} maxLength={MAX_CHOICE_LABEL} onChange={(e) => onChange({ ...step, skipLabel: e.target.value || undefined })} />
+      </div>
+      {step.validate && <TextInputField label={t('editor_retry_text')} value={step.retryText ?? ''} maxLength={2000} onChange={(e) => onChange({ ...step, retryText: e.target.value || undefined })} />}
       <NextField step={step} onChange={onChange} steps={steps} t={t} />
     </>
   )

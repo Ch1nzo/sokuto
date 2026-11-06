@@ -4,6 +4,7 @@ import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
 import type { ChannelProfile, InboundEvent, OutboundMessage } from '../channels/types'
 import { addTag, firstName, getTags, parseFields, removeTag, setBotPaused, setField, type ContactRow } from '../contacts'
+import { DEFAULT_RETRY_TEXT, SKIP_PAYLOAD, validateInput } from './inputs'
 import { matchRules, normalize } from './rules'
 import type { ButtonDef, FlowDefinition, FlowRecord, Step, Trigger } from './types'
 
@@ -214,6 +215,13 @@ function renderButtons(ctx: RunContext, step: Step & { type: 'message' }, button
   return buttons.map((b, i) => ({ label: render(ctx, b.label), url: b.url, payload: b.url ? undefined : buttonPayload(ctx.flow.id, step.id, i) }))
 }
 
+/** Choices as quick replies, plus the skip button when the step has one. */
+function questionQuickReplies(step: Step & { type: 'question' }): OutboundMessage['quickReplies'] {
+  const qr = (step.choices ?? []).map((c) => ({ label: c, payload: `sk-choice:${c}` }))
+  if (step.skipLabel) qr.push({ label: step.skipLabel, payload: SKIP_PAYLOAD })
+  return qr.length > 0 ? qr : undefined
+}
+
 export async function performActions(ctx: RunContext, actions: Array<{ type: string } & Record<string, unknown>>) {
   for (const a of actions) {
     if (ctx.dryRun) {
@@ -286,9 +294,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         break
       }
       case 'question': {
-        const msg: OutboundMessage = { text: render(ctx, step.text) }
-        if (step.choices && step.choices.length > 0) msg.quickReplies = step.choices.map((c) => ({ label: c, payload: `sk-choice:${c}` }))
-        const result = await deliver(ctx, step, msg)
+        const result = await deliver(ctx, step, { text: render(ctx, step.text), quickReplies: questionQuickReplies(step) })
         if (!result.ok) return endSession(ctx)
         await saveSession(ctx, { stepId: step.id, waiting: 'input', field: step.field })
         return
@@ -370,12 +376,24 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
     return false
   }
   if (session.waiting === 'input' && step.type === 'question') {
+    if (event.payload === SKIP_PAYLOAD && step.skipLabel) {
+      await runFrom(ctx, step.next)
+      return true
+    }
     const raw = event.payload?.startsWith('sk-choice:') ? event.payload.slice('sk-choice:'.length) : (event.text ?? event.payload ?? '')
     if (!raw.trim() && !(event.attachments && event.attachments.length)) return false
-    const value = raw.trim() || (event.attachments?.[0]?.url ?? event.attachments?.[0]?.type ?? '')
+    let value = raw.trim() || (event.attachments?.[0]?.url ?? event.attachments?.[0]?.type ?? '')
     if (step.choices && step.choices.length > 0 && !step.choices.some((c) => normalize(c) === normalize(value))) {
       // Not one of the offered choices: let triggers decide, otherwise re-ask.
       return false
+    }
+    if (step.validate) {
+      const normalized = validateInput(step.validate, value)
+      if (normalized === null) {
+        await deliver(ctx, step, { text: render(ctx, step.retryText || DEFAULT_RETRY_TEXT), quickReplies: questionQuickReplies(step) })
+        return true
+      }
+      value = normalized
     }
     ctx.lastInput = value
     if (ctx.dryRun) {

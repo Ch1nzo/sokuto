@@ -127,6 +127,19 @@ describe('validateFlow', () => {
     if (r.ok) expect(r.definition.triggers[0]).toEqual({ type: 'comment', keywords: ['link'], excludeKeywords: ['spam'], like: true })
   })
 
+  it('rejects skipLabel with 13 choices', () => {
+    const choices = Array.from({ length: 13 }, (_, i) => String(i))
+    expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'f', choices, skipLabel: 'Skip' }] })).toContain('step q: skipLabel needs a free quick-reply slot (max 12 choices)')
+    expect(validateFlow({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'f', choices: choices.slice(1), skipLabel: 'Skip' }] }).ok).toBe(true)
+  })
+
+  it('warns about validate without skipLabel', () => {
+    const r = validateFlow({ triggers: [{ type: 'keyword', keywords: ['a'] }], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'email', validate: 'email' }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.warnings).toEqual(['step q: validate without skipLabel: the person can only leave the question with a valid answer or a hand-over keyword'])
+    expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'f', validate: 'zip' }] }).length).toBeGreaterThan(0)
+  })
+
   it('rejects invalid step shapes and non-objects', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'bad field!' }] }).length).toBeGreaterThan(0)
     expect(errorsOf({ triggers: [], entry: 'd', steps: [{ id: 'd', type: 'delay', seconds: 0 }] }).length).toBeGreaterThan(0)

@@ -13,6 +13,7 @@ export type StepType = Step['type']
 export type TriggerType = Trigger['type']
 export type ActionType = Action['type']
 export type MatchType = NonNullable<Extract<Trigger, { type: 'keyword' }>['match']>
+export type ValidateType = NonNullable<Extract<Step, { type: 'question' }>['validate']>
 export type StepOf<T extends StepType> = Extract<Step, { type: T }>
 export type TFn = ReturnType<typeof useT>
 
@@ -20,6 +21,7 @@ export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'acti
 export const TRIGGER_TYPES: TriggerType[] = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply']
 export const ACTION_TYPES: ActionType[] = ['add_tag', 'remove_tag', 'set_field', 'notify', 'pause_bot', 'webhook']
 export const MATCH_TYPES: MatchType[] = ['contains', 'exact', 'starts_with']
+export const VALIDATE_TYPES: ValidateType[] = ['email', 'phone', 'number', 'url', 'date']
 export const RULE_OPS: ConditionRule['op'][] = ['equals', 'not_equals', 'contains', 'has_tag', 'not_has_tag', 'is_set', 'is_empty', 'gt', 'gte', 'lt', 'lte']
 export const OPS_WITHOUT_VALUE: ConditionRule['op'][] = ['is_set', 'is_empty']
 export const FLOW_CHANNELS: FlowChannel[] = ['any', 'line', 'messenger', 'instagram']

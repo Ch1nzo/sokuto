@@ -196,6 +196,49 @@ describe('simulateFlow', () => {
     expect(r.fields.size).toBe('M')
   })
 
+  const emailFlow = (q: Record<string, unknown> = {}) =>
+    flow({
+      triggers: [{ type: 'keyword', keywords: ['join'] }],
+      entry: 'q1',
+      steps: [
+        { id: 'q1', type: 'question', text: 'Email?', field: 'email', validate: 'email', ...q, next: 'm2' },
+        { id: 'm2', type: 'message', text: 'OK {{email}}' },
+      ],
+    })
+
+  it('re-asks an invalid answer and accepts a valid one', async () => {
+    const r = await simulateFlow(db, emailFlow({ retryText: 'メール形式で' }), [
+      { type: 'message', text: 'join' },
+      { type: 'message', text: 'nope' },
+      { type: 'message', text: 'a@b.co' },
+    ])
+    expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['メール形式で'])
+    expect(r.steps[1]!.waiting).toBe('input')
+    expect(r.steps[2]!.outputs.map((o) => o.text)).toEqual(['OK a@b.co'])
+    expect(r.fields.email).toBe('a@b.co')
+    expect(r.completed).toBe(true)
+  })
+
+  it('uses the default retry text', async () => {
+    const r = await simulateFlow(db, emailFlow(), [
+      { type: 'message', text: 'join' },
+      { type: 'message', text: 'nope' },
+    ])
+    expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['入力内容を確認して、もう一度送ってください。'])
+    expect(r.completed).toBe(false)
+  })
+
+  it('skips a question with the skip quick reply', async () => {
+    const r = await simulateFlow(db, emailFlow({ skipLabel: 'スキップ' }), [
+      { type: 'message', text: 'join' },
+      { type: 'message', button: 'スキップ' },
+    ])
+    expect(r.steps[0]!.outputs[0]!.quickReplies?.at(-1)).toEqual({ label: 'スキップ', payload: 'sk-skip' })
+    expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['OK {{email}}'])
+    expect(r.fields.email).toBeUndefined()
+    expect(r.completed).toBe(true)
+  })
+
   it('renders bot variables from options', async () => {
     const f = flow({ triggers: [{ type: 'keyword', keywords: ['hours'] }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'Open {{bot.hours}}' }] })
     const withOpts = await simulateFlow(db, f, [{ type: 'message', text: 'hours' }], 'line', true, { botFields: { hours: '10:00〜19:00' } })

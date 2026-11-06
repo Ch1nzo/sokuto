@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { FlowDefinition } from './types'
+import { INPUT_VALIDATIONS } from './inputs'
 
 const next = z.string().nullable().optional()
 
@@ -34,7 +35,7 @@ const buttonSchema = z.object({ label: z.string().min(1).max(40), next, url: z.s
 
 const stepSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string().min(1), type: z.literal('message'), text: z.string().max(2000).default(''), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).max(13).optional(), next }),
-  z.object({ id: z.string().min(1), type: z.literal('question'), text: z.string().min(1).max(2000), field: z.string().min(1).regex(/^[\w.-]+$/), choices: z.array(z.string().min(1).max(20)).max(13).optional(), next }),
+  z.object({ id: z.string().min(1), type: z.literal('question'), text: z.string().min(1).max(2000), field: z.string().min(1).regex(/^[\w.-]+$/), choices: z.array(z.string().min(1).max(20)).max(13).optional(), validate: z.enum(INPUT_VALIDATIONS).optional(), retryText: z.string().max(2000).optional(), skipLabel: z.string().min(1).max(20).optional(), next }),
   z.object({ id: z.string().min(1), type: z.literal('condition'), rules: z.array(ruleSchema).min(1), mode: z.enum(['all', 'any']).optional(), yes: next, no: next }),
   z.object({ id: z.string().min(1), type: z.literal('action'), actions: z.array(actionSchema).min(1), next }),
   z.object({ id: z.string().min(1), type: z.literal('delay'), seconds: z.number().int().min(1).max(60 * 60 * 24 * 30), next }),
@@ -77,6 +78,8 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
         break
       case 'question':
         check(s.next, `step ${s.id}.next`)
+        if (s.skipLabel && (s.choices?.length ?? 0) >= 13) errors.push(`step ${s.id}: skipLabel needs a free quick-reply slot (max 12 choices)`)
+        if (s.validate && !s.skipLabel) warnings.push(`step ${s.id}: validate without skipLabel: the person can only leave the question with a valid answer or a hand-over keyword`)
         break
       case 'condition':
         check(s.yes, `step ${s.id}.yes`)
@@ -118,7 +121,8 @@ Triggers (when the flow starts):
 Steps:
 - { "id", "type": "message", "text": "Hi {{first_name}}!", "imageUrl"?: "https://...", "buttons"?: [{ "label": "注文", "next": "q1" } | { "label": "詳細", "url": "https://..." }], "next"?: stepId }
   Buttons with "next" wait for the tap. Without buttons the flow continues to "next" immediately.
-- { "id", "type": "question", "text": "電話番号は?", "field": "phone", "choices"?: ["1","2","3"], "next": stepId }  waits for the answer and saves it to the contact field
+- { "id", "type": "question", "text": "電話番号は?", "field": "phone", "choices"?: ["1","2","3"], "validate"?: "email"|"phone"|"number"|"url"|"date", "retryText"?: "電話番号の形式で送ってください", "skipLabel"?: "スキップ", "next": stepId }  waits for the answer and saves it to the contact field
+  "validate" checks and normalizes the answer before saving (phone: digits with an optional leading +, 8–15 digits, spaces/hyphens/parentheses removed; number: half-width; url: http(s) only; date: saved as YYYY-MM-DD, real days only). An invalid answer gets "retryText" and the question keeps waiting: always write a retryText that says what format is expected (the default is a generic Japanese sentence). "skipLabel" adds a quick reply that moves on to "next" without saving the field; with it, at most 12 choices.
 - { "id", "type": "condition", "rules": [{ "field": "rating", "op": "lte", "value": "2" }], "mode"?: "all"|"any", "yes": stepId, "no": stepId }
   ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name", "is_follower" ("true"/"false"; Instagram follow status, always "true" on other channels), "hour" ("0"–"23" in the bot time zone), "weekday" ("0" = Sunday … "6" = Saturday), "days_since_created", "days_since_last_inbound" (whole days; empty for a new contact). Any other field is a contact field; use "tag" with has_tag / not_has_tag.
   Compare numbers as strings: { "field": "hour", "op": "gte", "value": "9" }
