@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Icon, NavItem, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
 import {
+  AiIcon,
   CancelIcon,
   ChannelsListIcon,
   DesktopIcon,
@@ -35,6 +36,7 @@ const Contacts = lazy(() => import('./pages/Contacts'))
 const Broadcasts = lazy(() => import('./pages/Broadcasts'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Bot = lazy(() => import('./pages/Bot'))
 
 type AuthState = { loading: boolean; setupRequired: boolean; authenticated: boolean }
 
@@ -43,6 +45,7 @@ const NAV: { to: string; label: Key; icon: BezierIcon }[] = [
   { to: '/inbox', label: 'nav_inbox', icon: InboxIcon },
   { to: '/contacts', label: 'nav_contacts', icon: PeopleIcon },
   { to: '/flows', label: 'nav_flows', icon: LightningIcon },
+  { to: '/bot', label: 'nav_bot', icon: AiIcon },
   { to: '/broadcasts', label: 'nav_broadcasts', icon: MegaphoneIcon },
   { to: '/reports', label: 'nav_reports', icon: GraphIcon },
   { to: '/channels', label: 'nav_channels', icon: ChannelsListIcon },
@@ -321,6 +324,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
                 <Route path="/inbox/:id" element={<Inbox />} />
                 <Route path="/flows" element={<Flows />} />
                 <Route path="/flows/:id" element={<FlowEditor />} />
+                <Route path="/bot/*" element={<Bot />} />
                 <Route path="/contacts" element={<Contacts />} />
                 <Route path="/broadcasts" element={<Broadcasts />} />
                 <Route path="/reports" element={<Reports />} />
@@ -357,8 +361,8 @@ function DevDataToggle({ onChange }: { onChange: () => void }) {
     if (mode) params.set('data', mode)
     else params.delete('data')
     const search = params.toString()
-    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true })
-  }, [location.pathname, location.search, mode, navigate])
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '', hash: location.hash }, { replace: true })
+  }, [location.pathname, location.search, location.hash, mode, navigate])
 
   const select = (next: string) => {
     void import('./lib/devFixtures').then((m) => {

@@ -229,6 +229,30 @@
   .filter-chip:not([aria-pressed='true']):hover, .filter-select:not(.is-set) > button:hover { background: var(--bg-black-lighter); }
 }
 
+/* Sub-navigation (components/SubNav.tsx: Settings, Soku): 200px column of NavItems, sticky under the header;
+   at ≤ 860px a row of text-only pill chips that scrolls sideways inside itself. */
+.subnav { position: sticky; top: calc(var(--header-height) + 16px); }
+.subnav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.subnav [role='menuitem'] { height: 34px; padding: 0 8px; text-decoration: none; }
+@media (max-width: 860px) {
+  .subnav {
+    position: static; margin: 0 calc(-1 * var(--page-pad-x));
+    overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .subnav::-webkit-scrollbar { display: none; }
+  .subnav ul { flex-direction: row; gap: 8px; width: max-content; padding: 0 var(--page-pad-x); }
+  .subnav [role='menuitem'] {
+    height: 32px; padding: 0 12px; white-space: nowrap;
+    border: 1px solid var(--bdr-black-light); border-radius: var(--radius-32); background: var(--bg-white-normal);
+  }
+  .subnav [role='menuitem'][aria-current='page'] { border-color: transparent; background: var(--bgtxt-blue-lightest); }
+  .subnav [role='menuitem'] > :first-child { display: none; }
+}
+
+/* Row "…" menu (components/RowMenu.tsx). */
+.row-menu { display: inline-flex; }
+.row-menu__list { min-width: 160px; padding: 6px; border-radius: var(--radius-8); background: var(--bg-white-high); box-shadow: var(--ev-3); }
+
 /* Contact avatar (components/ContactAvatar.tsx): initials on a tint, channel mark on the corner. */
 .c-avatar { position: relative; flex: none; display: inline-flex; }
 .c-avatar--36 { width: 36px; height: 36px; }
