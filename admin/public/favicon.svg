@@ -1,1 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#2563eb"/><path d="M18 20h28M18 32h20M18 44h12" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sokutō — Quick reply">
+  <path fill="#2468F2" d="M20 8H44A12 12 0 0 1 56 20V40A12 12 0 0 1 44 52H28L14 60V50A12 12 0 0 1 8 40V20A12 12 0 0 1 20 8Z"/>
+  <path fill="#FFFFFF" d="M34 16 21 34H30L27 46 44 26H34L38 16Z"/>
+</svg>

@@ -1,5 +1,12 @@
 # Sokutō
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <img src="docs/images/logo.svg" alt="Sokutō" width="240">
+  </picture>
+</p>
+
 <p align="center"><img src="docs/images/hero.webp" alt="Sokutō" width="800"></p>
 
 Sokutō(即答)= すぐに答える
