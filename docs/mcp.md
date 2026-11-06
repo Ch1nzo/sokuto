@@ -102,7 +102,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 
 | ツール | 内容 |
 | --- | --- |
-| `get_overview` | 接続先のワークスペース (`workspace: { id, name }`)、ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、AI プロバイダーの設定状況 (`ai: { configured, provider }`。AI 応答ステップと意図トリガーに必要)、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
+| `get_overview` | 接続先のワークスペース (`workspace: { id, name }`)、ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、AI プロバイダーの設定状況 (`ai: { configured, provider }`。AI 応答ステップ・意図トリガー・Soku に必要)、返信ボット Soku の状態 (`bot: { enabled, name }`)、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
 | `get_flow_schema` | 自動化 (フロー) の JSON の書き方 (トリガー・ステップ・変数・コツ)。作成や編集の前に読みます |
 | `list_templates` | 用意されているテンプレート 7 種類の定義 |
 | `list_flows` | すべての自動化とシーケンスの一覧 (種類 `flow` / `sequence`、状態、チャネル、トリガー、ステップ数) |
@@ -127,6 +127,16 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 | `delete_segment` | セグメントを削除。そのセグメント宛ての予約済み配信は対象 0 件になります |
 | `subscribe_sequence` | 連絡先を公開中のシーケンスに登録 (1 分以内に最初のステップを配信)。`remove: true` で解除 |
 | `update_contact` | 会話を完了 / 再開 (`status`: `open` / `closed`。新しいメッセージが届くと自動で `open`)、社内メモ (`notes`、空文字で削除) と表示名を更新 |
+| `get_bot` | 返信ボット Soku ([bot.md](bot.md)) の返信ルールと、直近 30 日の概要 (対応した会話・返信数・担当者に渡した数と理由・解決率・よく使われた FAQ と商品・ナレッジの件数) |
+| `update_bot` | Soku の返信ルールのうち指定した項目だけを変更 (`enabled`、`name`、`channels`、`persona`、`guidelines`、`guardrails`、`unknownAction`、`handoffMessage`、`fallbackMessage`、`maxTurns`、`autoClose`、`resolveMessage`、`recommendProducts`、`segmentId`、`suggestFaqs`、`language`)。`enabled: true` で実際のお客さんに返信し始めます (返信ごとに AI の料金がかかります) |
+| `list_faqs` | FAQ の一覧。`status`: `approved` (返信に使う) / `suggested` (承認待ちの提案) / `all` |
+| `upsert_faq` | FAQ を作成、`id` があれば更新。`status: "approved"` で提案を承認 |
+| `delete_faq` | FAQ を削除 (提案の却下もこれ) |
+| `list_products` | 商品の一覧 (`q` で名前・SKU・タグを検索) |
+| `upsert_product` | 商品を作成 (`name` 必須)、`id` があれば指定した項目だけ更新。カードで送るには `url` が必要 |
+| `delete_product` | 商品を削除 |
+| `add_document` | ドキュメントを追加。https の `url` (HTML かテキスト。PDF 不可。取得に失敗しても `status: "failed"` で登録) か、貼り付けた `text` (200,000 文字まで) |
+| `delete_document` | ドキュメントと、そこから作った提案中の FAQ を削除 |
 | `list_notifications` | 「担当者に通知」アクションや担当者呼び出しで作られた通知 |
 
 ## 4. 会話の例
@@ -173,4 +183,4 @@ Sokutō includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`
 - **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokutō yet.
 - **Cursor**: `mcp.json` with `url` and `headers`.
 
-26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. `update_flow` keeps the stored canvas `layout` (admin node positions) when the new definition omits it. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access to its workspace (MCP and `/api/*`, pinned to that workspace); only its SHA-256 hash is stored.
+36 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `get_bot`, `update_bot`, `list_faqs`, `upsert_faq`, `delete_faq`, `list_products`, `upsert_product`, `delete_product`, `add_document`, `delete_document`, `list_notifications`. The ten bot tools manage Soku, the AI reply bot ([bot.md](bot.md)): its rules (`update_bot` changes only the given fields; enabling it answers real customers and each reply is billed by the AI provider) and its knowledge (FAQs `approved` / `suggested`, products, https documents or pasted text); `get_overview` also reports `bot: { enabled, name }`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. `update_flow` keeps the stored canvas `layout` (admin node positions) when the new definition omits it. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access to its workspace (MCP and `/api/*`, pinned to that workspace); only its SHA-256 hash is stored.
