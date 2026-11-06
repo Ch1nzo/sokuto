@@ -10,7 +10,7 @@ Sokuto をローカルで動かしたり、改造したり、手動でデプロ�
 
 ## 使っている技術
 
-- 実行環境: Cloudflare Workers (`nodejs_compat`)、D1、KV、Cron Triggers、静的アセット
+- 実行環境: Cloudflare Workers (`nodejs_compat`)、D1、KV、Workers AI、Cron Triggers、静的アセット
 - サーバー: [Hono](https://hono.dev/)、[Drizzle ORM](https://orm.drizzle.team/) (D1)、[Zod](https://zod.dev/)、MCP TypeScript SDK + `@hono/mcp`
 - 管理画面: React 19、React Router、Vite
 - テスト: Vitest
@@ -35,7 +35,9 @@ npm run migrate:local  # ローカルの D1 にテーブルを作る
 npm run dev
 ```
 
-管理画面をビルド (`vite build` → `dist/client`) してから `wrangler dev` を起動します。http://localhost:8787 を開くと、管理者パスワードの設定画面が表示されます。D1 と KV はローカルのシミュレーター (`.wrangler/` 以下) が使われ、本番のデータには触れません。
+管理画面をビルド (`vite build` → `dist/client`) してから `wrangler dev --local` を起動します。http://localhost:8787 を開くと、管理者パスワードの設定画面が表示されます。D1 と KV はローカルのシミュレーター (`.wrangler/` 以下) が使われ、本番のデータには触れません。
+
+Workers AI (`AI` バインディング) はローカルで動かせないため、`--local` では使えません (AI 設定で Workers AI を選ぶと、接続テストが「Binding AI needs to be run remotely」で失敗します)。試すときは `npx wrangler login` してから `npx vite build && npx wrangler dev` で起動します (推論は Cloudflare 上で行われ、無料枠に数えられます)。Anthropic / OpenAI 互換はどちらでも使えます。
 
 ### 管理画面を編集しながら動かす
 
@@ -114,7 +116,7 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
 | --- | --- |
 | `build` | `vite build`。管理画面を `dist/client` にビルド |
 | `deploy` | `wrangler d1 migrations apply DB --remote && wrangler deploy` |
-| `dev` | `vite build && wrangler dev` (http://localhost:8787) |
+| `dev` | `vite build && wrangler dev --local` (http://localhost:8787、Workers AI なし) |
 | `dev:ui` | `vite` (http://localhost:5173、API は :8787 へ転送) |
 | `migrate:local` | ローカルの D1 にマイグレーションを適用 |
 | `db:generate` | `drizzle-kit generate`。スキーマからマイグレーションを生成 |
@@ -126,7 +128,7 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
 
 ```
 sokuto/
-├── wrangler.jsonc            # Worker の設定 (D1: DB, KV: KV, Cron 毎分, 静的アセット, META_GRAPH_VERSION)
+├── wrangler.jsonc            # Worker の設定 (D1: DB, KV: KV, Workers AI: AI, Cron 毎分, 静的アセット, META_GRAPH_VERSION)
 ├── package.json              # スクリプトと、Deploy ボタン用のバインディング説明 ("cloudflare.bindings")
 ├── vite.config.ts            # 管理画面のビルド設定 (root: admin, 出力: dist/client)
 ├── drizzle.config.ts         # drizzle-kit の設定
@@ -154,7 +156,8 @@ sokuto/
 │   ├── inbound.ts            # 受信イベントの処理 (重複排除、担当者呼び出し、トリガー照合)
 │   ├── scheduler.ts          # 定期処理 (待機の再開、一斉配信)
 │   ├── contacts.ts           # 連絡先・タグ・フィールド・ボット停止
-│   ├── settings.ts           # 設定、チャネル設定の暗号化保存、自動生成の秘密情報
+│   ├── settings.ts           # 設定、チャネル / AI 設定の暗号化保存、自動生成の秘密情報
+│   ├── ai.ts                 # AI プロバイダーの呼び出し (Anthropic / OpenAI 互換 / Workers AI) と応答の解析
 │   ├── crypto.ts             # HMAC、PBKDF2、署名付きトークン、AES-GCM
 │   └── db/                   # Drizzle のスキーマと接続
 ├── admin/                    # 管理画面 (React SPA)
@@ -207,7 +210,7 @@ sokuto/
 ## English summary
 
 - Prerequisites: Node 22+, npm. `npm install` (runs `wrangler types`), then `npm run migrate:local`. No secrets are needed; keys are generated into local KV on first use. `.dev.vars` is only for overriding `META_GRAPH_VERSION`.
-- `npm run dev` builds the admin and starts `wrangler dev` on :8787. `npm run dev:ui` starts Vite on :5173 and proxies `/api`, `/webhooks` and `/mcp` to :8787. Trigger the scheduler with `POST /api/scheduler/run` (logged in) or `wrangler dev --test-scheduled` + `/__scheduled`. Use a tunnel such as `cloudflared` to receive real webhooks locally.
+- `npm run dev` builds the admin and starts `wrangler dev --local` on :8787 (no Workers AI: the `AI` binding is remote-only; run `npx wrangler login` then `npx wrangler dev` to try it). `npm run dev:ui` starts Vite on :5173 and proxies `/api`, `/webhooks` and `/mcp` to :8787. Trigger the scheduler with `POST /api/scheduler/run` (logged in) or `wrangler dev --test-scheduled` + `/__scheduled`. Use a tunnel such as `cloudflared` to receive real webhooks locally.
 - `npm test` (Vitest, `tests/**/*.test.ts`), `npm run typecheck` (worker and admin).
 - After editing `src/db/schema.ts`, run `npm run db:generate` and `npm run migrate:local`; `npm run deploy` applies migrations remotely before deploying.
 - Manual deploy: `npx wrangler login`, create the D1 database and KV namespace, put their IDs into `wrangler.jsonc` (the repo has dummy IDs), then `npm run build && npm run deploy`.

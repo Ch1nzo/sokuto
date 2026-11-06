@@ -8,7 +8,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
-    "dev": "vite build && wrangler dev",
+    "dev": "vite build && wrangler dev --local",
     "dev:ui": "vite",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "db:generate": "drizzle-kit generate",
@@ -24,6 +24,9 @@
       },
       "KV": {
         "description": "Key-value storage for settings and auto-generated secrets."
+      },
+      "AI": {
+        "description": "Workers AI, used only if you pick it as the AI provider in Settings (free daily allowance)."
       }
     }
   },
