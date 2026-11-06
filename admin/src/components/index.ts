@@ -22,3 +22,4 @@ export { ContactName, contactDisplayName, type ContactNameSource } from './Conta
 export { RelativeTime } from './RelativeTime'
 export { SokutoMark } from './SokutoMark'
 export { formatNumber, formatDateTime, formatRelative, middleTruncate } from './format'
+export { WorkspaceAvatar, WorkspaceSwitcher, AddWorkspaceModal } from './Workspace'

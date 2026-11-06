@@ -3,16 +3,21 @@ import { Badge, Banner, Button, Divider, Icon, Text, VStack, useToast } from '@c
 import {
   CancelSmallIcon,
   CheckCircleFilledIcon,
+  ChevronSmallDownIcon,
+  ChevronSmallUpIcon,
   ErrorTriangleFilledIcon,
+  FacebookIcon,
+  LineIcon,
   LinkOffIcon,
   OpenInNewIcon,
   RefreshIcon,
   ViewIcon,
   ViewOffIcon,
+  type BezierIcon,
 } from '@channel.io/bezier-icons'
-import { api, errorMessage } from '../lib/api'
+import { api, errorMessage, getWorkspaceId } from '../lib/api'
 import { useLang, useT } from '../lib/i18n'
-import { Card, CopyBox, ErrorBanner, LoadingState, PageHeader, TextInputField, type TextInputFieldProps } from '../components'
+import { CopyBox, ErrorBanner, LoadingState, PageHeader, TextInputField, type TextInputFieldProps } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
 import { MetaProfileSection, type FlowOption, type MetaProfile } from './channels/MetaProfileSection'
 import { LineRichMenuSection, type LineRichMenu } from './channels/LineRichMenuSection'
@@ -129,6 +134,67 @@ function StatusBadge({ connected }: { connected: boolean }) {
   )
 }
 
+/**
+ * One channel as a row (Channel.io integrations style): icon, name, account, status, and a toggle that
+ * expands its setup / settings below. Collapsed rows keep the page scannable.
+ */
+function ChannelRow({
+  kind,
+  icon,
+  title,
+  account,
+  connected,
+  open,
+  onToggle,
+  children,
+}: {
+  kind: Kind
+  icon: BezierIcon
+  title: string
+  account?: string
+  connected: boolean
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  const t = useT()
+  const bodyId = `ch-${kind}-body`
+  return (
+    <section className="ch-row" aria-labelledby={`ch-${kind}-title`}>
+      <div className="ch-row__head">
+        <span className={`ch-row__icon ch-row__icon--${kind}`} aria-hidden="true">
+          <Icon source={icon} size="m" />
+        </span>
+        <div className="ch-row__text">
+          <Text as="h2" id={`ch-${kind}-title`} typo="14" bold color="txt-black-darkest">
+            {title}
+          </Text>
+          {account && (
+            <Text typo="13" color="txt-black-darker" truncated title={account}>
+              {account}
+            </Text>
+          )}
+        </div>
+        <StatusBadge connected={connected} />
+        <Button
+          size="s"
+          styleVariant="secondary"
+          colorVariant="monochrome-dark"
+          text={open ? t('close') : t('nav_settings')}
+          rightContent={open ? ChevronSmallUpIcon : ChevronSmallDownIcon}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={onToggle}
+        />
+      </div>
+      {/* Hidden, not unmounted: unsaved edits in the profile / rich menu forms survive collapsing. */}
+      <div className="ch-row__body" id={bodyId} hidden={!open}>
+        {children}
+      </div>
+    </section>
+  )
+}
+
 export default function Channels() {
   const t = useT()
   const { lang } = useLang()
@@ -143,6 +209,8 @@ export default function Channels() {
   const [confirming, setConfirming] = useState<Kind | null>(null)
   // Keeps the modal title stable while it animates out after `confirming` is cleared.
   const [confirmKind, setConfirmKind] = useState<Kind>('line')
+  // Rows start expanded while the channel is not connected (the setup form is the next step), collapsed once it is.
+  const [expanded, setExpanded] = useState<Partial<Record<Kind, boolean>>>({})
 
   const load = useCallback(async () => {
     try {
@@ -294,25 +362,35 @@ export default function Channels() {
     </div>
   )
 
-  const account = (parts: (string | undefined)[]): ReactNode => {
-    const text = parts.filter(Boolean).join(' · ')
-    return text ? (
-      <Text as="p" typo="14" color="txt-black-darker" className="ch-account">
-        {text}
-      </Text>
-    ) : null
-  }
+  const isOpen = (kind: Kind) => expanded[kind] ?? !info[kind].configured
+  const toggle = (kind: Kind) => setExpanded((prev) => ({ ...prev, [kind]: !isOpen(kind) }))
+  const account = (parts: (string | undefined)[]) => parts.filter(Boolean).join(' / ') || undefined
+  const wsNote = (
+    <Text as="p" typo="12" color="txt-black-dark" className="ch-note">
+      {t('channels_webhook_ws_note').replace('{id}', getWorkspaceId())}
+    </Text>
+  )
 
   return (
     <div className="stack">
       <PageHeader title={t('channels_title')} />
 
-      <div className="ch-grid">
-        <Card title={t('channels_line')} actions={<StatusBadge connected={info.line.configured} />}>
+      <div className="ch-list">
+        <ChannelRow
+          kind="line"
+          icon={LineIcon}
+          title={t('channels_line')}
+          account={info.line.configured ? account([info.line.displayName, info.line.botBasicId]) : undefined}
+          connected={info.line.configured}
+          open={isOpen('line')}
+          onToggle={() => toggle('line')}
+        >
           <VStack spacing={16}>
-            {info.line.configured && account([info.line.displayName, info.line.botBasicId])}
             <Guide steps={lineSteps} href={GUIDE_URL.line} />
-            <LabeledCopy label={t('channels_webhook')} value={info.webhooks.line} />
+            <div className="ch-field">
+              <LabeledCopy label={t('channels_webhook')} value={info.webhooks.line} />
+              {wsNote}
+            </div>
             {results.line && <ResultBanner result={results.line} onClose={() => setResult('line', undefined)} />}
             {!info.line.configured ? (
               <VStack as="form" spacing={16} onSubmit={connectLine}>
@@ -345,13 +423,23 @@ export default function Channels() {
               </>
             )}
           </VStack>
-        </Card>
+        </ChannelRow>
 
-        <Card title={t('channels_meta')} actions={<StatusBadge connected={info.meta.configured} />}>
+        <ChannelRow
+          kind="meta"
+          icon={FacebookIcon}
+          title={t('channels_meta')}
+          account={info.meta.configured ? account([info.meta.pageName, info.meta.instagramUsername ? `@${info.meta.instagramUsername}` : undefined]) : undefined}
+          connected={info.meta.configured}
+          open={isOpen('meta')}
+          onToggle={() => toggle('meta')}
+        >
           <VStack spacing={16}>
-            {info.meta.configured && account([info.meta.pageName, info.meta.instagramUsername ? `@${info.meta.instagramUsername}` : undefined])}
             <Guide steps={metaSteps} href={GUIDE_URL.meta} />
-            <LabeledCopy label={t('channels_webhook')} value={info.webhooks.meta} />
+            <div className="ch-field">
+              <LabeledCopy label={t('channels_webhook')} value={info.webhooks.meta} />
+              {wsNote}
+            </div>
             <LabeledCopy label={t('channels_verify_token')} value={info.metaVerifyToken} />
             <LabeledCopy label={t('meta_privacy_url')} value={info.privacyUrl} />
             <LabeledCopy label={t('meta_deletion_url')} value={info.dataDeletionUrl} />
@@ -397,7 +485,7 @@ export default function Channels() {
               </>
             )}
           </VStack>
-        </Card>
+        </ChannelRow>
       </div>
 
       <ConfirmAction

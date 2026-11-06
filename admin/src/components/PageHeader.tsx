@@ -3,18 +3,21 @@ import { Text } from '@channel.io/bezier-react'
 
 type Props = {
   title: ReactNode
-  /** Small line under the title (badges, counts, description). */
+  /** Inline next to the title (badges, counts, a short note); wraps under it when narrow. */
   description?: ReactNode
   /** Right-aligned buttons; wraps under the title on narrow screens. */
   actions?: ReactNode
 }
 
-/** First element of every page. Renders the page's single <h1>. */
+/**
+ * First element of every page: the 56px header band (title, optional inline description, right-aligned
+ * actions; one primary action at most). Renders the page's single <h1>.
+ */
 export function PageHeader({ title, description, actions }: Props) {
   return (
     <header className="page-header">
       <div className="page-header__text">
-        <Text as="h1" typo="22" bold color="txt-black-darkest" className="page-header__title">
+        <Text as="h1" typo="18" bold color="txt-black-darkest" className="page-header__title">
           {title}
         </Text>
         {description && <div className="page-header__description">{description}</div>}

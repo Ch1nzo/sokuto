@@ -9,6 +9,8 @@
  * overview notifications 10).
  */
 
+import { getWorkspaceId } from './api'
+
 export const DATA_MODES = ['worst', 'empty', 'one', 'huge'] as const
 export type DataMode = (typeof DATA_MODES)[number]
 
@@ -452,6 +454,36 @@ function worstOverview() {
   }
 }
 
+// 12 workspaces; names up to the API's 60-character limit (src/routes/api.ts workspaceName), mixed scripts and
+// lengths. In `worst` the default workspace (id 1) was renamed to the longest name, so the shell shows it.
+const LONG_WORKSPACE_NAME = 'Café Lumière 表参道店 (Omotesando) — Reservations, Takeout & Events'.slice(0, 60)
+const WORKSPACE_NAMES = [
+  'Jo',
+  '渋谷店',
+  '🍣 寿司 Bar 銀座',
+  'Aleksandra Wiśniewska-Kowalczyk Ceramics',
+  'Northwind Industries Holdings — EMEA Support',
+  'B',
+  'ปิ่นมณี สาขาสยาม',
+  'Đặng Thị Ngọc Hân Spa',
+  'Staging (do not use)',
+  'test',
+  'Default',
+]
+
+function workspacesFixture(mode: DataMode) {
+  // `empty` / `one` still have Default: workspace 1 always exists and cannot be deleted.
+  const all =
+    mode === 'worst'
+      ? [
+          { id: 1, name: LONG_WORKSPACE_NAME, createdAt: ago(400 * DAY) },
+          ...WORKSPACE_NAMES.map((name, i) => ({ id: i + 2, name, createdAt: ago((300 - i * 25) * DAY) })),
+        ]
+      : [{ id: 1, name: 'Default', createdAt: ago(400 * DAY) }]
+  const id = Number(getWorkspaceId())
+  return { workspaces: all, current: all.some((w) => w.id === id) ? id : 1 }
+}
+
 /* ---------- empty / one / huge ---------- */
 
 function oneContact(): ContactRow {
@@ -664,6 +696,7 @@ export function devFixture(path: string): unknown {
     return { contact: found, session: null, sequences: ds.sequences(id) }
   }
 
+  if (p === '/api/workspaces') return mode === 'huge' ? undefined : workspacesFixture(mode)
   if (p === '/api/overview') return ds.overview()
   if (p === '/api/broadcasts') return { broadcasts: ds.broadcasts() }
   if (p === '/api/tags') return { tags: ds.tags() }

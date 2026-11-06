@@ -28,23 +28,17 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-card__top">
-          <div className="auth-card__brand">
-            <SokutoMark size={32} />
-            <Text typo="18" bold color="txt-black-darkest">
-              {t('appName')}
-            </Text>
-          </div>
-          <SegmentedControl type="radiogroup" size="xs" width={160} value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
-            <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
-            <SegmentedControlItem value="en">English</SegmentedControlItem>
-          </SegmentedControl>
-        </div>
+    <main className="auth-page">
+      <div className="auth-brand">
+        <SokutoMark size={32} />
+        <Text typo="18" bold color="txt-black-darkest" translate="no">
+          {t('appName')}
+        </Text>
+      </div>
 
+      <div className="auth-card">
         <VStack spacing={6}>
-          <Text as="h1" typo="22" bold color="txt-black-darkest">
+          <Text as="h1" typo="18" bold color="txt-black-darkest">
             {setupRequired ? t('setup_title') : t('login_title')}
           </Text>
           {setupRequired && (
@@ -55,8 +49,11 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
         </VStack>
 
         <VStack as="form" spacing={16} onSubmit={submit}>
+          {/* Hidden username helps password managers associate the credentials. */}
+          <input type="text" name="username" autoComplete="username" value="admin" readOnly hidden />
           <TextInputField
             label={t('password')}
+            name="password"
             type="password"
             size="l"
             value={password}
@@ -69,6 +66,7 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
           {setupRequired && (
             <TextInputField
               label={t('password_confirm')}
+              name="password-confirm"
               type="password"
               size="l"
               value={confirm}
@@ -82,6 +80,11 @@ export default function Login({ setupRequired, onDone }: { setupRequired: boolea
           <Button type="submit" size="l" text={setupRequired ? t('create') : t('login')} loading={busy} className="auth-card__submit" />
         </VStack>
       </div>
-    </div>
+
+      <SegmentedControl type="radiogroup" size="xs" width={160} value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
+        <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
+        <SegmentedControlItem value="en">English</SegmentedControlItem>
+      </SegmentedControl>
+    </main>
   )
 }

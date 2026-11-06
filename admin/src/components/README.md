@@ -1,7 +1,8 @@
 # Admin UI: Bezier foundation
 
 Rules for rebuilding pages with Channel.io Bezier (`@channel.io/bezier-react@3.6.6`, `@channel.io/bezier-icons@0.64.0`).
-Reference pages: `pages/Dashboard.tsx` (data page), `pages/Login.tsx` (form). Copy their structure.
+Reference pages: `pages/Dashboard.tsx` (data page), `pages/Settings.tsx` (sub-navigation + forms), `pages/Channels.tsx`
+(row cards), `pages/Login.tsx` (form). Copy their structure.
 
 Ground truth for props is `node_modules/@channel.io/bezier-react/dist/types/components/<Name>/<Name>.types.d.ts`
 (the package also ships `src/`, so `src/components/<Name>/<Name>.tsx` and `*.stories.tsx` show real usage).
@@ -22,34 +23,69 @@ Ground truth for props is `node_modules/@channel.io/bezier-react/dist/types/comp
 - All pages are migrated; the pre-Bezier `LEGACY` block in `styles.css` is gone. Do not reintroduce generic utility classes (`.btn`, `.row`, `.muted`, `.alert`, `.badge`, `.grid`, …): use Bezier components and page-prefixed classes in `pages/<page>.css`.
 - Useful variables: surfaces `--bg-white-normal` (cards), `--bg-grey-lightest` (page), `--bg-black-lightest` / `--bg-black-lighter` (subtle fills, hover); text `--txt-black-darkest` / `-darker` / `-dark` (primary / secondary / tertiary); borders `--bdr-black-light`; accents `--bgtxt-{blue,red,green,orange,…}-{lightest,lighter,normal,dark}`; radii `--radius-6/8/12/16/32`; shadows `--ev-1…6`; mono `--font-family-mono`.
 
-## Layout rules
+## Shell and layout rules (Channel.io desk style)
 
-- Spacing scale: **4 · 8 · 12 · 16 · 24 · 32 px**. Between page sections: 16 (`.stack`). Inside cards: 16 padding, 12 between header and body. Form fields: `VStack spacing={16}`. Inline groups (badges, buttons): 6–8.
-- A page returns `<div className="stack">` whose **first child is `<PageHeader title actions? description? />`** (the only `<h1>`). Sections are `<Card title? actions? flush?>` (renders `<h2>`). The shell (`App.tsx`) already provides page padding and max width (1200px); do not add outer padding.
+Direction: white surfaces on the grey canvas (`--bg-grey-lightest`), 1px `--bdr-black-light` rules, dense rows, **one blue
+primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (pill chips `--radius-32`), modals/sheets
+`--radius-12`. Shadows only on floating things (dropdowns, sheets): `--ev-2/3`. No entrance animations.
+
+- **Shell** (`App.tsx`, `styles.css` "shell"): 220px white sidebar (`--sidebar-width`) = brand row (link to `/`, the
+  dashboard/home) → `WorkspaceSwitcher` → nav (受信箱 first, with the unread `.nav-count` badge, then 連絡先 / 自動化 /
+  一斉配信 / レポート / チャネル接続 / 設定) → footer (theme + language, sign out). Nav items are Bezier `NavItem`, 34px.
+  Mobile (≤ 860px): sticky top bar 52px (brand, switcher, menu button → bottom sheet with prefs + sign out) and a 44px
+  horizontally scrolling nav row. `--shell-top` is the height of that sticky chrome (0 on desktop, 97px on mobile):
+  use it for full-height pages (`calc(100dvh - var(--shell-top) - …)`).
+- **Workspace**: `useWorkspaces()` (`lib/workspace.ts`) → `{ workspaces, current, unread, reload }`. Every `api.*` call
+  already sends `X-Workspace` (and the `sokuto_ws` cookie covers plain links such as the CSV export); never add it by
+  hand. `switchWorkspace(id)` reloads the tab into the same section. Show the workspace name where the page is about
+  the workspace (dashboard title).
+- **Page**: the shell gives 24px side padding (16 on mobile) and **no max width**. A page returns `<div className="stack">`
+  whose first child is `<PageHeader title description? actions? />`: a full-bleed 56px white band with a bottom rule
+  (sticky on desktop), title 18 bold (the only `<h1>`), `description` inline after the title (badges, counts),
+  `actions` right-aligned (at most one primary button; others `secondary` + `monochrome-dark`). The band's margin plus
+  the stack gap give 24px to the first section. Full-height pages: band 56 + 8 + gap 16 + bottom padding 24 = 104px
+  (see `.ibx` in `inbox.css`).
+- **Width caps** only where reading/forms need it: Settings content column 720px; forms inside wide rows 720px
+  (`.ch-row__body form`). Lists, tables and stat tiles use the full width.
+- **Sub-navigation** (Settings): 200px column of `NavItem`s with icons (`.st-subnav`), sticky under the header; the
+  section lives in the URL hash (`/settings#workspaces`) so links and Back work. At ≤ 860px it becomes a horizontal row
+  of pill chips (text only) that scrolls inside itself. Reuse the pattern (and the CSS) for any page with sections.
+- **Rows instead of card grids**: for a handful of configurable things (channels), use full-width row cards
+  (`.ch-row`: 36px tinted icon, name 14 bold + one-line account, status `Badge`, `secondary` s toggle with
+  `aria-expanded`/`aria-controls`; the body expands below a rule, no animation).
+- **Density**: list rows 56px (`.st-ws`), table rows ~44px, nav items 34px, chips 32px with 8px gaps. Spacing scale
+  4 · 8 · 12 · 16 · 24. Text: 13 body, 14 emphasized, 12 meta, 16/18 headings; tabular figures for numbers.
+- **Chips** (filters, section switches): Bezier `Button size="xs|s"` / `Tag`, or the `.st-subnav` chip style; not
+  `SegmentedControl` when there are more than 3 options or labels differ in length.
+- **Hover** effects only inside `@media (hover: hover)`, 120ms `ease`, `transform`/`opacity`/colors only; never
+  `transition: all`. The only custom motion is the mobile sheet (`.sheet`: 220ms `var(--ease-drawer)`, fade only under
+  `prefers-reduced-motion`). Dropdowns, modals, toasts and button presses are Bezier's own.
+- Sections are `<Card title? actions? flush?>` (white, 1px rule, `--radius-8`, renders `<h2>`). KPI tiles: `StatCard`
+  in `.stat-grid` (fills the row; `value` may be a string such as `99+` or `—`).
 - Loading: `if (!data) return error ? <ErrorBanner …/> : <LoadingState />` (first load). **Never** leave a page stuck on "loading" when the request fails: keep an `error` state and render `<ErrorBanner error={err} onRetry={load} />` (with `<PageHeader>` above it).
-- Empty data: `<EmptyState icon={…Icon} title=… description? action? compact? />` (use `compact` inside a Card).
-- Errors from actions (save, delete…): `ErrorBanner` near the form for validation/API errors; **toasts** for one-shot feedback: `const toast = useToast(); toast.addToast(t('saved'), { preset: 'success' })` (preset `'success' | 'error' | 'default'`). Note the method is **`addToast`**, not `add`.
+- Empty data: `<EmptyState icon={…Icon} title=… description? action? compact? />` (use `compact` inside a Card). An empty state says what to do next and offers the button.
+- Errors from actions (save, delete…): `ErrorBanner` near the form for validation/API errors; **toasts** for one-shot feedback: `const toast = useToast(); toast.addToast(t('saved'), { preset: 'success' })` (preset `'success' | 'error' | 'default'`). Note the method is **`addToast`**, not `add`. Name the toast after the action (追加 → 「…を追加しました」).
 - Confirm destructive actions with `ConfirmModal` (see below), not `window.confirm`.
 - Tables: `<Card flush><DataTable columns rows rowKey onRowClick? empty={<EmptyState compact …/>} /></Card>`. Columns: `{ key, header, render, width?, numeric?, nowrap?, hideOnMobile? }`. It scrolls horizontally inside itself; the page must never scroll sideways.
 - Lists of rows that are not tabular: `<Card flush><div className="list">{items.map(… <ListItem …/>)}</div></Card>` (see Dashboard). Long user text inside list content: wrap in `<span className="list-text">` (has `overflow-wrap:anywhere`).
-- Names of contacts: always `<ContactName contact={c} />` (displayName → `@username` → channel + middle-truncated id). Plain-text variant: `contactDisplayName(c)`.
-- Dates: `<RelativeTime value={iso} />` for "x 分前"; `formatDateTime(lang, v)` for absolute. Numbers: `formatNumber(lang)(n)`; counts in tables/cards must use tabular figures (`numeric` column, `StatCard`, or `.tabular`).
+- Names of contacts: always `<ContactName contact={c} />` (displayName → `@username` → channel + middle-truncated id). Plain-text variant: `contactDisplayName(c)`. Truncated names carry a `title`.
+- Dates: `<RelativeTime value={iso} />` for "x 分前"; `formatDateTime(lang, v)` for absolute. Numbers: `formatNumber(lang)(n)`; counts in tables/cards must use tabular figures (`numeric` column, `StatCard`, or `.tabular`). Counts that hit an API cap: `countLabel(n)` → `99+`.
 - Chat UI (Inbox, test panel): `.bubble.in` / `.bubble.out`, failed sends add `.failed` (red tones, keep the error text visible in `.meta`), quick replies `.chips > button.chip`.
-- Mobile (≤ 860px): the sidebar is already a top bar. In pages: never use fixed widths > 340px, let action rows wrap (`PageHeader` does), two-column layouts collapse to one column at 860px, use `hideOnMobile` only for secondary table columns. Test at 390px with `?data=worst`.
-- Dev data: run `npm run dev:ui` and add `?data=worst|empty|one|huge` (see `lib/devFixtures.ts`). The toggle at the bottom is dev-only.
+- Mobile (≤ 860px): never use fixed widths > 340px, let action rows wrap (`PageHeader` does), two-column layouts collapse to one column at 860px, use `hideOnMobile` only for secondary table columns. Test at 390px with `?data=worst`.
+- Dev data: run `npm run dev:ui` and add `?data=worst|empty|one|huge` (see `lib/devFixtures.ts`; `/api/workspaces` has a 12-workspace worst case whose current name is 60 characters). The toggle at the bottom is dev-only.
 
 ## Shared components (`import { … } from '../components'`)
 
 | Component | Notes |
 |---|---|
-| `PageHeader` | `title`, `description?` (badges/counts), `actions?` (buttons). |
+| `PageHeader` | 56px header band: `title`, `description?` (inline badges/counts), `actions?` (buttons, one primary). |
 | `Card` | `title?`, `actions?`, `flush?` (no padding; header gets a divider), `className?`. |
 | `EmptyState` | `icon` (BezierIcon), `title`, `description?`, `action?`, `compact?`. |
 | `ErrorBanner` | `error` (unknown → `errorMessage()`), `onRetry?` adds an inline "再試行". |
 | `LoadingState` | centered Spinner; `compact?` for inside cards. |
 | `ChannelBadge` | `channel` ('line' / 'messenger' / 'instagram' / 'any' / other), `size?`. `useChannelLabel()` for plain text. |
 | `BotStatusBadge` | `on: boolean`. |
-| `StatCard` | `label`, `value: number`, `hint?`. Put in `<div className="stat-grid">`. |
+| `StatCard` | `label`, `value: number \| string`, `hint?`. Put in `<div className="stat-grid">`. |
 | `DataTable` | see above. Generic: `DataTable<Row>`. |
 | `TextInputField` / `TextAreaField` | `label`, `helperText?`, `error?`, `help?`, `required?`, `disabled?` + all TextField/TextArea props (`value`, `onChange(e)`, `type`, `placeholder`, `size`…). |
 | `SelectField` / `SelectInput` | `value`, `options: {value,label}[]`, `onChange(value)`, `placeholder?`. Bezier Select is a button + dropdown of ListItems, not a native `<select>`. `SelectInput` has no label (filters/toolbars; pass `aria-label`). |
@@ -57,6 +93,7 @@ Ground truth for props is `node_modules/@channel.io/bezier-react/dist/types/comp
 | `ContactName` | `contact: { id?, channel?, displayName, username?, channelUserId? }`, `typo?`, `bold?`. Truncates to one line: parent needs `min-width: 0`. |
 | `RelativeTime` | `value`, `maxDays?` (default 7, then absolute date). |
 | `SokutoMark` | brand SVG, `size?`. |
+| `WorkspaceSwitcher` | shell only. `WorkspaceAvatar` (`workspace`, `size?`: initial on a tint chosen by id), `AddWorkspaceModal` (`show`, `onHide`, `onCreated(ws)`). |
 | `formatNumber(lang)(n)`, `formatDateTime(lang, v)`, `formatRelative(lang, v)`, `middleTruncate(s)` | from `components/format.ts`. |
 
 ## Bezier components (verified against the 3.6.6 types)
@@ -68,7 +105,7 @@ Import from `@channel.io/bezier-react`; icons from `@channel.io/bezier-icons` (`
 - `Badge` / `Tag` — `size: 'xs'|'s'|'m'|'l'`, `variant: 'default'|'monochrome-light'|'monochrome-dark'|'blue'|'cobalt'|'teal'|'green'|'olive'|'pink'|'navy'|'yellow'|'orange'|'red'|'purple'`; Badge has `icon?`; Tag has `onDelete?` (shows ×).
 - `Banner` — **`icon` is required** (BezierIcon or `null`), `variant: 'default'|'blue'|'cobalt'|'green'|'orange'|'red'|'alt'`, `content`, `hasLink` + `linkText` + `renderLink={({content}) => <Link …>{content}</Link>}` (default link opens a new tab!), `actionIcon` + `onClickAction` (icon-only button with no label; prefer `renderLink` for actions).
 - `ListItem` — `content`, `description?`, `leftContent?` (icon or node), `rightContent?`, `size: 'xs'|'s'|'m'|'l'`, `variant`, `active`, `disabled`, `onClick` (renders a button). **`href` always opens in a new tab (`target=_blank`)**: for in-app navigation use `onClick={() => navigate(to)}`. String `content` is truncated to one line; pass a node (`<span className="list-text">`) to wrap.
-- `NavItem` — renders `<li><a role=menuitem>`; must be inside `<ul role="menu">`. `name` (required), `content`, `href`, `leftContent` (BezierIcon only), `active`, `onClick(e, name)`. Used by the shell only.
+- `NavItem` — renders `<li><a role=menuitem>`; must be inside `<ul role="menu">`. `name` (required), `content`, `href`, `leftContent` (BezierIcon only; the 20px icon slot is always reserved, so give every item an icon), `rightContent`, `active`, `onClick(e, name)`. Used by the shell and sub-navigations; pass `aria-current="page"` on the active one.
 - `FormControl` / `FormLabel` / `FormHelperText` / `FormErrorMessage` — FormControl props `hasError`, `required`, `disabled`, `readOnly`, `size: 'xl'|'l'|'m'|'xs'`, `labelPosition: 'top'|'left'`; it wires ids/aria to the child field. `FormErrorMessage` is shown only when `hasError`. Prefer our `TextInputField` etc.
 - `TextField` — `value`, `onChange(e)`, `type: 'search'|'text'|'email'|'password'|'tel'|'url'|'hidden'|'number'`, `size: 'xl'|'l'|'m'|'xs'` (no `s`!), `variant: 'primary'|'secondary'`, `allowClear`, `leftContent` (`{ icon }` object or element), `hasError`.
 - `TextArea` — auto-grows; `minRows`/`maxRows` must be one of `3|6|10|16|24|36`.

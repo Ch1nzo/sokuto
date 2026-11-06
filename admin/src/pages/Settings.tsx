@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Badge,
   Banner,
   Button,
   ListItem,
+  NavItem,
   SegmentedControl,
   SegmentedControlItem,
   Switch,
@@ -12,13 +14,30 @@ import {
   VStack,
   useToast,
 } from '@channel.io/bezier-react'
-import { CheckCircleFilledIcon, ErrorTriangleFilledIcon, InfoFilledIcon, KeyIcon, LinkCopyIcon, NoteIcon, PlusIcon, TrashIcon } from '@channel.io/bezier-icons'
+import {
+  AiIcon,
+  CheckCircleFilledIcon,
+  ErrorTriangleFilledIcon,
+  InfoFilledIcon,
+  KeyIcon,
+  LinkCopyIcon,
+  LockIcon,
+  NoteIcon,
+  PlugIcon,
+  PlusIcon,
+  SettingsIcon,
+  StoreIcon,
+  TrashIcon,
+  VariableIcon,
+  type BezierIcon,
+} from '@channel.io/bezier-icons'
 import { ApiError, api, errorMessage } from '../lib/api'
-import { useLang, useT, type Lang } from '../lib/i18n'
+import { useLang, useT, type Key, type Lang } from '../lib/i18n'
 import { useTheme, type ThemePref } from '../lib/theme'
 import { Card, CopyBox, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
 import { AddButton, IconBtn } from './flow-editor/fields'
+import { WorkspacesSection } from './settings/WorkspacesSection'
 import './settings.css'
 
 type General = {
@@ -45,6 +64,51 @@ const AI_DEFAULT_MODEL: Record<AiProvider, string> = { anthropic: 'claude-sonnet
 const toAiForm = (ai: AiInfo): AiForm => ({ provider: ai.provider ?? 'anthropic', apiKey: '', model: ai.model ?? '', baseUrl: ai.baseUrl ?? '' })
 
 type Snippet = { id: number; name: string; text: string }
+
+/** Sub-navigation (Channel.io settings style); the section is the URL hash, e.g. /settings#workspaces. */
+type Section = 'general' | 'workspaces' | 'bot-fields' | 'snippets' | 'ai' | 'mcp' | 'password'
+const SECTIONS: { id: Section; label: Key; icon: BezierIcon }[] = [
+  { id: 'general', label: 'settings_general', icon: SettingsIcon },
+  { id: 'workspaces', label: 'settings_workspaces', icon: StoreIcon },
+  { id: 'bot-fields', label: 'settings_bot_fields', icon: VariableIcon },
+  { id: 'snippets', label: 'settings_snippets', icon: NoteIcon },
+  { id: 'ai', label: 'settings_ai', icon: AiIcon },
+  { id: 'mcp', label: 'settings_mcp', icon: PlugIcon },
+  { id: 'password', label: 'settings_password', icon: LockIcon },
+]
+
+function sectionFromHash(hash: string): Section {
+  const id = hash.replace(/^#/, '')
+  return SECTIONS.find((s) => s.id === id)?.id ?? 'general'
+}
+
+function SettingsNav({ current }: { current: Section }) {
+  const t = useT()
+  const navigate = useNavigate()
+  return (
+    <nav className="st-subnav" aria-label={t('settings_sections')}>
+      <ul role="menu">
+        {SECTIONS.map((s) => (
+          <NavItem
+            key={s.id}
+            name={s.id}
+            href={`#${s.id}`}
+            content={t(s.label)}
+            leftContent={s.icon}
+            active={s.id === current}
+            aria-current={s.id === current ? 'page' : undefined}
+            onClick={(e) => {
+              // Modified clicks keep the native link behaviour (new tab / window).
+              if (!e || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+              e.preventDefault()
+              navigate({ hash: s.id })
+            }}
+          />
+        ))}
+      </ul>
+    </nav>
+  )
+}
 
 type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
 
@@ -118,6 +182,7 @@ export default function Settings() {
   const { setLang } = useLang()
   const { pref, setPref } = useTheme()
   const toast = useToast()
+  const section = sectionFromHash(useLocation().hash)
   const [data, setData] = useState<SettingsResponse | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [form, setForm] = useState<Form | null>(null)
@@ -166,15 +231,26 @@ export default function Settings() {
 
   const timezones = useMemo(() => timezoneList(form?.timezone ?? '').map((z) => ({ value: z, label: z.replace(/_/g, ' ') })), [form?.timezone])
 
-  if (!data || !form) {
-    return loadError ? (
-      <div className="stack">
-        <PageHeader title={t('settings_title')} />
-        <ErrorBanner error={loadError} onRetry={() => void load()} />
+  // A new section starts at its top.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [section])
+
+  const frame = (content: ReactNode) => (
+    <div className="stack">
+      <PageHeader title={t('settings_title')} />
+      <div className="st-layout">
+        <SettingsNav current={section} />
+        <div className="st-content">{content}</div>
       </div>
-    ) : (
-      <LoadingState />
-    )
+    </div>
+  )
+
+  // Workspaces come from the shell, not from /api/settings.
+  if (section === 'workspaces') return frame(<WorkspacesSection />)
+
+  if (!data || !form) {
+    return frame(loadError ? <ErrorBanner error={loadError} onRetry={() => void load()} /> : <LoadingState compact />)
   }
 
   const saveGeneral = async (e: FormEvent) => {
@@ -355,52 +431,66 @@ export default function Settings() {
   const aiKeySaved = data.ai.configured && data.ai.provider === aiForm.provider && (data.ai.baseUrl ?? '') === aiForm.baseUrl.trim()
   const aiDefaultModel = AI_DEFAULT_MODEL[aiForm.provider]
 
-  return (
-    <div className="stack">
-      <PageHeader title={t('settings_title')} />
-
-      <Card title={t('settings_general')}>
-        <VStack as="form" spacing={16} onSubmit={saveGeneral}>
-          <div className="st-form-row">
-            <TextInputField label={t('settings_bot_name')} value={form.botName} onChange={(e) => setForm({ ...form, botName: e.target.value })} required />
-            <SelectField<Lang>
-              label={t('settings_language')}
-              value={form.language}
-              options={[
-                { value: 'ja', label: '日本語' },
-                { value: 'en', label: 'English' },
-              ]}
-              onChange={(v) => setForm({ ...form, language: v })}
+  const sections: Record<Exclude<Section, 'workspaces'>, ReactNode> = {
+    general: (
+      <>
+        <Card title={t('settings_general')}>
+          <VStack as="form" spacing={16} onSubmit={saveGeneral}>
+            <div className="st-form-row">
+              <TextInputField label={t('settings_bot_name')} value={form.botName} onChange={(e) => setForm({ ...form, botName: e.target.value })} required />
+              <SelectField<Lang>
+                label={t('settings_language')}
+                value={form.language}
+                options={[
+                  { value: 'ja', label: '日本語' },
+                  { value: 'en', label: 'English' },
+                ]}
+                onChange={(v) => setForm({ ...form, language: v })}
+              />
+            </div>
+            <div className="st-form-row">
+              <SelectField label={t('settings_timezone')} value={form.timezone} options={timezones} onChange={(v) => setForm({ ...form, timezone: v })} />
+            </div>
+            <div className="st-switch">
+              <label className="st-switch__text" htmlFor="settings-paused">
+                <Text as="span" typo="14" bold color="txt-black-darkest">
+                  {t('settings_paused')}
+                </Text>
+                <Text as="span" typo="13" color="txt-black-dark">
+                  {t('settings_paused_help')}
+                </Text>
+              </label>
+              <Switch id="settings-paused" checked={form.paused} onCheckedChange={(v) => setForm({ ...form, paused: v })} />
+            </div>
+            <TextInputField
+              label={t('settings_handoff_keywords')}
+              helperText={t('settings_handoff_keywords_help')}
+              value={form.keywords}
+              onChange={(e) => setForm({ ...form, keywords: e.target.value })}
             />
-          </div>
-          <div className="st-form-row">
-            <SelectField label={t('settings_timezone')} value={form.timezone} options={timezones} onChange={(v) => setForm({ ...form, timezone: v })} />
-          </div>
-          <div className="st-switch">
-            <label className="st-switch__text" htmlFor="settings-paused">
-              <Text as="span" typo="14" bold color="txt-black-darkest">
-                {t('settings_paused')}
-              </Text>
-              <Text as="span" typo="13" color="txt-black-dark">
-                {t('settings_paused_help')}
-              </Text>
-            </label>
-            <Switch id="settings-paused" checked={form.paused} onCheckedChange={(v) => setForm({ ...form, paused: v })} />
-          </div>
-          <TextInputField
-            label={t('settings_handoff_keywords')}
-            helperText={t('settings_handoff_keywords_help')}
-            value={form.keywords}
-            onChange={(e) => setForm({ ...form, keywords: e.target.value })}
-          />
-          <TextAreaField label={t('settings_handoff_reply')} value={form.handoffReply} onChange={(e) => setForm({ ...form, handoffReply: e.target.value })} maxRows={10} />
-          {generalError !== null && <ErrorBanner error={generalError} />}
-          <div className="st-actions">
-            <Button type="submit" text={t('save')} loading={savingGeneral} />
-          </div>
-        </VStack>
-      </Card>
+            <TextAreaField label={t('settings_handoff_reply')} value={form.handoffReply} onChange={(e) => setForm({ ...form, handoffReply: e.target.value })} maxRows={10} />
+            {generalError !== null && <ErrorBanner error={generalError} />}
+            <div className="st-actions">
+              <Button type="submit" text={t('save')} loading={savingGeneral} />
+            </div>
+          </VStack>
+        </Card>
 
+        <Card title={t('theme')}>
+          <div className="st-theme">
+            <SegmentedControl type="radiogroup" size="m" width={300} value={pref} onValueChange={(v: ThemePref) => setPref(v)} aria-label={t('theme')}>
+              <SegmentedControlItem value="light">{t('theme_light')}</SegmentedControlItem>
+              <SegmentedControlItem value="dark">{t('theme_dark')}</SegmentedControlItem>
+              <SegmentedControlItem value="system">{t('theme_system')}</SegmentedControlItem>
+            </SegmentedControl>
+            <Text as="p" typo="13" color="txt-black-dark">
+              {t('settings_theme_help')}
+            </Text>
+          </div>
+        </Card>
+      </>
+    ),
+    'bot-fields': (
       <Card title={t('settings_bot_fields')}>
         <VStack as="form" spacing={16} onSubmit={saveBotFields}>
           <Text as="p" typo="13" color="txt-black-dark">
@@ -437,78 +527,50 @@ export default function Settings() {
           </div>
         </VStack>
       </Card>
-
-      <Card title={t('theme')}>
-        <div className="st-theme">
-          <SegmentedControl type="radiogroup" size="m" width={300} value={pref} onValueChange={(v: ThemePref) => setPref(v)} aria-label={t('theme')}>
-            <SegmentedControlItem value="light">{t('theme_light')}</SegmentedControlItem>
-            <SegmentedControlItem value="dark">{t('theme_dark')}</SegmentedControlItem>
-            <SegmentedControlItem value="system">{t('theme_system')}</SegmentedControlItem>
-          </SegmentedControl>
-          <Text as="p" typo="13" color="txt-black-dark">
-            {t('settings_theme_help')}
-          </Text>
-        </div>
-      </Card>
-
-      <Card
-        title={t('settings_mcp')}
-        actions={
-          data.mcp.configured ? (
-            <Badge size="m" variant="green" icon={CheckCircleFilledIcon}>
-              {t('settings_mcp_configured')}
-            </Badge>
-          ) : (
-            <Badge size="m" variant="monochrome-light">
-              {t('settings_mcp_not_configured')}
-            </Badge>
-          )
-        }
-      >
+    ),
+    snippets: (
+      <Card title={t('settings_snippets')}>
         <VStack spacing={16}>
-          <Text as="p" typo="14" color="txt-black-darker">
-            {t('settings_mcp_lead')}
+          <Text as="p" typo="13" color="txt-black-dark">
+            {t('settings_snippets_lead')}
           </Text>
-          <Labeled label={t('settings_mcp_url')}>
-            <CopyBox value={mcpUrl} label={t('settings_mcp_url')} />
-          </Labeled>
-          {token && (
-            <>
-              <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('settings_mcp_token_once')} />
-              <Labeled label={t('settings_mcp_token')}>
-                <CopyBox value={token.token} label={t('settings_mcp_token')} />
-              </Labeled>
-              <Banner className="st-wrap" variant="blue" icon={InfoFilledIcon} content={t('settings_mcp_how')} />
-              <CodeSnippet label="Claude Desktop / JSON" value={jsonSnippet} />
-              <CodeSnippet label="Claude Code" value={cliSnippet} />
-            </>
+          {snippets.length === 0 ? (
+            <EmptyState compact icon={NoteIcon} title={t('settings_snippets_empty')} />
+          ) : (
+            <div className="list">
+              {snippets.map((s) => (
+                <ListItem
+                  key={s.id}
+                  content={s.name}
+                  description={s.text}
+                  descriptionMaxLines={2}
+                  rightContent={
+                    <IconBtn
+                      icon={TrashIcon}
+                      danger
+                      label={`${t('delete')}: ${s.name}`}
+                      onClick={() => {
+                        setSnippetToDelete(s)
+                        setSnippetConfirm(true)
+                      }}
+                    />
+                  }
+                />
+              ))}
+            </div>
           )}
-          {mcpError !== null && <ErrorBanner error={mcpError} />}
-          <div className="st-actions">
-            <Button
-              leftContent={KeyIcon}
-              styleVariant={data.mcp.configured ? 'secondary' : 'primary'}
-              colorVariant={data.mcp.configured ? 'monochrome-dark' : 'blue'}
-              text={data.mcp.configured ? t('settings_mcp_regenerate') : t('settings_mcp_generate')}
-              loading={mcpBusy === 'rotate'}
-              disabled={mcpBusy === 'revoke'}
-              onClick={() => (data.mcp.configured ? askMcp('rotate') : void rotate())}
-            />
-            {data.mcp.configured && (
-              <Button
-                leftContent={TrashIcon}
-                styleVariant="secondary"
-                colorVariant="red"
-                text={t('settings_mcp_revoke')}
-                loading={mcpBusy === 'revoke'}
-                disabled={mcpBusy === 'rotate'}
-                onClick={() => askMcp('revoke')}
-              />
-            )}
-          </div>
+          <VStack as="form" spacing={16} onSubmit={addSnippet}>
+            <TextInputField label={t('settings_snippet_name')} value={snippetForm.name} maxLength={60} onChange={(e) => setSnippetForm({ ...snippetForm, name: e.target.value })} required />
+            <TextAreaField label={t('settings_snippet_text')} value={snippetForm.text} maxLength={2000} maxRows={10} onChange={(e) => setSnippetForm({ ...snippetForm, text: e.target.value })} required />
+            {snippetError !== null && <ErrorBanner error={snippetError} />}
+            <div className="st-actions">
+              <Button type="submit" leftContent={PlusIcon} text={t('settings_snippet_add')} loading={snippetBusy} disabled={!snippetForm.name.trim() || !snippetForm.text.trim()} />
+            </div>
+          </VStack>
         </VStack>
       </Card>
-
+    ),
+    ai: (
       <Card
         title={t('settings_ai')}
         actions={
@@ -592,47 +654,67 @@ export default function Settings() {
           </div>
         </VStack>
       </Card>
-      <Card title={t('settings_snippets')}>
-        <VStack spacing={16}>
-          <Text as="p" typo="13" color="txt-black-dark">
-            {t('settings_snippets_lead')}
-          </Text>
-          {snippets.length === 0 ? (
-            <EmptyState compact icon={NoteIcon} title={t('settings_snippets_empty')} />
+    ),
+    mcp: (
+      <Card
+        title={t('settings_mcp')}
+        actions={
+          data.mcp.configured ? (
+            <Badge size="m" variant="green" icon={CheckCircleFilledIcon}>
+              {t('settings_mcp_configured')}
+            </Badge>
           ) : (
-            <div className="list">
-              {snippets.map((s) => (
-                <ListItem
-                  key={s.id}
-                  content={s.name}
-                  description={s.text}
-                  descriptionMaxLines={2}
-                  rightContent={
-                    <IconBtn
-                      icon={TrashIcon}
-                      danger
-                      label={`${t('delete')}: ${s.name}`}
-                      onClick={() => {
-                        setSnippetToDelete(s)
-                        setSnippetConfirm(true)
-                      }}
-                    />
-                  }
-                />
-              ))}
-            </div>
+            <Badge size="m" variant="monochrome-light">
+              {t('settings_mcp_not_configured')}
+            </Badge>
+          )
+        }
+      >
+        <VStack spacing={16}>
+          <Text as="p" typo="14" color="txt-black-darker">
+            {t('settings_mcp_lead')}
+          </Text>
+          <Labeled label={t('settings_mcp_url')}>
+            <CopyBox value={mcpUrl} label={t('settings_mcp_url')} />
+          </Labeled>
+          {token && (
+            <>
+              <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('settings_mcp_token_once')} />
+              <Labeled label={t('settings_mcp_token')}>
+                <CopyBox value={token.token} label={t('settings_mcp_token')} />
+              </Labeled>
+              <Banner className="st-wrap" variant="blue" icon={InfoFilledIcon} content={t('settings_mcp_how')} />
+              <CodeSnippet label="Claude Desktop / JSON" value={jsonSnippet} />
+              <CodeSnippet label="Claude Code" value={cliSnippet} />
+            </>
           )}
-          <VStack as="form" spacing={16} onSubmit={addSnippet}>
-            <TextInputField label={t('settings_snippet_name')} value={snippetForm.name} maxLength={60} onChange={(e) => setSnippetForm({ ...snippetForm, name: e.target.value })} required />
-            <TextAreaField label={t('settings_snippet_text')} value={snippetForm.text} maxLength={2000} maxRows={10} onChange={(e) => setSnippetForm({ ...snippetForm, text: e.target.value })} required />
-            {snippetError !== null && <ErrorBanner error={snippetError} />}
-            <div className="st-actions">
-              <Button type="submit" leftContent={PlusIcon} text={t('settings_snippet_add')} loading={snippetBusy} disabled={!snippetForm.name.trim() || !snippetForm.text.trim()} />
-            </div>
-          </VStack>
+          {mcpError !== null && <ErrorBanner error={mcpError} />}
+          <div className="st-actions">
+            <Button
+              leftContent={KeyIcon}
+              styleVariant={data.mcp.configured ? 'secondary' : 'primary'}
+              colorVariant={data.mcp.configured ? 'monochrome-dark' : 'blue'}
+              text={data.mcp.configured ? t('settings_mcp_regenerate') : t('settings_mcp_generate')}
+              loading={mcpBusy === 'rotate'}
+              disabled={mcpBusy === 'revoke'}
+              onClick={() => (data.mcp.configured ? askMcp('rotate') : void rotate())}
+            />
+            {data.mcp.configured && (
+              <Button
+                leftContent={TrashIcon}
+                styleVariant="secondary"
+                colorVariant="red"
+                text={t('settings_mcp_revoke')}
+                loading={mcpBusy === 'revoke'}
+                disabled={mcpBusy === 'rotate'}
+                onClick={() => askMcp('revoke')}
+              />
+            )}
+          </div>
         </VStack>
       </Card>
-
+    ),
+    password: (
       <Card title={t('settings_password')}>
         <VStack as="form" spacing={16} onSubmit={changePassword}>
           {/* Hidden username helps password managers associate the credentials. */}
@@ -664,7 +746,12 @@ export default function Settings() {
           </div>
         </VStack>
       </Card>
+    ),
+  }
 
+  return (
+    <>
+      {frame(sections[section])}
       <ConfirmAction
         show={mcpConfirm !== null}
         onHide={() => setMcpConfirm(null)}
@@ -689,6 +776,6 @@ export default function Settings() {
         confirmText={t('delete')}
         onConfirm={() => snippetToDelete && void deleteSnippet(snippetToDelete)}
       />
-    </div>
+    </>
   )
 }

@@ -4,9 +4,9 @@
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 16px;
-  /* page padding (24) + header (~40) + gap (16) + breathing room */
-  height: calc(100vh - 112px);
-  height: calc(100dvh - 112px);
+  /* header band (56) + its margin (8) + stack gap (16) + page bottom padding (24) */
+  height: calc(100vh - 104px);
+  height: calc(100dvh - 104px);
   min-height: 520px;
 }
 .ibx-pane {
@@ -139,9 +139,9 @@
 @media (max-width: 860px) {
   .ibx {
     grid-template-columns: minmax(0, 1fr);
-    /* top bar (52) + page padding (16 + 16) + page header and gap (~52) */
-    height: calc(100vh - 136px);
-    height: calc(100dvh - 136px);
+    /* mobile chrome (--shell-top) + header band (56 + 8) + stack gap (16) + bottom padding (24) */
+    height: calc(100vh - var(--shell-top) - 104px);
+    height: calc(100dvh - var(--shell-top) - 104px);
     min-height: 440px;
   }
   .ibx.has-selection .ibx-list { display: none; }

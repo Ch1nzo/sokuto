@@ -5,7 +5,8 @@ import { formatNumber } from './format'
 
 type Props = {
   label: ReactNode
-  value: number
+  /** A number (formatted for the UI locale) or ready-made text such as "99+" / "—". */
+  value: number | string
   /** Optional line under the number. */
   hint?: ReactNode
 }
@@ -18,8 +19,8 @@ export function StatCard({ label, value, hint }: Props) {
       <Text typo="13" color="txt-black-darker" truncated={2}>
         {label}
       </Text>
-      <Text typo="30" bold color="txt-black-darkest" className="stat-card__value">
-        {formatNumber(lang)(value)}
+      <Text typo="24" bold color="txt-black-darkest" className="stat-card__value">
+        {typeof value === 'number' ? formatNumber(lang)(value) : value}
       </Text>
       {hint && (
         <Text typo="12" color="txt-black-dark">

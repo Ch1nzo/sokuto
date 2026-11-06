@@ -1,25 +1,27 @@
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Icon, NavItem, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
 import {
+  CancelIcon,
   ChannelsListIcon,
+  DesktopIcon,
   GraphIcon,
-  HomeIcon,
   InboxIcon,
   LightningIcon,
   MegaphoneIcon,
+  MenuIcon,
   MoonIcon,
   OutIcon,
   PeopleIcon,
   SettingsIcon,
   WeatherSunIcon,
-  DesktopIcon,
   type BezierIcon,
 } from '@channel.io/bezier-icons'
-import { api } from './lib/api'
+import { api, getWorkspaceId } from './lib/api'
 import { LangContext, initialLang, useLang, useT, type Key, type Lang } from './lib/i18n'
 import { useTheme, type ThemePref } from './lib/theme'
-import { LoadingState, SokutoMark } from './components'
+import { WorkspaceContext, countLabel, type Workspace } from './lib/workspace'
+import { LoadingState, SokutoMark, WorkspaceSwitcher } from './components'
 import Login from './pages/Login'
 
 // Pages behind the login are split into their own chunks (each page imports its own CSS).
@@ -36,16 +38,18 @@ const Settings = lazy(() => import('./pages/Settings'))
 
 type AuthState = { loading: boolean; setupRequired: boolean; authenticated: boolean }
 
+/** Channel.io order: the inbox is the workhorse, so it comes first. Home (dashboard) is the brand link. */
 const NAV: { to: string; label: Key; icon: BezierIcon }[] = [
-  { to: '/', label: 'nav_dashboard', icon: HomeIcon },
   { to: '/inbox', label: 'nav_inbox', icon: InboxIcon },
-  { to: '/flows', label: 'nav_flows', icon: LightningIcon },
   { to: '/contacts', label: 'nav_contacts', icon: PeopleIcon },
+  { to: '/flows', label: 'nav_flows', icon: LightningIcon },
   { to: '/broadcasts', label: 'nav_broadcasts', icon: MegaphoneIcon },
   { to: '/reports', label: 'nav_reports', icon: GraphIcon },
   { to: '/channels', label: 'nav_channels', icon: ChannelsListIcon },
   { to: '/settings', label: 'nav_settings', icon: SettingsIcon },
 ]
+
+const UNREAD_POLL_MS = 30_000
 
 /** Plain left click → client-side navigation; modified clicks keep the native link behaviour. */
 function useLinkClick() {
@@ -80,29 +84,84 @@ function useOverflowFade<T extends HTMLElement>() {
   return ref
 }
 
-function Preferences() {
+/** Theme + language. Compact in the sidebar footer; labeled and full width in the mobile menu sheet. */
+function Preferences({ labeled }: { labeled?: boolean }) {
   const t = useT()
   const { lang, setLang } = useLang()
   const { pref, setPref } = useTheme()
+  const size = labeled ? 'm' : 'xs'
   const themes: [ThemePref, BezierIcon, Key][] = [
     ['light', WeatherSunIcon, 'theme_light'],
     ['dark', MoonIcon, 'theme_dark'],
     ['system', DesktopIcon, 'theme_system'],
   ]
+  const theme = (
+    <SegmentedControl type="radiogroup" size={size} width="100%" value={pref} onValueChange={setPref} aria-label={t('theme')}>
+      {themes.map(([value, icon, label]) => (
+        <SegmentedControlItem key={value} value={value} title={t(label)} leftContent={<Icon source={icon} size={labeled ? 'xs' : 'xxs'} />}>
+          {t(label)}
+        </SegmentedControlItem>
+      ))}
+    </SegmentedControl>
+  )
+  const language = (
+    <SegmentedControl type="radiogroup" size={size} width="100%" value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
+      <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
+      <SegmentedControlItem value="en">English</SegmentedControlItem>
+    </SegmentedControl>
+  )
+  if (!labeled) {
+    return (
+      <div className="prefs">
+        {theme}
+        {language}
+      </div>
+    )
+  }
   return (
-    <div className="sidebar__prefs">
-      <SegmentedControl type="radiogroup" size="xs" value={pref} onValueChange={setPref} aria-label={t('theme')}>
-        {themes.map(([value, icon, label]) => (
-          <SegmentedControlItem key={value} value={value} title={t(label)} leftContent={<Icon source={icon} size="xxs" />}>
-            {t(label)}
-          </SegmentedControlItem>
-        ))}
-      </SegmentedControl>
-      <SegmentedControl type="radiogroup" size="xs" value={lang} onValueChange={(v: Lang) => setLang(v)} aria-label={t('settings_language')}>
-        <SegmentedControlItem value="ja">日本語</SegmentedControlItem>
-        <SegmentedControlItem value="en">English</SegmentedControlItem>
-      </SegmentedControl>
+    <div className="prefs prefs--labeled">
+      <div className="prefs__field">
+        <Text as="div" typo="13" bold color="txt-black-darker">
+          {t('theme')}
+        </Text>
+        {theme}
+      </div>
+      <div className="prefs__field">
+        <Text as="div" typo="13" bold color="txt-black-darker">
+          {t('settings_language')}
+        </Text>
+        {language}
+      </div>
     </div>
+  )
+}
+
+/**
+ * Mobile menu (preferences + sign out) as a bottom sheet. Native <dialog>: focus trap, Esc and the
+ * inert background come from the platform; the scrim is the dialog itself, the panel slides up.
+ */
+function MenuSheet({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout: () => void }) {
+  const t = useT()
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const d = ref.current
+    if (!d) return
+    if (open && !d.open) d.showModal()
+    else if (!open && d.open) d.close()
+  }, [open])
+  return (
+    <dialog ref={ref} className="sheet" aria-labelledby="menu-sheet-title" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet__panel">
+        <div className="sheet__head">
+          <Text as="h2" id="menu-sheet-title" typo="16" bold color="txt-black-darkest">
+            {t('nav_menu')}
+          </Text>
+          <Button styleVariant="tertiary" colorVariant="monochrome-dark" size="m" leftContent={CancelIcon} aria-label={t('close')} onClick={onClose} />
+        </div>
+        <Preferences labeled />
+        <Button className="sheet__logout" styleVariant="secondary" colorVariant="monochrome-dark" size="l" leftContent={OutIcon} text={t('logout')} onClick={onLogout} />
+      </div>
+    </dialog>
   )
 }
 
@@ -111,89 +170,169 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const location = useLocation()
   const linkClick = useLinkClick()
   const scrollerRef = useOverflowFade<HTMLDivElement>()
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [wsError, setWsError] = useState<unknown>(null)
+  const [unread, setUnread] = useState<number | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const isActive = (to: string) => !!matchPath({ path: to, end: to === '/' }, location.pathname) || (to !== '/' && location.pathname.startsWith(`${to}/`))
 
-  // Mobile top bar: keep the active entry visible after navigation.
+  const reload = useCallback(async () => {
+    try {
+      setWorkspaces((await api.get<{ workspaces: Workspace[] }>('/api/workspaces')).workspaces)
+      setWsError(null)
+    } catch (err) {
+      // The switcher shows its placeholder; Settings › Workspaces shows the error with a retry.
+      setWsError(err)
+    }
+  }, [])
+
   useEffect(() => {
-    scrollerRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    void reload()
+  }, [reload])
+
+  // ponytail: counts the unread list (≤ 100 rows) because the API has no count endpoint; add one if the poll gets heavy.
+  const pollUnread = useCallback(
+    () => api.get<{ conversations: unknown[] }>('/api/inbox?filter=unread').then((r) => setUnread(r.conversations.length), () => undefined),
+    [],
+  )
+
+  // After every navigation (opening a conversation marks it read) and every 30 s while the tab is visible.
+  useEffect(() => {
+    void pollUnread()
+  }, [pollUnread, location.pathname])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!document.hidden) void pollUnread()
+    }, UNREAD_POLL_MS)
+    return () => window.clearInterval(id)
+  }, [pollUnread])
+
+  // Mobile nav row: keep the active entry visible after navigation and whenever the row or its content
+  // changes width (web font swap, the unread badge appearing, a page scrollbar appearing).
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    // Centers it by setting scrollLeft: scrollIntoView() would also move Chrome's sequential focus starting
+    // point, so the first Tab would skip the skip link, brand, switcher and nav.
+    const reveal = () => {
+      const a = el.querySelector<HTMLElement>('[aria-current="page"]')
+      if (a) el.scrollLeft += a.getBoundingClientRect().left - el.getBoundingClientRect().left - (el.clientWidth - a.offsetWidth) / 2
+    }
+    const ro = new ResizeObserver(reveal)
+    ro.observe(el)
+    if (el.firstElementChild) ro.observe(el.firstElementChild)
+    return () => ro.disconnect()
   }, [location.pathname, scrollerRef])
 
+  const current = workspaces.find((w) => String(w.id) === getWorkspaceId())
+  const ctx = useMemo(() => ({ workspaces, current, unread, error: wsError, reload }), [workspaces, current, unread, wsError, reload])
+  const home = location.pathname === '/'
+
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <a className="sidebar__brand" href="/" onClick={linkClick('/')} aria-label={t('appName')}>
-          <SokutoMark size={28} />
-          <Text typo="17" bold color="txt-black-darkest" className="sidebar__brand-name">
-            {t('appName')}
-          </Text>
-        </a>
-        <div className="sidebar__scroller" ref={scrollerRef}>
-          <nav aria-label={t('nav_label')} className="sidebar__nav">
-            <ul role="menu">
-              {NAV.map(({ to, label, icon }) => {
-                const active = isActive(to)
-                return (
-                  <NavItem
-                    key={to}
-                    name={to}
-                    href={to}
-                    content={t(label)}
-                    leftContent={icon}
-                    active={active}
-                    aria-current={active ? 'page' : undefined}
-                    onClick={linkClick(to)}
-                  />
-                )
-              })}
-            </ul>
-          </nav>
-          <Preferences />
-        </div>
-        <div className="sidebar__logout">
-          <ul role="menu" className="sidebar__logout-full">
-            <NavItem
-              name="logout"
-              href="#logout"
-              content={t('logout')}
-              leftContent={OutIcon}
-              onClick={(e) => {
-                e?.preventDefault()
-                onLogout()
-              }}
+    <WorkspaceContext.Provider value={ctx}>
+      {/* Focuses <main> without touching the URL hash (Settings keeps its section there). */}
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(e) => {
+          e.preventDefault()
+          document.getElementById('main')?.focus()
+        }}
+      >
+        {t('skip_to_main')}
+      </a>
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="sidebar__top">
+            <a className="sidebar__brand" href="/" onClick={linkClick('/')} aria-current={home ? 'page' : undefined} title={t('nav_home')}>
+              <SokutoMark size={24} />
+              <Text typo="15" bold color="txt-black-darkest" className="sidebar__brand-name" translate="no">
+                {t('appName')}
+              </Text>
+              <span className="visually-hidden">{t('nav_home')}</span>
+            </a>
+            <WorkspaceSwitcher />
+            <Button
+              className="sidebar__menu"
+              styleVariant="tertiary"
+              colorVariant="monochrome-dark"
+              size="m"
+              leftContent={MenuIcon}
+              aria-label={t('nav_menu')}
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
             />
-          </ul>
-          <Button
-            className="sidebar__logout-icon"
-            styleVariant="tertiary"
-            colorVariant="monochrome-dark"
-            size="m"
-            leftContent={OutIcon}
-            aria-label={t('logout')}
-            title={t('logout')}
-            onClick={onLogout}
-          />
-        </div>
-      </aside>
-      <main className="main">
-        <div className="main__inner">
-          <Suspense fallback={<LoadingState />}>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/inbox" element={<Inbox />} />
-              <Route path="/inbox/:id" element={<Inbox />} />
-              <Route path="/flows" element={<Flows />} />
-              <Route path="/flows/:id" element={<FlowEditor />} />
-              <Route path="/contacts" element={<Contacts />} />
-              <Route path="/broadcasts" element={<Broadcasts />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/channels" element={<Channels />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Suspense>
-        </div>
-      </main>
-    </div>
+          </div>
+          <div className="sidebar__scroller" ref={scrollerRef}>
+            <nav aria-label={t('nav_label')} className="sidebar__nav">
+              <ul role="menu">
+                {NAV.map(({ to, label, icon }) => {
+                  const active = isActive(to)
+                  const count = to === '/inbox' ? (unread ?? 0) : 0
+                  return (
+                    <NavItem
+                      key={to}
+                      name={to}
+                      href={to}
+                      content={t(label)}
+                      leftContent={icon}
+                      active={active}
+                      aria-current={active ? 'page' : undefined}
+                      rightContent={
+                        count > 0 ? (
+                          <span className="nav-count">
+                            <span aria-hidden="true">{countLabel(count)}</span>
+                            <span className="visually-hidden">{t('nav_unread_count').replace('{n}', countLabel(count))}</span>
+                          </span>
+                        ) : undefined
+                      }
+                      onClick={linkClick(to)}
+                    />
+                  )
+                })}
+              </ul>
+            </nav>
+          </div>
+          <div className="sidebar__footer">
+            <Preferences />
+            <ul role="menu" className="sidebar__logout">
+              <NavItem
+                name="logout"
+                href="#logout"
+                content={t('logout')}
+                leftContent={OutIcon}
+                onClick={(e) => {
+                  e?.preventDefault()
+                  onLogout()
+                }}
+              />
+            </ul>
+          </div>
+        </aside>
+        <MenuSheet open={menuOpen} onClose={() => setMenuOpen(false)} onLogout={onLogout} />
+        <main className="main" id="main" tabIndex={-1}>
+          <div className="main__inner">
+            <Suspense fallback={<LoadingState />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/inbox" element={<Inbox />} />
+                <Route path="/inbox/:id" element={<Inbox />} />
+                <Route path="/flows" element={<Flows />} />
+                <Route path="/flows/:id" element={<FlowEditor />} />
+                <Route path="/contacts" element={<Contacts />} />
+                <Route path="/broadcasts" element={<Broadcasts />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/channels" element={<Channels />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </div>
+        </main>
+      </div>
+    </WorkspaceContext.Provider>
   )
 }
 

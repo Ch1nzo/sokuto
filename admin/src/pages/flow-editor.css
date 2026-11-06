@@ -12,7 +12,8 @@
   border-radius: var(--radius-12); box-shadow: var(--ev-2);
 }
 .fe-page:has(.fe-layout.has-panel) > :not(.fe-layout):not(.fe-side) { max-width: calc(100% - 380px - 16px); }
-.fe-page > .page-header { gap: 8px 16px; }
+.fe-page > .page-header { gap: 8px 16px; min-height: 0; }
+.fe-page .page-header__text { flex-direction: column; align-items: flex-start; gap: 8px; }
 .fe-side { pointer-events: auto; }
 
 /* ---------- header ---------- */
@@ -175,7 +176,7 @@ a.chip { text-decoration: none; }
 
 /* ---------- mobile: canvas fills the screen, the side panel is a bottom sheet ---------- */
 @media (max-width: 860px) {
-  .fe-page { height: calc(100vh - 52px); height: calc(100dvh - 52px); padding: 12px; }
+  .fe-page { height: calc(100vh - var(--shell-top)); height: calc(100dvh - var(--shell-top)); padding: 12px; }
   /* The panel is a bottom sheet here, so it never takes a grid column and the floating cards keep the full width. */
   .fe-layout, .fe-layout.has-panel { grid-template-columns: minmax(0, 1fr); }
   .fe-page > :not(.fe-layout):not(.fe-side), .fe-page:has(.fe-layout.has-panel) > :not(.fe-layout):not(.fe-side) { width: auto; max-width: 100%; }

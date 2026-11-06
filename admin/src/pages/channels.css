@@ -1,7 +1,25 @@
 /* Channels page (pages/Channels.tsx). Bezier tokens only; unlayered class rules. */
-.ch-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; }
+/* One row per channel (Channel.io integrations): head = icon, name + account, status, toggle; body expands below. */
+.ch-list { display: flex; flex-direction: column; gap: 12px; }
+.ch-row { background: var(--bg-white-normal); border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8); min-width: 0; }
+.ch-row__head { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 16px; }
+.ch-row__icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-8); }
+.ch-row__icon--line { background: var(--bgtxt-green-lightest); color: var(--bgtxt-green-normal); }
+.ch-row__icon--meta { background: var(--bgtxt-blue-lightest); color: var(--bgtxt-blue-normal); }
+.ch-row__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ch-row__head > :not(.ch-row__text) { flex: none; }
+.ch-row__body { padding: 16px; border-top: 1px solid var(--bdr-black-light); }
+/* Inputs stay at a readable width; guides and URLs use the full row. */
+.ch-row__body form { max-width: 720px; }
+@media (max-width: 480px) {
+  /* Status and toggle move under the name so it keeps the full width. */
+  .ch-row__head { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px; }
+  .ch-row__text { grid-column: 2 / -1; }
+  .ch-row__head > :nth-child(3) { grid-column: 2; justify-self: start; }
+  .ch-row__body { padding: 12px; }
+}
 .ch-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ch-account { overflow-wrap: anywhere; margin-top: -4px; }
+.ch-note { overflow-wrap: anywhere; }
 .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ch-form-row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 860px) { .ch-form-row { grid-template-columns: minmax(0, 1fr); } }
