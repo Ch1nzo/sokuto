@@ -74,8 +74,9 @@ export function TestPanel({ flowId, definition, kind, defaultChannel, onClose, t
     setText('')
   }
 
+  // Only http(s) links become hrefs; anything else (e.g. javascript:) renders as a plain tap button.
   const chip = (b: OutboundButton, k: number) =>
-    b.url ? (
+    b.url && /^https?:\/\//i.test(b.url) ? (
       <a key={k} className="chip" href={b.url} target="_blank" rel="noreferrer">
         {b.label}
         <Icon source={ArrowRightUpSmallIcon} size="xs" />

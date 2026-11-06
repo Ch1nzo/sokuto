@@ -265,13 +265,17 @@ async function performRequest(ctx: RunContext, step: Step & { type: 'request' })
   }
   try {
     if (!url.startsWith('https://')) throw new Error('url must start with https://')
+    // Placeholders (contact data) may only fill in path/query values: the host is fixed by the template and `..` segments are refused.
+    if (new URL(url).host !== new URL(step.url.replace(/\{\{[^}]*\}\}|\{[\w.-]+\}/g, 'x')).host) throw new Error('placeholders may not change the host')
+    if (url.split(/[?#]/)[0]!.split('/').some((seg) => seg === '.' || seg === '..')) throw new Error('invalid path segment')
     const headers: Record<string, string> = {}
-    for (const [k, v] of Object.entries(step.headers ?? {})) headers[k] = render(ctx, v)
+    for (const [k, v] of Object.entries(step.headers ?? {})) headers[k] = render(ctx, v).replace(/[\r\n\0]/g, '')
     let body: string | undefined
     if (step.method === 'POST') {
       const ct = Object.keys(headers).find((k) => k.toLowerCase() === 'content-type') ?? 'Content-Type'
       headers[ct] ??= 'application/json'
-      body = render(ctx, step.body ?? '', /json/i.test(headers[ct]) ? (v) => JSON.stringify(v).slice(1, -1) : undefined)
+      const encode = /json/i.test(headers[ct]) ? (v: string) => JSON.stringify(v).slice(1, -1) : /x-www-form-urlencoded/i.test(headers[ct]) ? encodeURIComponent : undefined
+      body = render(ctx, step.body ?? '', encode)
     }
     const res = await fetch(url, { method: step.method, headers, body, signal: AbortSignal.timeout(Math.min(step.timeoutMs ?? 8000, 15000)) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)

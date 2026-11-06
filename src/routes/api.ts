@@ -211,7 +211,8 @@ apiRoutes.put('/channels/line/richmenu', async (c) => {
   const parsed = lineRichMenuSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: 'invalid_richmenu', errors: zodErrors(parsed.error) }, 400)
   const menu = parsed.data
-  const img = await fetch(menu.imageUrl).catch(() => null)
+  // No redirects: the image must be served directly from the given https URL.
+  const img = await fetch(menu.imageUrl, { redirect: 'manual' }).catch(() => null)
   const contentType = img?.headers.get('content-type')?.split(';')[0]!.trim() ?? ''
   if (!img?.ok || (contentType !== 'image/jpeg' && contentType !== 'image/png')) return c.json({ error: 'invalid_image' }, 400)
   const bytes = await img.arrayBuffer()
@@ -729,6 +730,7 @@ apiRoutes.put('/settings/ai', async (c) => {
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
   const model = str(body.model)
   const baseUrl = provider === 'openai' ? str(body.baseUrl) : ''
+  if (baseUrl && (!/^https:\/\//i.test(baseUrl) || !URL.canParse(baseUrl))) return c.json({ error: 'invalid_base_url' }, 400)
   const current = await getAiConfig(d, c.env.KV)
   // Keep the saved key only for the same endpoint, so changing the Base URL cannot send it elsewhere.
   const sameEndpoint = current?.provider === provider && (current.baseUrl ?? '') === baseUrl

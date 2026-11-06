@@ -241,3 +241,14 @@ describe('segmentInputSchema', () => {
     expect(segmentInputSchema.safeParse({ name: 'VIP', rules: [rule], mode: 'none' }).success).toBe(false)
   })
 })
+
+describe('link URLs', () => {
+  const def = (url: string) => ({ triggers: [{ type: 'follow' }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'hi', buttons: [{ label: 'Go', url }] }] })
+
+  it('accepts http(s) button links and rejects other schemes', () => {
+    expect(validateFlow(def('https://example.com/x')).ok).toBe(true)
+    expect(validateFlow(def('http://example.com/x')).ok).toBe(true)
+    expect(validateFlow(def('javascript:alert(1)')).ok).toBe(false)
+    expect(validateFlow(def('data:text/html,hi')).ok).toBe(false)
+  })
+})

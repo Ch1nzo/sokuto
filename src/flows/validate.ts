@@ -4,6 +4,8 @@ import { INPUT_VALIDATIONS } from './inputs'
 import { MESSAGE_TAGS } from '../channels/types'
 
 const next = z.string().nullable().optional()
+/** Links rendered as hrefs / sent to channels: http(s) only (no javascript:, data: …). */
+const httpUrl = z.string().url().regex(/^https?:\/\//i, 'http(s) URL')
 
 const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('keyword'), keywords: z.array(z.string().min(1)).min(1), match: z.enum(['contains', 'exact', 'starts_with']).optional() }),
@@ -34,7 +36,7 @@ export const segmentInputSchema = z.object({
 export const broadcastButtonsSchema = z
   .array(
     z
-      .object({ label: z.string().trim().min(1).max(40), url: z.string().url().optional(), flowId: z.number().int().positive().optional() })
+      .object({ label: z.string().trim().min(1).max(40), url: httpUrl.optional(), flowId: z.number().int().positive().optional() })
       .refine((b) => !b.url !== !b.flowId, 'give either url or flowId, not both'),
   )
   .max(3)
@@ -47,17 +49,17 @@ const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set_field'), field: z.string().min(1), value: z.string() }),
   z.object({ type: z.literal('notify'), text: z.string().optional() }),
   z.object({ type: z.literal('pause_bot'), minutes: z.number().int().positive().optional() }),
-  z.object({ type: z.literal('webhook'), url: z.string().url() }),
+  z.object({ type: z.literal('webhook'), url: httpUrl }),
   z.object({ type: z.literal('subscribe'), flowId: z.number().int().positive() }),
   z.object({ type: z.literal('unsubscribe'), flowId: z.number().int().positive() }),
 ])
 
-const buttonSchema = z.object({ label: z.string().min(1).max(40), next, url: z.string().url().optional() })
-const cardSchema = z.object({ title: z.string().min(1).max(40), subtitle: z.string().max(60).optional(), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).min(1).max(3) })
-const attachmentSchema = z.object({ type: z.enum(['video', 'audio', 'file']), url: z.string().url().startsWith('https://'), previewImageUrl: z.string().url().optional(), durationMs: z.number().int().positive().optional() })
+const buttonSchema = z.object({ label: z.string().min(1).max(40), next, url: httpUrl.optional() })
+const cardSchema = z.object({ title: z.string().min(1).max(40), subtitle: z.string().max(60).optional(), imageUrl: httpUrl.optional().or(z.literal('')), buttons: z.array(buttonSchema).min(1).max(3) })
+const attachmentSchema = z.object({ type: z.enum(['video', 'audio', 'file']), url: z.string().url().startsWith('https://'), previewImageUrl: httpUrl.optional(), durationMs: z.number().int().positive().optional() })
 
 const stepSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), type: z.literal('message'), text: z.string().max(2000).default(''), imageUrl: z.string().url().optional().or(z.literal('')), buttons: z.array(buttonSchema).max(13).optional(), cards: z.array(cardSchema).max(10).optional(), attachment: attachmentSchema.optional(), next }),
+  z.object({ id: z.string().min(1), type: z.literal('message'), text: z.string().max(2000).default(''), imageUrl: httpUrl.optional().or(z.literal('')), buttons: z.array(buttonSchema).max(13).optional(), cards: z.array(cardSchema).max(10).optional(), attachment: attachmentSchema.optional(), next }),
   z.object({ id: z.string().min(1), type: z.literal('question'), text: z.string().min(1).max(2000), field: z.string().min(1).regex(/^[\w.-]+$/), choices: z.array(z.string().min(1).max(20)).max(13).optional(), validate: z.enum(INPUT_VALIDATIONS).optional(), retryText: z.string().max(2000).optional(), skipLabel: z.string().min(1).max(20).optional(), next }),
   z.object({ id: z.string().min(1), type: z.literal('condition'), rules: z.array(ruleSchema).min(1), mode: z.enum(['all', 'any']).optional(), yes: next, no: next }),
   z.object({ id: z.string().min(1), type: z.literal('action'), actions: z.array(actionSchema).min(1), next }),
