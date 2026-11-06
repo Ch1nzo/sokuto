@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { Db } from './db'
 import { schema } from './db'
 import type { Channel, ChannelProfile } from './channels/types'
@@ -47,6 +47,12 @@ export async function addTag(db: Db, contactId: number, tag: string) {
 
 export async function removeTag(db: Db, contactId: number, tag: string) {
   await db.delete(schema.contactTags).where(and(eq(schema.contactTags.contactId, contactId), eq(schema.contactTags.tag, tag.trim())))
+}
+
+/** WHERE clause for the inbox filters `all | open | unread | paused | closed` (anything else lists everyone). */
+export function inboxWhere(filter: string) {
+  const c = schema.contacts
+  return filter === 'paused' ? eq(c.botPaused, 1) : filter === 'unread' ? sql`${c.unread} > 0` : filter === 'open' || filter === 'closed' ? eq(c.status, filter) : undefined
 }
 
 export function parseFields(contact: ContactRow): Record<string, string> {

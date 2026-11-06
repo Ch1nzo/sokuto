@@ -112,10 +112,10 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 | `delete_flow` | 自動化を完全に削除 (シーケンスへの登録も削除) |
 | `test_flow` | お客さんになりきって会話を試す (メッセージ、コメント、友だち追加、ボタンのタップなど)。`{ "type": "start" }` でトリガーなしに最初のステップから実行 (シーケンスの再生に使います。待機は飛ばします)。LINE や Meta には何も送られません。外部リクエストのステップは呼ばずに `notes` に記録されます |
 | `list_contacts` | 連絡先を名前・タグ・チャネルで検索 |
-| `get_contact` | 1 人の連絡先 (フィールド、タグ、登録中のシーケンスと次回の配信日時、最近のメッセージ 30 件) |
+| `get_contact` | 1 人の連絡先 (会話の状態 `open` / `closed`、社内メモ、フィールド、タグ、登録中のシーケンスと次回の配信日時、最近のメッセージ 30 件) |
 | `tag_contact` | 連絡先にタグを付ける / 外す |
 | `set_bot_paused` | その連絡先のボットを停止 (担当者に引き継ぎ) / 再開 |
-| `list_conversations` | 最近の会話と最後のメッセージ (すべて / 未読 / 担当者対応中) |
+| `list_conversations` | 最近の会話と最後のメッセージ、会話の状態 (すべて / 対応中 / 未読 / 担当者対応中 / 完了) |
 | `send_message` | 連絡先に人としてテキストを送信。`keepBot` を指定しない限り、その相手のボットは停止します。Meta は 24 時間以内のみ |
 | `get_reports` | 自動化ごとの数字 (起動・送信・ボタン・回答・完了・エラー)、日別メッセージ数、最近のエラー |
 | `broadcast_reach` | 一斉配信が今何人に届くか (Meta は 24 時間以内にメッセージをくれた人のみ。`messageTag: true` なら全員)。`segmentId` でセグメントを指定できます (タグより優先) |
@@ -124,6 +124,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 | `create_segment` | セグメントを作成。条件は条件分岐ステップと同じ形式です (例: `{ "field": "tag", "op": "has_tag", "value": "vip" }`、最大 20 件) |
 | `delete_segment` | セグメントを削除。そのセグメント宛ての予約済み配信は対象 0 件になります |
 | `subscribe_sequence` | 連絡先を公開中のシーケンスに登録 (1 分以内に最初のステップを配信)。`remove: true` で解除 |
+| `update_contact` | 会話を完了 / 再開 (`status`: `open` / `closed`。新しいメッセージが届くと自動で `open`)、社内メモ (`notes`、空文字で削除) と表示名を更新 |
 | `list_notifications` | 「担当者に通知」アクションや担当者呼び出しで作られた通知 |
 
 ## 4. 会話の例
@@ -170,4 +171,4 @@ Sokuto includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`,
 - **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokuto yet.
 - **Cursor**: `mcp.json` with `url` and `headers`.
 
-25 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `list_notifications`. Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access (MCP and `/api/*`); only its SHA-256 hash is stored.
+26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access (MCP and `/api/*`); only its SHA-256 hash is stored.

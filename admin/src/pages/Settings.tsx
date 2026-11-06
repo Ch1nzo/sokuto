@@ -3,6 +3,7 @@ import {
   Badge,
   Banner,
   Button,
+  ListItem,
   SegmentedControl,
   SegmentedControlItem,
   Switch,
@@ -11,11 +12,11 @@ import {
   VStack,
   useToast,
 } from '@channel.io/bezier-react'
-import { CheckCircleFilledIcon, ErrorTriangleFilledIcon, InfoFilledIcon, KeyIcon, LinkCopyIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { CheckCircleFilledIcon, ErrorTriangleFilledIcon, InfoFilledIcon, KeyIcon, LinkCopyIcon, NoteIcon, PlusIcon, TrashIcon } from '@channel.io/bezier-icons'
 import { ApiError, api, errorMessage } from '../lib/api'
 import { useLang, useT, type Lang } from '../lib/i18n'
 import { useTheme, type ThemePref } from '../lib/theme'
-import { Card, CopyBox, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
+import { Card, CopyBox, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectField, TextAreaField, TextInputField } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
 import { AddButton, IconBtn } from './flow-editor/fields'
 import './settings.css'
@@ -42,6 +43,8 @@ const AI_PROVIDERS: AiProvider[] = ['anthropic', 'openai', 'workers_ai']
 const AI_DEFAULT_MODEL: Record<AiProvider, string> = { anthropic: 'claude-sonnet-5-5', openai: '', workers_ai: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' }
 
 const toAiForm = (ai: AiInfo): AiForm => ({ provider: ai.provider ?? 'anthropic', apiKey: '', model: ai.model ?? '', baseUrl: ai.baseUrl ?? '' })
+
+type Snippet = { id: number; name: string; text: string }
 
 type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
 
@@ -135,10 +138,18 @@ export default function Settings() {
   const [aiBusy, setAiBusy] = useState<'save' | 'test' | 'remove' | null>(null)
   const [aiError, setAiError] = useState<unknown>(null)
   const [aiConfirm, setAiConfirm] = useState(false)
+  const [snippets, setSnippets] = useState<Snippet[]>([])
+  const [snippetForm, setSnippetForm] = useState({ name: '', text: '' })
+  const [snippetBusy, setSnippetBusy] = useState(false)
+  const [snippetError, setSnippetError] = useState<unknown>(null)
+  // Kept after the modal closes so its text does not blank out during the exit animation.
+  const [snippetToDelete, setSnippetToDelete] = useState<Snippet | null>(null)
+  const [snippetConfirm, setSnippetConfirm] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<SettingsResponse>('/api/settings')
+      const [r, s] = await Promise.all([api.get<SettingsResponse>('/api/settings'), api.get<{ snippets: Snippet[] }>('/api/snippets')])
+      setSnippets(s.snippets)
       setData(r)
       setForm(toForm(r.general))
       setBotRows(Object.entries(r.general.botFields ?? {}))
@@ -305,6 +316,32 @@ export default function Settings() {
       else setPwError(errorMessage(err))
     } finally {
       setPwBusy(false)
+    }
+  }
+
+  const addSnippet = async (e: FormEvent) => {
+    e.preventDefault()
+    setSnippetBusy(true)
+    setSnippetError(null)
+    try {
+      const r = await api.post<{ snippet: Snippet }>('/api/snippets', snippetForm)
+      setSnippets([...snippets, r.snippet])
+      setSnippetForm({ name: '', text: '' })
+      toast.addToast(t('saved'), { preset: 'success' })
+    } catch (err) {
+      setSnippetError(err)
+    } finally {
+      setSnippetBusy(false)
+    }
+  }
+
+  const deleteSnippet = async (s: Snippet) => {
+    try {
+      await api.delete(`/api/snippets/${s.id}`)
+      setSnippets((list) => list.filter((x) => x.id !== s.id))
+      toast.addToast(t('settings_snippet_deleted'), { preset: 'success' })
+    } catch (err) {
+      toast.addToast(errorMessage(err), { preset: 'error' })
     }
   }
 
@@ -553,6 +590,44 @@ export default function Settings() {
               </>
             )}
           </div>
+      <Card title={t('settings_snippets')}>
+        <VStack spacing={16}>
+          <Text as="p" typo="13" color="txt-black-dark">
+            {t('settings_snippets_lead')}
+          </Text>
+          {snippets.length === 0 ? (
+            <EmptyState compact icon={NoteIcon} title={t('settings_snippets_empty')} />
+          ) : (
+            <div className="list">
+              {snippets.map((s) => (
+                <ListItem
+                  key={s.id}
+                  content={s.name}
+                  description={s.text}
+                  descriptionMaxLines={2}
+                  rightContent={
+                    <IconBtn
+                      icon={TrashIcon}
+                      danger
+                      label={`${t('delete')}: ${s.name}`}
+                      onClick={() => {
+                        setSnippetToDelete(s)
+                        setSnippetConfirm(true)
+                      }}
+                    />
+                  }
+                />
+              ))}
+            </div>
+          )}
+          <VStack as="form" spacing={16} onSubmit={addSnippet}>
+            <TextInputField label={t('settings_snippet_name')} value={snippetForm.name} maxLength={60} onChange={(e) => setSnippetForm({ ...snippetForm, name: e.target.value })} required />
+            <TextAreaField label={t('settings_snippet_text')} value={snippetForm.text} maxLength={2000} maxRows={10} onChange={(e) => setSnippetForm({ ...snippetForm, text: e.target.value })} required />
+            {snippetError !== null && <ErrorBanner error={snippetError} />}
+            <div className="st-actions">
+              <Button type="submit" leftContent={PlusIcon} text={t('settings_snippet_add')} loading={snippetBusy} disabled={!snippetForm.name.trim() || !snippetForm.text.trim()} />
+            </div>
+          </VStack>
         </VStack>
       </Card>
 
@@ -603,6 +678,14 @@ export default function Settings() {
         title={`${t('settings_ai_remove')}?`}
         confirmText={t('settings_ai_remove')}
         onConfirm={() => void removeAi()}
+      />
+      <ConfirmAction
+        show={snippetConfirm}
+        onHide={() => setSnippetConfirm(false)}
+        title={t('settings_snippet_delete_title')}
+        description={snippetToDelete?.name}
+        confirmText={t('delete')}
+        onConfirm={() => snippetToDelete && void deleteSnippet(snippetToDelete)}
       />
     </div>
   )

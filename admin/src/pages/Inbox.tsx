@@ -18,12 +18,15 @@ import {
   CalendarIcon,
   CancelSmallIcon,
   ChatBubbleIcon,
+  CheckIcon,
   ClipIcon,
   ImageFailedIcon,
   ImageIcon,
   InboxIcon,
+  NoteIcon,
   PersonIcon,
   PlusIcon,
+  RefreshIcon,
   SendIcon,
   VideocamIcon,
   type BezierIcon,
@@ -39,12 +42,13 @@ import {
   LoadingState,
   PageHeader,
   RelativeTime,
+  SelectInput,
   contactDisplayName,
   formatDateTime,
 } from '../components'
 import './inbox.css'
 
-type Filter = 'all' | 'unread' | 'paused'
+type Filter = 'all' | 'open' | 'unread' | 'paused' | 'closed'
 
 type ContactSummary = {
   id: number
@@ -57,6 +61,9 @@ type ContactSummary = {
   botPaused: number | boolean
   unread: number
   lastInboundAt: string | null
+  status: 'open' | 'closed'
+  /** Only on GET /api/contacts/:id (the inbox list leaves it out). */
+  notes?: string | null
 }
 
 type Attachment = { type: string; url?: string }
@@ -99,6 +106,8 @@ type ContactDetail = ContactSummary & { tags: string[] }
 
 /** GET /api/contacts/:id → sequences (src/flows/engine.ts contactSequences). */
 type SequenceEnrollment = { id: number; flowId: number; name: string; stepId: string | null; resumeAt: string }
+
+type Snippet = { id: number; name: string; text: string }
 
 const POLL_MS = 10_000
 /** Tag chips shown in the chat header before "+N". */
@@ -186,7 +195,7 @@ export default function Inbox() {
   const toast = useToast()
   const attachmentLabel = useAttachmentLabel()
   const { id } = useParams<{ id: string }>()
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilter] = useState<Filter>('open')
   const [conversations, setConversations] = useState<Conversation[] | null>(null)
   const [listError, setListError] = useState<unknown>(null)
   const [contact, setContact] = useState<ContactDetail | null>(null)
@@ -197,6 +206,11 @@ export default function Inbox() {
   const [tagInput, setTagInput] = useState('')
   const [tagsExpanded, setTagsExpanded] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [snippets, setSnippets] = useState<Snippet[]>([])
+  const [notes, setNotes] = useState('')
+  const [notesOpen, setNotesOpen] = useState(false)
+  // Unsaved note edits must survive the 10 s poll.
+  const notesDirty = useRef(false)
   const messagesRef = useRef<HTMLDivElement>(null)
   const lastCount = useRef(0)
 
@@ -219,6 +233,7 @@ export default function Inbox() {
       ])
       setMessages(m.messages)
       setContact(c.contact)
+      if (!notesDirty.current) setNotes(c.contact.notes ?? '')
       setSequences(c.sequences ?? [])
       setChatError(null)
     } catch (err) {
@@ -233,12 +248,20 @@ export default function Inbox() {
   }, [loadList])
 
   useEffect(() => {
+    // Optional: without snippets the composer simply has no picker.
+    api.get<{ snippets: Snippet[] }>('/api/snippets').then((r) => setSnippets(r.snippets), () => {})
+  }, [])
+
+  useEffect(() => {
     setMessages(null)
     setContact(null)
     setSequences([])
     setChatError(null)
     setText('')
     setTagsExpanded(false)
+    setNotes('')
+    setNotesOpen(false)
+    notesDirty.current = false
     lastCount.current = 0
     if (!id) return
     void loadConversation()
@@ -285,6 +308,27 @@ export default function Inbox() {
   const setBot = (on: boolean) => {
     if (!contact) return
     void run(() => api.post(`/api/inbox/${contact.id}/bot`, { paused: !on }))
+  }
+
+  const setStatus = (status: 'open' | 'closed') => {
+    if (!contact) return
+    void run(() => api.patch(`/api/contacts/${contact.id}`, { status }))
+  }
+
+  const saveNotes = async () => {
+    if (!contact || !notesDirty.current) return
+    try {
+      await api.patch(`/api/contacts/${contact.id}`, { notes })
+      notesDirty.current = false
+      toast.addToast(t('inbox_notes_saved'), { preset: 'success' })
+    } catch (err) {
+      toast.addToast(errorMessage(err), { preset: 'error' })
+    }
+  }
+
+  const insertSnippet = (snippetId: string) => {
+    const s = snippets.find((x) => String(x.id) === snippetId)
+    if (s) setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n${s.text}` : s.text))
   }
 
   const addTag = () => {
@@ -377,8 +421,10 @@ export default function Inbox() {
           <div className="ibx-list__filter">
             <SegmentedControl type="radiogroup" size="s" width="100%" value={filter} onValueChange={(v: Filter) => setFilter(v)} aria-label={t('inbox_title')}>
               <SegmentedControlItem value="all">{t('inbox_all')}</SegmentedControlItem>
+              <SegmentedControlItem value="open">{t('inbox_open')}</SegmentedControlItem>
               <SegmentedControlItem value="unread">{t('inbox_unread')}</SegmentedControlItem>
-              <SegmentedControlItem value="paused">{t('inbox_paused')}</SegmentedControlItem>
+              <SegmentedControlItem value="paused">{t('inbox_filter_paused')}</SegmentedControlItem>
+              <SegmentedControlItem value="closed">{t('inbox_closed')}</SegmentedControlItem>
             </SegmentedControl>
           </div>
           <div className="ibx-list__body">
@@ -414,6 +460,11 @@ export default function Inbox() {
                             {isPaused(c) && (
                               <Badge size="xs" variant="orange">
                                 {t('inbox_paused')}
+                              </Badge>
+                            )}
+                            {c.status === 'closed' && (
+                              <Badge size="xs" variant="monochrome-light" icon={CheckIcon}>
+                                {t('inbox_closed')}
                               </Badge>
                             )}
                           </span>
@@ -461,18 +512,34 @@ export default function Inbox() {
                         <span className="ibx-chat__badges">
                           <ChannelBadge channel={contact.channel} size="xs" />
                           <BotStatusBadge on={!isPaused(contact)} />
+                          {contact.status === 'closed' && (
+                            <Badge size="xs" variant="monochrome-light" icon={CheckIcon}>
+                              {t('inbox_closed')}
+                            </Badge>
+                          )}
                         </span>
                       </span>
                     </>
                   )}
                 </div>
                 {contact && (
-                  <label className="ibx-chat__bot">
-                    <Text typo="13" color="txt-black-darker">
-                      {t('inbox_bot')}
-                    </Text>
-                    <Switch size="m" checked={!isPaused(contact)} disabled={busy} onCheckedChange={setBot} aria-label={isPaused(contact) ? t('inbox_resume_bot') : t('inbox_pause_bot')} />
-                  </label>
+                  <div className="ibx-chat__tools">
+                    <Button
+                      size="s"
+                      styleVariant="secondary"
+                      colorVariant="monochrome-dark"
+                      leftContent={contact.status === 'closed' ? RefreshIcon : CheckIcon}
+                      text={contact.status === 'closed' ? t('inbox_reopen') : t('inbox_close')}
+                      disabled={busy}
+                      onClick={() => setStatus(contact.status === 'closed' ? 'open' : 'closed')}
+                    />
+                    <label className="ibx-chat__bot">
+                      <Text typo="13" color="txt-black-darker">
+                        {t('inbox_bot')}
+                      </Text>
+                      <Switch size="m" checked={!isPaused(contact)} disabled={busy} onCheckedChange={setBot} aria-label={isPaused(contact) ? t('inbox_resume_bot') : t('inbox_pause_bot')} />
+                    </label>
+                  </div>
                 )}
                 {contact && (
                   <div className="ibx-tags">
@@ -522,7 +589,32 @@ export default function Inbox() {
                       />
                       <Button type="submit" size="xs" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={PlusIcon} aria-label={t('contacts_add_tag')} disabled={busy || !tagInput.trim()} />
                     </form>
+                    <Button
+                      size="xs"
+                      styleVariant="secondary"
+                      colorVariant={notes.trim() ? 'blue' : 'monochrome-dark'}
+                      leftContent={NoteIcon}
+                      text={t('inbox_notes')}
+                      aria-expanded={notesOpen}
+                      onClick={() => setNotesOpen(!notesOpen)}
+                    />
                   </div>
+                )}
+                {contact && notesOpen && (
+                  <TextArea
+                    className="ibx-notes"
+                    minRows={3}
+                    maxRows={6}
+                    maxLength={5000}
+                    value={notes}
+                    onChange={(e) => {
+                      notesDirty.current = true
+                      setNotes(e.target.value)
+                    }}
+                    onBlur={() => void saveNotes()}
+                    placeholder={t('inbox_notes_placeholder')}
+                    aria-label={t('inbox_notes')}
+                  />
                 )}
               </header>
 
@@ -546,6 +638,11 @@ export default function Inbox() {
                   send()
                 }}
               >
+                {snippets.length > 0 && (
+                  <div className="ibx-composer__snippets">
+                    <SelectInput value="" options={snippets.map((s) => ({ value: String(s.id), label: s.name }))} onChange={insertSnippet} placeholder={t('inbox_snippet')} aria-label={t('inbox_snippet')} dropdownPosition="top-left" />
+                  </div>
+                )}
                 <TextArea
                   className="ibx-composer__input"
                   minRows={3}
