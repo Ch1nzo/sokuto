@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ContextType, type MouseEvent, type ReactNode } from 'react'
 import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Icon, NavItem, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
 import {
@@ -22,6 +22,7 @@ import { api, getWorkspaceId } from './lib/api'
 import { LangContext, initialLang, useLang, useT, type Key, type Lang } from './lib/i18n'
 import { useTheme, type ThemePref } from './lib/theme'
 import { WorkspaceContext, countLabel, type Workspace } from './lib/workspace'
+import { RealtimeClient, RealtimeContext } from './lib/realtime'
 import { LoadingState, SokutoMark, WorkspaceSwitcher } from './components'
 import Login from './pages/Login'
 
@@ -52,7 +53,12 @@ const NAV: { to: string; label: Key; icon: BezierIcon }[] = [
   { to: '/settings', label: 'nav_settings', icon: SettingsIcon },
 ]
 
-const UNREAD_POLL_MS = 30_000
+/** Counts for the nav badge and tab title: realtime events drive them; this poll is only the safety net. */
+const COUNTS_POLL_MS = 60_000
+/** `admin/index.html`'s title; `Sokutō (N)` while N conversations are open. */
+const BASE_TITLE = 'Sokutō'
+
+type InboxCounts = { open: number; unread: number }
 
 /** Plain left click → client-side navigation; modified clicks keep the native link behaviour. */
 function useLinkClick() {
@@ -168,6 +174,15 @@ function MenuSheet({ open, onClose, onLogout }: { open: boolean; onClose: () => 
   )
 }
 
+/** What every page behind the login can read: the workspaces (+ unread count) and the realtime inbox events. */
+function ShellContext({ workspace, realtime, children }: { workspace: ContextType<typeof WorkspaceContext>; realtime: ContextType<typeof RealtimeContext>; children: ReactNode }) {
+  return (
+    <WorkspaceContext.Provider value={workspace}>
+      <RealtimeContext.Provider value={realtime}>{children}</RealtimeContext.Provider>
+    </WorkspaceContext.Provider>
+  )
+}
+
 function Shell({ onLogout }: { onLogout: () => void }) {
   const t = useT()
   const location = useLocation()
@@ -175,7 +190,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const scrollerRef = useOverflowFade<HTMLDivElement>()
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [wsError, setWsError] = useState<unknown>(null)
-  const [unread, setUnread] = useState<number | null>(null)
+  const [counts, setCounts] = useState<InboxCounts | null>(null)
+  const unread = counts?.unread ?? null
+  const [connected, setConnected] = useState(false)
+  const [client, setClient] = useState<RealtimeClient | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const isActive = (to: string) => !!matchPath({ path: to, end: to === '/' }, location.pathname) || (to !== '/' && location.pathname.startsWith(`${to}/`))
 
@@ -193,23 +211,49 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     void reload()
   }, [reload])
 
-  // ponytail: counts the unread list (≤ 100 rows) because the API has no count endpoint; add one if the poll gets heavy.
-  const pollUnread = useCallback(
-    () => api.get<{ conversations: unknown[] }>('/api/inbox?filter=unread').then((r) => setUnread(r.conversations.length), () => undefined),
-    [],
-  )
+  const loadCounts = useCallback(() => api.get<InboxCounts>('/api/inbox/counts').then(setCounts, () => undefined), [])
 
-  // After every navigation (opening a conversation marks it read) and every 30 s while the tab is visible.
+  // One realtime connection per tab, for this tab's workspace (switching workspaces reloads the page).
+  const workspaceId = getWorkspaceId()
   useEffect(() => {
-    void pollUnread()
-  }, [pollUnread, location.pathname])
+    const c = new RealtimeClient(workspaceId, setConnected)
+    c.start()
+    setClient(c)
+    return () => {
+      c.stop()
+      setClient(null)
+    }
+  }, [workspaceId])
+
+  // After every navigation (opening a conversation marks it read), on every inbox event (debounced), and on a
+  // slow poll that also runs in background tabs, so the title stays right while the tab is not looked at.
+  useEffect(() => {
+    void loadCounts()
+  }, [loadCounts, location.pathname])
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      if (!document.hidden) void pollUnread()
-    }, UNREAD_POLL_MS)
+    if (!client) return
+    let timer: number | undefined
+    const off = client.subscribe(() => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => void loadCounts(), 250)
+    })
+    return () => {
+      off()
+      window.clearTimeout(timer)
+    }
+  }, [client, loadCounts])
+
+  useEffect(() => {
+    const id = window.setInterval(() => void loadCounts(), COUNTS_POLL_MS)
     return () => window.clearInterval(id)
-  }, [pollUnread])
+  }, [loadCounts])
+
+  const open = counts?.open ?? 0
+  useEffect(() => {
+    document.title = open > 0 ? `${BASE_TITLE} (${open})` : BASE_TITLE
+  }, [open])
+  useEffect(() => () => void (document.title = BASE_TITLE), [])
 
   // Mobile nav row: keep the active entry visible after navigation and whenever the row or its content
   // changes width (web font swap, the unread badge appearing, a page scrollbar appearing).
@@ -230,10 +274,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
   const current = workspaces.find((w) => String(w.id) === getWorkspaceId())
   const ctx = useMemo(() => ({ workspaces, current, unread, error: wsError, reload }), [workspaces, current, unread, wsError, reload])
+  const realtime = useMemo(() => ({ subscribe: client ? client.subscribe : () => () => {}, connected }), [client, connected])
   const home = location.pathname === '/'
 
   return (
-    <WorkspaceContext.Provider value={ctx}>
+    <ShellContext workspace={ctx} realtime={realtime}>
       {/* Focuses <main> without touching the URL hash (Settings keeps its section there). */}
       <a
         className="skip-link"
@@ -336,7 +381,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </div>
         </main>
       </div>
-    </WorkspaceContext.Provider>
+    </ShellContext>
   )
 }
 

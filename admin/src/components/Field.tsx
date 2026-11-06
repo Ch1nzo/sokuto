@@ -105,6 +105,7 @@ export function useSelectDropdown(count: number) {
   const [up, setUp] = useState(false)
   return {
     dropdownContainer: useDropdownContainer(),
+    dropdownClassName: 'select-dropdown', // pops from the trigger (styles.css)
     dropdownStyle: { maxHeight: 320, overflowY: 'auto' },
     dropdownPosition: up ? 'top-left' : 'bottom-left',
     // Options are 30px tall, the list caps at 320px and scrolls, 6px gap to the trigger.

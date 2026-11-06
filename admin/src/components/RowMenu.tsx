@@ -36,7 +36,7 @@ export function RowMenu({ label, items, disabled }: { label: string; items: RowM
       {/* In the body (not the default fixed layer, which Bezier offsets by the page scroll), so it follows the row. */}
       <Overlay show={open} target={buttonRef.current} container={useDropdownContainer()} position={up ? 'top-right' : 'bottom-right'} marginY={4} onHide={close}>
         {/* The Overlay mounts this after `show`: focus the first item once it exists. */}
-        <div ref={(el) => { if (open) el?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }} role="menu" aria-label={label} className="row-menu__list">
+        <div ref={(el) => { if (open) el?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }} role="menu" aria-label={label} className="row-menu__list menu-pop" style={{ transformOrigin: up ? 'bottom right' : 'top right' }}>
           {items.map((item) => (
             <ListItem
               key={item.label}

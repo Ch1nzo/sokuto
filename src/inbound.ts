@@ -21,8 +21,11 @@ export async function liveFlows(db: Db, ws: number) {
   return rows.map(parseFlow)
 }
 
-/** Processes one normalized inbound event of workspace `ws` end to end. */
-export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string, ai?: AiCaller): Promise<void> {
+/**
+ * Processes one normalized inbound event of workspace `ws` end to end. `stored(contactId)` is called once the
+ * event is in the conversation (before any reply), so the webhook can tell open inbox tabs right away.
+ */
+export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string, ai?: AiCaller, stored?: (contactId: number) => void): Promise<void> {
   if (!(await markProcessed(db, `${ws}:${event.channel}:${event.eventId}`))) return
   const { contact: initial, created } = await upsertContact(db, ws, event.channel, event.channelUserId, () => adapter.getProfile(event.channelUserId))
   let contact: ContactRow = initial
@@ -31,6 +34,7 @@ export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter,
     await logMessage(db, { contactId: contact.id, direction: 'in', source: 'system', kind: 'event', text: 'unfollow' })
     await db.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
     await db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
+    stored?.(contact.id)
     return
   }
 
@@ -38,6 +42,7 @@ export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter,
   const displayText = event.text ?? (event.type === 'postback' ? (event.payload?.startsWith('sk-choice:') ? event.payload.slice(10) : undefined) : undefined) ?? (event.type === 'follow' ? 'follow' : event.type === 'ref' ? `ref:${event.ref}` : event.type === 'story_mention' ? 'story mention' : undefined)
   await logMessage(db, { contactId: contact.id, direction: 'in', source: 'user', kind, text: displayText ?? null, payload: { type: event.type, payload: event.payload, commentId: event.commentId, postId: event.postId, attachments: event.attachments } })
   await db.update(schema.contacts).set({ unread: (contact.unread ?? 0) + 1, status: 'open' }).where(eq(schema.contacts.id, contact.id))
+  stored?.(contact.id)
 
   const general = await getGeneral(db, ws)
   if (general.paused) return

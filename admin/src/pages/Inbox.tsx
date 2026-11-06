@@ -27,6 +27,7 @@ import {
 import { ApiError, api, errorMessage } from '../lib/api'
 import { useLang, useT, type Key, type Lang } from '../lib/i18n'
 import { countLabel, useWorkspaces } from '../lib/workspace'
+import { useInboxEvents, useRealtime } from '../lib/realtime'
 import {
   BotStatusBadge,
   ChannelBadge,
@@ -132,7 +133,11 @@ type Snippet = { id: number; name: string; text: string }
 
 type Section = 'basic' | 'tags' | 'fields' | 'notes' | 'sequences'
 
+/** Safety poll: realtime events (lib/realtime.ts) refresh the inbox at once; this only covers a lost socket. */
 const POLL_MS = 10_000
+const POLL_CONNECTED_MS = 60_000
+/** Events come in bursts (message, then the bot's reply): one refetch per burst. */
+const EVENT_DEBOUNCE_MS = 250
 /** Three panes from this width; below it the user info opens as a drawer (≤ 860px: a bottom sheet). */
 const WIDE_QUERY = '(min-width: 1240px)'
 
@@ -233,6 +238,8 @@ export default function Inbox() {
   const toast = useToast()
   const copy = useCopy()
   const { unread } = useWorkspaces()
+  const { connected } = useRealtime()
+  const pollMs = connected ? POLL_CONNECTED_MS : POLL_MS
   const dates = useChatDates(lang)
   const wide = useMediaQuery(WIDE_QUERY)
   const attachmentLabel = useAttachmentLabel()
@@ -256,47 +263,75 @@ export default function Inbox() {
   const [drafting, setDrafting] = useState(false)
   const [picking, setPicking] = useState(false)
   const [collapsed, setCollapsed] = useState<Partial<Record<Section, boolean>>>({})
-  // Unsaved note edits must survive the 10 s poll.
+  // Unsaved note edits must survive every refetch (poll and realtime).
   const notesDirty = useRef(false)
   // A response for a conversation the user already left must not land in the open one.
   const idRef = useRef(id)
   idRef.current = id
   const messagesRef = useRef<HTMLDivElement>(null)
   const lastCount = useRef(0)
+  // Messages that arrive while a conversation is open slide in (`ibx-msg--enter`); the history it opened with does not.
+  // `baseline` = ids shown by the first load; each later id is decided once, so a re-render never replays it.
+  const entering = useRef<{ baseline: Set<number> | null; decided: Map<number, boolean> }>({ baseline: null, decided: new Map() })
+
+  // Refetches overlap (poll, event, after a send): only the newest request may land.
+  const listSeq = useRef(0)
+  const chatSeq = useRef(0)
 
   const loadList = useCallback(async () => {
+    const seq = ++listSeq.current
     try {
       const r = await api.get<{ conversations: Conversation[] }>(`/api/inbox?filter=${filter}`)
+      if (seq !== listSeq.current) return
       setConversations(r.conversations)
       setListError(null)
     } catch (err) {
-      setListError(err)
+      if (seq === listSeq.current) setListError(err)
     }
   }, [filter])
 
   const loadConversation = useCallback(async () => {
     if (!id) return
+    const seq = ++chatSeq.current
     try {
       const [m, c] = await Promise.all([
         api.get<{ messages: Message[] }>(`/api/inbox/${id}/messages`),
         api.get<{ contact: ContactDetail; sequences?: SequenceEnrollment[] }>(`/api/contacts/${id}`),
       ])
-      if (idRef.current !== id) return
+      if (idRef.current !== id || seq !== chatSeq.current) return
       setMessages(m.messages)
       setContact(c.contact)
       if (!notesDirty.current) setNotes(c.contact.notes ?? '')
       setSequences(c.sequences ?? [])
       setChatError(null)
     } catch (err) {
-      if (idRef.current === id) setChatError(err)
+      if (idRef.current === id && seq === chatSeq.current) setChatError(err)
     }
   }, [id])
 
   useEffect(() => {
     void loadList()
-    const timer = setInterval(() => void loadList(), POLL_MS)
-    return () => clearInterval(timer)
   }, [loadList])
+
+  useEffect(() => {
+    const timer = setInterval(() => void loadList(), pollMs)
+    return () => clearInterval(timer)
+  }, [loadList, pollMs])
+
+  // Realtime: refetch the list, and the open conversation when the event is about it (or about everything).
+  const pending = useRef<{ timer?: number; chat: boolean }>({ chat: false })
+  useInboxEvents((e) => {
+    const p = pending.current
+    if (e.contactId === undefined || String(e.contactId) === idRef.current) p.chat = true
+    window.clearTimeout(p.timer)
+    p.timer = window.setTimeout(() => {
+      const chat = p.chat
+      p.chat = false
+      void loadList()
+      if (chat) void loadConversation()
+    }, EVENT_DEBOUNCE_MS)
+  })
+  useEffect(() => () => window.clearTimeout(pending.current.timer), [])
 
   useEffect(() => {
     // Optional: without snippets the composer simply has no picker; without Soku, no draft / product buttons.
@@ -316,11 +351,16 @@ export default function Inbox() {
     setInfoOpen(false)
     notesDirty.current = false
     lastCount.current = 0
+    entering.current = { baseline: null, decided: new Map() }
     if (!id) return
     void loadConversation()
-    const timer = setInterval(() => void loadConversation(), POLL_MS)
-    return () => clearInterval(timer)
   }, [id, loadConversation])
+
+  useEffect(() => {
+    if (!id) return
+    const timer = setInterval(() => void loadConversation(), pollMs)
+    return () => clearInterval(timer)
+  }, [id, loadConversation, pollMs])
 
   const shownCount = (messages?.length ?? 0) + outbox.length
   useEffect(() => {
@@ -462,11 +502,25 @@ export default function Inbox() {
       ? conversations.filter(({ contact: c }) => [c.displayName, c.username, c.channelUserId, String(c.id)].some((v) => v && normalize(v).includes(needle)))
       : conversations
 
+  /** The server copy of a reply sent from here replaces its optimistic bubble (same text) in place: no second entrance. */
+  const sendingTexts = new Set(outbox.map((o) => o.text))
+  const isEntering = (m: Message): boolean => {
+    const e = entering.current
+    if (!e.baseline || e.baseline.has(m.id)) return false
+    let d = e.decided.get(m.id)
+    if (d === undefined) {
+      d = !(m.id > 0 && m.direction === 'out' && m.source === 'human' && sendingTexts.has(m.text ?? ''))
+      e.decided.set(m.id, d)
+    }
+    return d
+  }
+
   const renderMessage = (m: Message) => {
     const time = dates.time(m.createdAt)
+    const enter = isEntering(m) ? ' ibx-msg--enter' : ''
     if (m.source === 'system') {
       return (
-        <div key={m.id} className="ibx-msg ibx-msg--system">
+        <div key={m.id} className={`ibx-msg ibx-msg--system${enter}`}>
           {m.text === 'follow' ? t('trigger_follow') : m.text || attachmentLabel(m)}
           {time && <span className="tabular"> · {time}</span>}
         </div>
@@ -481,7 +535,7 @@ export default function Inbox() {
     const who = m.direction === 'in' ? 'in' : m.source === 'human' ? 'human' : 'bot'
     const hasBody = !!m.text || !!imageUrl || attachments.length > 0 || cards.length > 0
     return (
-      <div key={m.id} className={`ibx-msg ibx-msg--${who}${m.pending ? ' is-pending' : ''}`}>
+      <div key={m.id} className={`ibx-msg ibx-msg--${who}${m.pending ? ' is-pending' : ''}${enter}`}>
         <div className={`bubble ${m.direction}${failed ? ' failed' : ''}${who === 'bot' ? ' ibx-bubble--bot' : ''}`}>
           {imageUrl && <ChatImage url={imageUrl} />}
           {m.text && <div>{m.text}</div>}
@@ -540,7 +594,9 @@ export default function Inbox() {
   if (messages) {
     const local: Message[] = outbox.map((o) => ({ id: -o.key, direction: 'out', source: 'human', kind: 'text', text: o.text, payload: null, error: o.error, createdAt: o.createdAt, pending: !o.error }))
     let lastDay = ''
-    for (const m of [...messages, ...local]) {
+    const all = [...messages, ...local]
+    if (!entering.current.baseline) entering.current.baseline = new Set(all.map((m) => m.id))
+    for (const m of all) {
       const day = dates.dayKey(m.createdAt)
       if (day && day !== lastDay) {
         thread.push(

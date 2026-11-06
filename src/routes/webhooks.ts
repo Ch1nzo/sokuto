@@ -9,6 +9,8 @@ import { parseWorkspaceId } from '../workspaces'
 import { lazyAi, type AiCaller } from '../ai'
 import type { InboundEvent } from '../channels/types'
 import type { ChannelAdapter } from '../channels/adapter'
+import { notifyInbox } from '../realtime'
+import type { Env } from '../env'
 
 export const webhookRoutes = new Hono<AppEnv>()
 
@@ -23,16 +25,31 @@ webhookRoutes.use('/:channel/:ws?', async (c, next) => {
   return next()
 })
 
-async function processAll(db: ReturnType<typeof createDb>, ws: number, adapterFor: (ev: InboundEvent) => ChannelAdapter | null, events: InboundEvent[], replyTokens: Map<string, string>, ai: AiCaller) {
+/**
+ * Runs in waitUntil after the 200. Open inbox tabs hear about the request at most twice, however many events
+ * it carried: as soon as the first message is stored (so it shows before a slow AI reply), and once at the end
+ * (replies, hand-overs, every other conversation the batch touched).
+ */
+async function processAll(env: Env, db: ReturnType<typeof createDb>, ws: number, adapterFor: (ev: InboundEvent) => ChannelAdapter | null, events: InboundEvent[], replyTokens: Map<string, string>, ai: AiCaller) {
+  const touched = new Set<number>()
+  let first: Promise<void> | undefined
+  const stored = (contactId: number) => {
+    touched.add(contactId)
+    first ??= notifyInbox(env, ws, contactId)
+  }
   for (const ev of events) {
     const adapter = adapterFor(ev)
     if (!adapter) continue
     try {
-      await handleInbound(db, ws, adapter, ev, replyTokens.get(ev.channelUserId), ai)
+      await handleInbound(db, ws, adapter, ev, replyTokens.get(ev.channelUserId), ai, stored)
     } catch (err) {
       console.error('inbound failed', ev.channel, ev.type, err)
     }
   }
+  if (!first) return
+  await first
+  const [only] = touched
+  await notifyInbox(env, ws, touched.size === 1 ? only : undefined)
 }
 
 webhookRoutes.post('/line/:ws?', async (c) => {
@@ -44,7 +61,7 @@ webhookRoutes.post('/line/:ws?', async (c) => {
   if (!(await verifyLineSignature(cfg.channelSecret, body, c.req.header('x-line-signature')))) return c.json({ error: 'bad_signature' }, 401)
   const { events, replyTokens } = parseLineWebhook(body)
   const adapter = new LineAdapter(cfg)
-  c.executionCtx.waitUntil(processAll(db, ws, () => adapter, events, replyTokens, lazyAi(c.env, db, ws)))
+  c.executionCtx.waitUntil(processAll(c.env, db, ws, () => adapter, events, replyTokens, lazyAi(c.env, db, ws)))
   return c.json({ ok: true })
 })
 
@@ -67,6 +84,6 @@ webhookRoutes.post('/meta/:ws?', async (c) => {
   const { events, replyTokens } = parseMetaWebhook(body, cfg)
   const version = c.env.META_GRAPH_VERSION || undefined
   const adapters = { messenger: new MetaAdapter('messenger', cfg, version), instagram: cfg.instagramAccountId ? new MetaAdapter('instagram', cfg, version) : null }
-  c.executionCtx.waitUntil(processAll(db, ws, (ev) => (ev.channel === 'instagram' ? adapters.instagram : adapters.messenger), events, replyTokens, lazyAi(c.env, db, ws)))
+  c.executionCtx.waitUntil(processAll(c.env, db, ws, (ev) => (ev.channel === 'instagram' ? adapters.instagram : adapters.messenger), events, replyTokens, lazyAi(c.env, db, ws)))
   return c.text('EVENT_RECEIVED')
 })

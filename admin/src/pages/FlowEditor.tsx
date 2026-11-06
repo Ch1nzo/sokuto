@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { animateValue, cubicBezier, m, useReducedMotion, type AnimationPlaybackControls } from 'motion/react'
+import { getViewportForBounds } from '@xyflow/react'
 import {
   Badge,
   Banner,
@@ -21,6 +23,7 @@ import { ArrowLeftIcon, CancelIcon, CheckIcon, ChevronSmallDownIcon, ErrorTriang
 import type { FlowDefinition, FlowRecord, Step, Trigger } from '@shared/flows/types'
 import { api } from '../lib/api'
 import { useT, type Key } from '../lib/i18n'
+import { EASE_DRAWER, EASE_IN_OUT } from '../lib/motion'
 import { EmptyState, ErrorBanner, LoadingState, MenuButton, PageHeader, SelectInput, type MenuButtonItem } from '../components'
 import { formatFlowError } from './flow-editor/errors'
 import { IconBtn } from './flow-editor/fields'
@@ -36,6 +39,19 @@ import './flow-editor.css'
 const STACK_BELOW = 880
 const ICON_ONLY_BELOW = 520
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+
+/** Test drawer: slides in from the right (a fade under reduced motion); the scrim fades. */
+const DRAWER_TRANSITION = { duration: 0.22, ease: EASE_DRAWER }
+const SCRIM_VARIANTS = { open: { opacity: 1 }, closed: { opacity: 0 } }
+const PANEL_SLIDE = { open: { x: 0 }, closed: { x: '100%' } }
+/** "Arrange" glides every node to its new place (positions interpolated in JS so edges stay attached). */
+const ARRANGE_MS = 250
+const arrangeEase = cubicBezier(...EASE_IN_OUT)
+const lerpLayout = (from: Record<string, Point>, to: Record<string, Point>, p: number): Record<string, Point> =>
+  Object.fromEntries(Object.entries(to).map(([k, b]) => {
+    const a = from[k] ?? b
+    return [k, { x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p }]
+  }))
 
 /** Flows saved before the canvas (and templates) have no layout: arrange them once on open. */
 const withLayout = (d: FlowDefinition): FlowDefinition => (d.layout ? d : { ...d, layout: autoLayout(d) })
@@ -60,6 +76,12 @@ export default function FlowEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
+  // The drawer stays mounted (the test transcript survives closing it); `hidden` only once its exit has finished.
+  const [testHidden, setTestHidden] = useState(true)
+  const [appearId, setAppearId] = useState<string | null>(null)
+  const reduceMotion = useReducedMotion()
+  const arrangeAnim = useRef<AnimationPlaybackControls | null>(null)
+  const lastPanel = useRef<ReactNode>(null)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [barWidth, setBarWidth] = useState(Number.POSITIVE_INFINITY)
   const rf = useRef<CanvasInstance | null>(null)
@@ -108,6 +130,7 @@ export default function FlowEditor() {
   // Test drawer: lock page scroll and close on Escape while open.
   useEffect(() => {
     if (!testOpen) return
+    setTestHidden(false)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
@@ -183,11 +206,48 @@ export default function FlowEditor() {
       steps: [...d.steps.map((s) => (s.id === selectedId && outlets(s).some((o) => o.handle === 'next' && !o.target) ? setPointer(s, 'next', step.id) : s)), step],
     }))
     setSelectedId(step.id)
+    setAppearId(step.id)
   }
 
+  const stopArrange = useCallback(() => {
+    arrangeAnim.current?.stop()
+    arrangeAnim.current = null
+  }, [])
+  useEffect(() => stopArrange, [stopArrange])
+
+  /** Auto layout. Nodes glide there (250ms --ease-in-out) while the view pans to fit the result; instant under reduced motion. */
   const arrange = () => {
-    updateDef((d) => ({ ...d, layout: autoLayout(d) }))
-    requestAnimationFrame(() => void rf.current?.fitView({ maxZoom: 1 }))
+    stopArrange()
+    const inst = rf.current
+    const box = canvasRef.current?.getBoundingClientRect()
+    if (reduceMotion || !inst || !box) {
+      updateDef((d) => ({ ...d, layout: autoLayout(d) }))
+      requestAnimationFrame(() => void rf.current?.fitView({ maxZoom: 1 }))
+      return
+    }
+    const nodes = inst.getNodes()
+    const from = Object.fromEntries(nodes.map((n) => [n.id, n.position]))
+    const to = autoLayout(def)
+    // Fit the view to where the nodes will end up, in step with the glide (fitView would use their current places).
+    const rects = nodes.map((n) => ({ ...(to[n.id] ?? n.position), w: n.measured?.width ?? 260, h: n.measured?.height ?? 80 }))
+    if (rects.length) {
+      const x = Math.min(...rects.map((r) => r.x))
+      const y = Math.min(...rects.map((r) => r.y))
+      const bounds = { x, y, width: Math.max(...rects.map((r) => r.x + r.w)) - x, height: Math.max(...rects.map((r) => r.y + r.h)) - y }
+      void inst.setViewport(getViewportForBounds(bounds, box.width, box.height, 0.2, 1, 0.1), { duration: ARRANGE_MS, ease: arrangeEase })
+    }
+    setDirty(true)
+    // Motion's plain value animation (0 → 1, ms; the engine domAnimation already ships, unlike the full `animate()`).
+    arrangeAnim.current = animateValue({
+      keyframes: [0, 1],
+      duration: ARRANGE_MS,
+      ease: EASE_IN_OUT,
+      onUpdate: (p) => setDef((d) => ({ ...d, layout: { ...d.layout, ...lerpLayout(from, to, p) } })),
+      onComplete: () => {
+        arrangeAnim.current = null
+        setDef((d) => ({ ...d, layout: autoLayout(d) }))
+      },
+    })
   }
 
   /* server actions */
@@ -296,6 +356,51 @@ export default function FlowEditor() {
     { key: 'delete', label: t('delete'), icon: TrashIcon, danger: true, onSelect: () => setConfirmDelete(true) },
   ]
   const closeBtn = <IconBtn icon={CancelIcon} label={t('close')} onClick={() => setSelectedId(null)} />
+  // While the mobile bottom sheet slides away (selection already cleared), it keeps showing what it showed.
+  const panelContent =
+    selectedId === START ? (
+      <VStack spacing={16}>
+        <div className="fe-panel__head">
+          <Text as="h2" typo="16" bold color="txt-black-darkest" className="fe-grow">
+            {isSequence ? t('editor_canvas_start') : t('editor_triggers')}
+          </Text>
+          {closeBtn}
+        </div>
+        {isSequence ? <Banner variant="default" icon={InfoIcon} content={t('editor_sequence_note')} /> : <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />}
+      </VStack>
+    ) : selectedStep ? (
+      <VStack spacing={16}>
+        <div className="fe-panel__head">
+          <Tag size="m" variant="monochrome-dark" className="fe-mono">
+            {selectedStep.id}
+          </Tag>
+          <div className="fe-grow">
+            <SelectInput
+              aria-label={t('editor_step_type')}
+              value={selectedStep.type}
+              options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
+              onChange={(type: StepType) => setStep(changeStepType(selectedStep, type))}
+            />
+          </div>
+          <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${selectedStep.id}`} onClick={() => removeSteps([selectedStep.id])} />
+          {closeBtn}
+        </div>
+        <HStack>
+          {def.entry === selectedStep.id ? (
+            <Badge size="m" variant="green">
+              {t('editor_entry')}
+            </Badge>
+          ) : (
+            <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" text={t('editor_canvas_set_entry')} onClick={() => updateDef((d) => ({ ...d, entry: selectedStep.id }))} />
+          )}
+        </HStack>
+        <Banner variant="default" icon={InfoIcon} content={t('editor_placeholders')} />
+        <StepBody key={selectedStep.id} step={selectedStep} steps={def.steps} t={t} flows={allFlows} currentId={flow.id} onChange={setStep} />
+      </VStack>
+    ) : (
+      <EmptyState compact icon={FlowIcon} title={t('editor_canvas_select')} description={t('editor_canvas_hint')} />
+    )
+  if (selectedId) lastPanel.current = panelContent
 
   return (
     <div className="stack fe-page">
@@ -400,6 +505,8 @@ export default function FlowEditor() {
             onChange={updateDef}
             onRemove={removeSteps}
             onInit={(instance) => (rf.current = instance)}
+            appearId={appearId}
+            onNodeDragStart={stopArrange}
           />
           <div className="fe-canvasbar" role="toolbar" aria-label={t('editor_canvas_tools')}>
             <MenuButton
@@ -413,57 +520,32 @@ export default function FlowEditor() {
           </div>
         </div>
 
-        <aside className={['fe-panel', selectedId ? 'is-open' : ''].filter(Boolean).join(' ')} aria-label={selectedStep?.id ?? t('editor_triggers')}>
-          {selectedId === START ? (
-            <VStack spacing={16}>
-              <div className="fe-panel__head">
-                <Text as="h2" typo="16" bold color="txt-black-darkest" className="fe-grow">
-                  {isSequence ? t('editor_canvas_start') : t('editor_triggers')}
-                </Text>
-                {closeBtn}
-              </div>
-              {isSequence ? <Banner variant="default" icon={InfoIcon} content={t('editor_sequence_note')} /> : <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />}
-            </VStack>
-          ) : selectedStep ? (
-            <VStack spacing={16}>
-              <div className="fe-panel__head">
-                <Tag size="m" variant="monochrome-dark" className="fe-mono">
-                  {selectedStep.id}
-                </Tag>
-                <div className="fe-grow">
-                  <SelectInput
-                    aria-label={t('editor_step_type')}
-                    value={selectedStep.type}
-                    options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
-                    onChange={(type: StepType) => setStep(changeStepType(selectedStep, type))}
-                  />
-                </div>
-                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${selectedStep.id}`} onClick={() => removeSteps([selectedStep.id])} />
-                {closeBtn}
-              </div>
-              <HStack>
-                {def.entry === selectedStep.id ? (
-                  <Badge size="m" variant="green">
-                    {t('editor_entry')}
-                  </Badge>
-                ) : (
-                  <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" text={t('editor_canvas_set_entry')} onClick={() => updateDef((d) => ({ ...d, entry: selectedStep.id }))} />
-                )}
-              </HStack>
-              <Banner variant="default" icon={InfoIcon} content={t('editor_placeholders')} />
-              <StepBody key={selectedStep.id} step={selectedStep} steps={def.steps} t={t} flows={allFlows} currentId={flow.id} onChange={setStep} />
-            </VStack>
-          ) : (
-            <EmptyState compact icon={FlowIcon} title={t('editor_canvas_select')} description={t('editor_canvas_hint')} />
-          )}
+        <aside className={['fe-panel', selectedId ? 'is-open' : ''].filter(Boolean).join(' ')} aria-label={selectedStep?.id ?? t('editor_triggers')} inert={!selectedId}>
+          {selectedId ? panelContent : lastPanel.current}
         </aside>
       </div>
 
-      <aside id="fe-test-sheet" className="fe-side" role="dialog" aria-modal aria-labelledby="fe-test-title" hidden={!testOpen}>
-        <div className="fe-side__scrim" onClick={() => setTestOpen(false)} aria-hidden="true" />
-        <div className="fe-side__panel">
+      {/* Stays mounted while closed so the transcript survives; inert during the slide-out, `hidden` after it. */}
+      <aside id="fe-test-sheet" className="fe-side" role="dialog" aria-modal aria-labelledby="fe-test-title" hidden={!testOpen && testHidden} inert={!testOpen}>
+        <m.div
+          className="fe-side__scrim"
+          aria-hidden="true"
+          variants={SCRIM_VARIANTS}
+          initial={false}
+          animate={testOpen ? 'open' : 'closed'}
+          transition={DRAWER_TRANSITION}
+          onClick={() => setTestOpen(false)}
+        />
+        <m.div
+          className="fe-side__panel"
+          variants={reduceMotion ? SCRIM_VARIANTS : PANEL_SLIDE}
+          initial={false}
+          animate={testOpen ? 'open' : 'closed'}
+          transition={DRAWER_TRANSITION}
+          onAnimationComplete={(v) => v === 'closed' && setTestHidden(true)}
+        >
           <TestPanel flowId={id} definition={def} kind={flow.kind} defaultChannel={channel === 'any' ? 'line' : channel} t={t} onClose={() => setTestOpen(false)} />
-        </div>
+        </m.div>
       </aside>
 
       <ConfirmModal show={confirmDelete} onHide={() => setConfirmDelete(false)}>

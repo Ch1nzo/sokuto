@@ -17,7 +17,11 @@
   /* Height of the sticky app chrome above the page (0 on desktop; mobile top bar + nav row). */
   --shell-top: 0px;
   --header-height: 56px;
+  /* Motion curves (mirrored in lib/motion.ts for Motion components). Only these three, plus plain `ease` for
+     color / hover; UI durations ≤ 300ms; animate transform and opacity only. */
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 /*
  * Bezier ships its CSS in cascade layers (@layer tokens, base, components). Unlayered rules
@@ -252,6 +256,35 @@
 /* Row "…" menu (components/RowMenu.tsx) and MenuButton (components/MenuButton.tsx). */
 .row-menu, .menu-button { display: inline-flex; }
 .row-menu__list, .menu-button__list { min-width: 160px; padding: 6px; border-radius: var(--radius-8); background: var(--bg-white-high); box-shadow: var(--ev-3); }
+
+/* Menus pop from their trigger: 150ms fade + scale(0.97 → 1), --ease-out. Enter only (the Overlay unmounts on close),
+   so a keyframe on mount is enough. RowMenu / MenuButton set `transform-origin` inline on the list (the trigger's
+   corner: top-* when dropping down, bottom-* when dropping up). */
+.menu-pop { animation: menu-pop 150ms var(--ease-out); }
+@keyframes menu-pop { from { opacity: 0; transform: scale(0.97); } }
+/* Bezier Select dropdowns (`useSelectDropdown`, workspace switcher): the Overlay element is the list and Bezier
+   places it with `transform: translate()` from the trigger's top-left corner, so scale it with the separate `scale`
+   property around that corner (the trigger edge, within ~1px either way it opens). Bezier fades it in and out
+   through `.hidden` (its close waits for that transition); we keep the fade at our timing and drop its 10px `top`
+   slide, which always moved downward, even for lists that open upward. */
+.select-dropdown { transform-origin: 0 0; transition: opacity 150ms var(--ease-out); animation: select-pop 150ms var(--ease-out); }
+@keyframes select-pop { from { scale: 0.97; } }
+@keyframes fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .menu-pop { animation-name: fade-in; }
+  .select-dropdown { animation: none; }
+}
+
+/* Press feedback on every Bezier Button (stable `data-bezier-component`; Bezier has no press transform of its own).
+   Keeps Bezier's color / shadow transitions, which this unlayered rule replaces. Not inside the React Flow canvas,
+   where nodes are positioned with transforms. */
+[data-bezier-component='Button'] {
+  transition: background-color var(--motion-transition-fast), box-shadow var(--motion-transition-fast), transform 120ms var(--ease-out);
+}
+[data-bezier-component='Button']:active:not(:disabled):not(.react-flow *) { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  [data-bezier-component='Button']:active:not(:disabled):not(.react-flow *) { transform: none; }
+}
 
 /* Contact avatar (components/ContactAvatar.tsx): initials on a tint, channel mark on the corner. */
 .c-avatar { position: relative; flex: none; display: inline-flex; }

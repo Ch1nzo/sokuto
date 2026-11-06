@@ -42,10 +42,14 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
 /** The workspace a session request asks for: `X-Workspace` header, else the `sokuto_ws` cookie. */
 export const requestedWorkspace = (c: Context<AppEnv>) => c.req.header('x-workspace') || getCookie(c, 'sokuto_ws')
 
-/** Session requests work on the requested workspace (default 1). MCP tokens keep their own. */
+/**
+ * Session requests work on the requested workspace (default 1). MCP tokens keep their own.
+ * `GET /api/realtime` takes it from `?ws=` instead: a browser cannot set headers on a WebSocket, and the
+ * cookie is shared by tabs that may be on other workspaces.
+ */
 export async function resolveWorkspace(c: Context<AppEnv>, next: Next) {
   if (c.get('auth') === 'session') {
-    const raw = requestedWorkspace(c)
+    const raw = c.req.path === '/api/realtime' ? c.req.query('ws') : requestedWorkspace(c)
     const ws = raw ? parseWorkspaceId(raw) : 1
     if (ws === null || !(await getWorkspace(createDb(c.env.DB), ws))) return c.json({ error: 'workspace_not_found' }, 404)
     c.set('ws', ws)

@@ -8,7 +8,7 @@ type WorkspaceState = {
   workspaces: Workspace[]
   /** This tab's workspace; undefined until the list has loaded. */
   current: Workspace | undefined
-  /** Conversations with unread messages in this workspace (the API caps the list at 100); null until the first poll. */
+  /** Conversations with unread messages in this workspace (GET /api/inbox/counts); null until it first loads. */
   unread: number | null
   /** Why the list could not be loaded (null when it loaded or is loading). */
   error: unknown

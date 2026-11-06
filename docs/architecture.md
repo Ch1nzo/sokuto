@@ -26,6 +26,7 @@ Sokutō は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 - `wrangler.jsonc` の `assets.run_worker_first` に `/api/*`, `/webhooks/*`, `/mcp`, `/mcp/*`, `/health` が指定されており、これらは Worker のコードが処理します。それ以外のパスは静的アセット (`dist/client`) が返され、見つからないパスは `index.html` (SPA) が返されます。
 - Webhook は署名を検証したらすぐに応答を返し、実際の処理 (連絡先の作成、自動化の実行、送信) は `ctx.waitUntil` でバックグラウンドで行います。LINE / Meta のタイムアウトを避けるためです。
 - `GET /health` は `{ "ok": true, "name": "sokuto" }` を返します。
+- 管理画面の受信箱は、Durable Object `InboxHub` への WebSocket (`GET /api/realtime`) で変更をすぐに受け取ります ([リアルタイム受信箱](#リアルタイム受信箱))。
 
 ## ワークスペース
 
@@ -192,6 +193,21 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 注意: 待機の再開時には 24 時間ルールを確認していません。Messenger / Instagram で 24 時間を超える待機のあとに送るメッセージは、Meta 側でエラーになります。
 
+## リアルタイム受信箱
+
+管理画面は、新しい会話・メッセージ・状態の変化をリロードなしで表示します。コードは `src/realtime.ts` (通知と接続の検証)、`src/inbox-hub.ts` (Durable Object)、`admin/src/lib/realtime.ts` (ブラウザ側) です。
+
+- **InboxHub**: ワークスペースごとに 1 つの Durable Object (`idFromName('ws:<ID>')`、バインディング `INBOX_HUB`、SQLite 型。`wrangler.jsonc` の `migrations` で作られ、`wrangler deploy` が適用します)。データは保存せず、開いている管理画面のタブの WebSocket を持つだけです。**WebSocket Hibernation API** を使うので、接続を保ったまま休止でき、待っている間は使用時間 (duration) に数えられません。タブが 30 秒ごとに送る `ping` には実行環境が `pong` を返し (`setWebSocketAutoResponse`)、Durable Object は起きません。
+- **接続**: `GET /api/realtime?ws=<ID>` (WebSocket のアップグレード)。ほかの `/api/*` と同じセッション Cookie が必要で (MCP トークンは 403 `session_required`)、ブラウザは WebSocket にヘッダーを付けられないので、ワークスペースはクエリ `ws` で選びます (存在しなければ 404)。アップグレードでなければ 426、`Origin` が自分のオリジンと違えば 403 `bad_origin` です (Cookie 付きのクロスサイト WebSocket 乗っ取りを防ぐため)。
+- **通知**: 受信箱に見えるものが変わると、そのワークスペースの InboxHub に `{ "t": "inbox", "contactId"?: n }` を送り、全タブに転送します。中身は送らず、タブは通常の API で読み直します。通知の失敗はログに残すだけで、呼び出し元の処理は止めません。送る場所:
+  - Webhook (`routes/webhooks.ts`): 1 回のリクエストにつき最大 2 回。最初のメッセージを保存した時点 (AI の返信を待たずに表示するため) と、全イベントの処理の後 (自動化・Soku の返信、担当者への引き継ぎ)。
+  - 定期処理 (`scheduler.ts`): 1 回の実行でワークスペースごとに 1 回 (待機の再開・シーケンス・一斉配信。一斉配信を含むときは `contactId` なし)。
+  - 管理 API: 手動返信・商品カードの送信、ボットの停止 / 再開、連絡先の更新 (状態・メモ・名前)、タグ、シーケンスの登録 / 解除、連絡先の削除、未読だった会話を開いたとき (既読)。
+  - MCP: `send_message`、`set_bot_paused`、`tag_contact`、`subscribe_sequence`、`update_contact`。
+- **ブラウザ**: タブごとに 1 本の接続をログイン後に開きます (ワークスペースを切り替えるとページごと読み直すので新しく開き直す)。切れたら 1 秒から 30 秒まで倍々に (ランダムな揺らぎ付きで) 再接続し、5 分以上隠れているタブは接続を閉じて、表示されたときに再接続して 1 回読み直します。受信箱はイベントを 250 ms まとめてから一覧 (と、そのイベントの会話を開いていれば会話) を読み直します。念のための定期的な読み直しは、接続中は 60 秒、切断中は 10 秒ごとです。
+- **件数とタブのタイトル**: `GET /api/inbox/counts` は `{ open, unread }` (未完了の会話の数、未読のある会話の数) を `count(*)` で返します。管理画面は、どのページでも未完了の数をタブのタイトル (`Sokutō (N)`、0 なら `Sokutō`) に、未読の数を「受信箱」のバッジに出します。読み直すのは、表示時・画面の移動・イベントのたびと、60 秒ごと (タブが隠れていても) です。
+- **無料プランでの費用**: Durable Objects の無料枠は 1 日 100,000 リクエストです。数えられるのは、タブの接続 1 回、通知 1 回 (誰も接続していなくても 1 回)、タブから届く WebSocket メッセージ (20 通で 1 リクエスト。30 秒ごとの `ping` は 1 タブ 1 日約 150 リクエスト分) です。
+
 ## セキュリティモデル
 
 - **デプロイ時に秘密情報は不要**: セッション署名鍵、暗号化鍵、Meta 検証トークンは、初回に必要になった時点でランダムに生成され、あなたの KV に保存されます (`src/settings.ts` の `getOrCreateSecret`)。`.dev.vars` も通常は不要です。
@@ -218,4 +234,5 @@ Sokutō is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
 - **AI providers** (`src/ai.ts`, used by `ai` steps, `intent` triggers and Soku): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db, ws)` loads the workspace's `ws:<id>:ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped unless the broadcast has a Meta message tag; up to 3 buttons, links or `sk-bc:` postbacks that start a flow, with tap counts), and prunes dedupe records. Delay resumes do not check the 24 h window.
+- **Realtime inbox** (`src/realtime.ts`, `src/inbox-hub.ts`, `admin/src/lib/realtime.ts`): one SQLite-backed Durable Object `InboxHub` per workspace (`idFromName('ws:<id>')`, binding `INBOX_HUB`, created by the `migrations` entry in `wrangler.jsonc` on `wrangler deploy`) holds the admin tabs' WebSockets with the Hibernation API; the tabs' 30 s `ping` is answered with `pong` by `setWebSocketAutoResponse` without waking it. `GET /api/realtime?ws=<id>` needs the session cookie (MCP token → 403 `session_required`), answers 426 to non-upgrade requests and 403 `bad_origin` unless `Origin` is the request's own origin (cross-site WebSocket hijacking). Events are `{ t: 'inbox', contactId? }` with no data; tabs refetch. Published (never throwing, via `waitUntil`) by webhooks (at most twice per request: when the first message is stored, and after processing), the scheduler (once per workspace per tick; without `contactId` when broadcasts were sent), the admin inbox/contact write routes (send, products, bot pause, contact patch, tags, sequences, delete, marking an unread conversation read) and the MCP tools `send_message`, `set_bot_paused`, `tag_contact`, `subscribe_sequence`, `update_contact`. The client reconnects with jittered exponential backoff (1 s → 30 s), closes after 5 min hidden and reconnects (and refetches) when visible; the inbox debounces events by 250 ms and keeps a safety poll (60 s connected, 10 s disconnected). `GET /api/inbox/counts` returns `{ open, unread }` with `count(*)` for the tab title (`Sokutō (N)` open conversations) and the inbox nav badge, refreshed on navigation, events and every 60 s. Free plan: Durable Objects allow 100k requests/day; each tab connection, each publish and every 20 incoming WebSocket messages count as one.
 - **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; one MCP token per workspace, stored as SHA-256, valid for `/mcp` and `/api/*` but only for its workspace; constant-time webhook signature checks.

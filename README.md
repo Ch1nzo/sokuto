@@ -78,6 +78,7 @@ Sokutō 自体に料金はありません。ただし、次の外部サービス
 - Workers: 1 日 100,000 リクエストまで。Webhook (受信メッセージ)、管理画面の操作、MCP の呼び出しがそれぞれリクエストとして数えられます。
 - D1: 1 日あたり読み取り 500 万行・書き込み 10 万行、保存容量 5 GB まで。受信メッセージ 1 通につき、連絡先・メッセージ履歴・統計などで数行〜10 行程度の書き込みが発生します。
 - KV: 1 日あたり読み取り 100,000 回・書き込み 1,000 回まで。
+- Durable Objects (受信箱のリアルタイム更新): 1 日 100,000 リクエストまで。管理画面を開いているタブの接続と、メッセージの受信・送信などの通知 (Webhook 1 回につき最大 2 回) が数えられます。接続は休止したまま保たれるので、待っている間は使用時間に数えられません。
 - 上限を超えると、**UTC 0:00 (日本時間 9:00) にリセットされるまで Worker がエラーを返し、ボットは止まります**。その間に届いたメッセージには返信されません。小規模なお店の利用であれば通常は上限に届きませんが、大量の一斉配信や大きなキャンペーンの前には Cloudflare ダッシュボードで使用量を確認してください。必要なら有料の Workers Paid プランに切り替えられます。
 - 定期処理 (Cron) は 1 分ごとに動き、待機ステップを再開し、一斉配信を送信します。
 
@@ -168,7 +169,7 @@ Forgot the password? Delete the `admin:password` key in the Worker's KV namespac
 
 ### Pricing and limits
 
-- Cloudflare free plan: 100k Worker requests/day, D1 5M rows read / 100k rows written per day and 5 GB, KV 100k reads / 1k writes per day. When a limit is hit the Worker returns errors (the bot stops) until the reset at 00:00 UTC.
+- Cloudflare free plan: 100k Worker requests/day, D1 5M rows read / 100k rows written per day and 5 GB, KV 100k reads / 1k writes per day, Durable Objects 100k requests per day (the realtime inbox: admin tab connections and one or two notifications per webhook; idle sockets hibernate). When a limit is hit the Worker returns errors (the bot stops) until the reset at 00:00 UTC.
 - LINE: replies are free; push messages (broadcasts, messages after a delay, manual inbox replies, and the 2nd+ step sent for one incoming message) count against your Official Account plan's monthly quota (free plan: 200/month at the time of writing).
 - Meta: the 24-hour rule applies; broadcasts only go to people who messaged you in the last 24 hours (unless you set a message tag, which Meta allows only for event confirmations, post-purchase updates and account updates), and delays longer than 24 hours will fail on Messenger/Instagram. One private reply per comment.
 

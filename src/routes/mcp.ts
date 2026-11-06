@@ -18,6 +18,7 @@ import type { Channel } from '../channels/types'
 import { broadcastReach } from '../scheduler'
 import { loadSegment, parseSegment } from '../segments'
 import { getWorkspace } from '../workspaces'
+import { notifyInbox, type Defer } from '../realtime'
 import { addDocument, botOverview, deleteDocument, deleteFaq, deleteProduct, listFaqs, listProducts, productInputSchema, saveFaq, saveProduct } from '../bot'
 
 export const mcpRoutes = new Hono<AppEnv>()
@@ -30,9 +31,13 @@ async function flowById(d: Db, ws: number, id: number) {
   return row ? parseFlow(row) : null
 }
 
-/** MCP tools for workspace `ws` (the token's workspace): nothing outside it is visible or writable. */
-export function buildMcpServer(env: Env, ws: number): McpServer {
+/**
+ * MCP tools for workspace `ws` (the token's workspace): nothing outside it is visible or writable.
+ * `defer` (the request's waitUntil) carries inbox publishes for open admin tabs past the tool's answer.
+ */
+export function buildMcpServer(env: Env, ws: number, defer: Defer = () => {}): McpServer {
   const d = createDb(env.DB)
+  const publish = (contactId: number) => defer(notifyInbox(env, ws, contactId))
   const server = new McpServer({ name: 'sokuto', version: '0.1.0' })
 
   server.registerTool('get_overview', { title: 'Overview', description: 'Workspace, bot name, configured channels, AI provider (needed by ai steps, intent triggers and Soku), Soku (the reply bot) on/off, live flows and key numbers for the last 7 days.' }, async () => {
@@ -174,12 +179,14 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
     if (!(await getContact(d, ws, id))) return fail('not_found')
     if (remove) await removeTag(d, id, tag)
     else await addTag(d, id, tag)
+    publish(id)
     return json({ tags: await getTags(d, id) })
   })
 
   server.registerTool('set_bot_paused', { title: 'Pause / resume bot for a contact', description: 'Pauses automations for one contact (hand over to a person) or resumes them.', inputSchema: { id: z.number().int(), paused: z.boolean() } }, async ({ id, paused }) => {
     if (!(await getContact(d, ws, id))) return fail('not_found')
     await setBotPaused(d, id, paused)
+    publish(id)
     return json({ ok: true })
   })
 
@@ -206,6 +213,7 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
     const res = await adapter.send(contact.channelUserId, { text })
     await logMessage(d, { contactId, direction: 'out', source: 'human', kind: 'text', text, error: res.ok ? undefined : res.error })
     if (!keepBot) await setBotPaused(d, contactId, true)
+    publish(contactId)
     return res.ok ? json({ ok: true }) : fail(res.error)
   })
 
@@ -279,6 +287,7 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
         const res = await subscribeSequence(d, contact, flowId)
         if (res !== 'ok') return fail(res)
       }
+      publish(contactId)
       return json({ sequences: await contactSequences(d, contactId) })
     },
   )
@@ -296,6 +305,7 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
       if (notes !== undefined) patch.notes = notes || null
       if (displayName !== undefined) patch.displayName = displayName
       const r = await d.update(schema.contacts).set(patch).where(and(eq(schema.contacts.id, id), eq(schema.contacts.workspaceId, ws))).returning().get()
+      if (r) publish(r.id)
       return r ? json({ id: r.id, name: r.displayName, status: r.status, notes: r.notes }) : fail('not_found')
     },
   )
@@ -382,7 +392,7 @@ mcpRoutes.all('/', async (c) => {
   if (ws === null) {
     return c.json({ error: 'unauthorized', hint: 'Send "Authorization: Bearer <token>" with the token from Settings → AI (MCP).' }, 401, { 'WWW-Authenticate': 'Bearer realm="sokuto"' })
   }
-  const server = buildMcpServer(c.env, ws)
+  const server = buildMcpServer(c.env, ws, (p) => c.executionCtx.waitUntil(p))
   const transport = new StreamableHTTPTransport({ sessionIdGenerator: undefined })
   await server.connect(transport)
   return transport.handleRequest(c)

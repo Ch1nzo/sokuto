@@ -83,7 +83,7 @@ export function MenuButton({ label, text, icon, iconOnly, items, disabled, size 
         }}
       />
       <Overlay show={open} target={buttonRef.current} container={container} position={`${up ? 'top' : 'bottom'}-${align}`} marginY={4} keepInContainer onHide={close}>
-        <div ref={listRef} role="menu" aria-label={label} className="menu-button__list" onKeyDown={onKeyDown}>
+        <div ref={listRef} role="menu" aria-label={label} className="menu-button__list menu-pop" style={{ transformOrigin: `${up ? 'bottom' : 'top'} ${align}` }} onKeyDown={onKeyDown}>
           {items.map((item) => (
             <ListItem
               key={item.key}

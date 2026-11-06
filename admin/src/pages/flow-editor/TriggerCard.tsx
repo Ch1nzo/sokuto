@@ -1,7 +1,9 @@
 import { Checkbox, HStack, VStack } from '@channel.io/bezier-react'
+import { AnimatePresence, m } from 'motion/react'
 import { TrashIcon } from '@channel.io/bezier-icons'
 import type { Trigger } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
+import { LIST_ITEM_MOTION, useItemKeys } from '../../lib/motion'
 import { SelectField, TextInputField } from '../../components'
 import { AddButton, IconBtn, ListInputField } from './fields'
 import { MATCH_TYPES, TRIGGER_TYPES, defaultTrigger, type MatchType, type TFn, type TriggerType } from './model'
@@ -77,18 +79,26 @@ export function TriggerCard({ trigger, index, onChange, onRemove, t }: { trigger
 }
 
 export function TriggerList({ triggers, onChange, t }: { triggers: Trigger[]; onChange: (fn: (ts: Trigger[]) => Trigger[]) => void; t: TFn }) {
+  const { keys, without } = useItemKeys(triggers.length)
   return (
     <VStack spacing={12}>
-      {triggers.map((tr, i) => (
-        <TriggerCard
-          key={i}
-          index={i}
-          trigger={tr}
-          t={t}
-          onChange={(ntr) => onChange((ts) => ts.map((x, j) => (j === i ? ntr : x)))}
-          onRemove={() => onChange((ts) => ts.filter((_, j) => j !== i))}
-        />
-      ))}
+      {/* Cards added / removed while the panel is open fade in / out; the ones it opens with do not. */}
+      <AnimatePresence initial={false}>
+        {triggers.map((tr, i) => (
+          <m.div key={keys[i]} {...LIST_ITEM_MOTION}>
+            <TriggerCard
+              index={i}
+              trigger={tr}
+              t={t}
+              onChange={(ntr) => onChange((ts) => ts.map((x, j) => (j === i ? ntr : x)))}
+              onRemove={() => {
+                const next = without(triggers, i) // outside the updater: it also drops the item's key
+                onChange(() => next)
+              }}
+            />
+          </m.div>
+        ))}
+      </AnimatePresence>
       <div>
         <AddButton text={t('editor_add_trigger')} onClick={() => onChange((ts) => [...ts, defaultTrigger('keyword')])} />
       </div>

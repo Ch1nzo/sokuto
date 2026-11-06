@@ -27,6 +27,9 @@
       },
       "AI": {
         "description": "Workers AI, used only if you pick it as the AI provider in Settings (free daily allowance)."
+      },
+      "INBOX_HUB": {
+        "description": "Durable Object that pushes new messages to open inbox tabs in real time (one per workspace)."
       }
     }
   },
@@ -38,6 +41,7 @@
     "@xyflow/react": "^12.12.1",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
+    "motion": "^14.10.1",
     "zod": "^4.1.0"
   },
   "devDependencies": {

@@ -7,6 +7,8 @@ import { createDb } from './db'
 import { runScheduledTasks } from './scheduler'
 import type { Env } from './env'
 
+export { InboxHub } from './inbox-hub'
+
 const app = new Hono<AppEnv>()
 
 app.get('/health', (c) => c.json({ ok: true, name: 'sokuto' }))

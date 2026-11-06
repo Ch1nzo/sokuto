@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Badge, Button, HStack, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
+import { AnimatePresence, m } from 'motion/react'
 import { CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { Action, AttachmentDef, ButtonDef, CardDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
+import { LIST_ITEM_MOTION, useItemKeys } from '../../lib/motion'
 import { SelectField, SelectInput, TextAreaField, TextInputField } from '../../components'
 import { AddButton, IconBtn, ListInputField, StepPicker } from './fields'
 import { RulesEditor } from './RulesEditor'
@@ -41,38 +43,41 @@ function NumberInput({ value, onChange, min, max, ariaLabel, className }: { valu
 /** Button rows (label / URL / next) shared by the message itself and each carousel card. */
 function ButtonList({ buttons, max, steps, t, onChange }: { buttons: ButtonDef[]; max: number; steps: Step[]; t: TFn; onChange: (bs: ButtonDef[]) => void }) {
   const setButton = (i: number, b: ButtonDef) => onChange(buttons.map((x, j) => (j === i ? b : x)))
+  const { keys, without } = useItemKeys(buttons.length)
   return (
     <VStack spacing={8}>
       <Text typo="13" bold color="txt-black-darker">
         {t('editor_buttons')} <span className="fe-count">({buttons.length}/{max})</span>
       </Text>
-      {buttons.map((b, i) => (
-        <div className="fe-subitem" key={i}>
-          <div className="fe-grid-2">
-            <TextInputField
-              label={t('editor_button_label')}
-              helperText={`${b.label.length}/${MAX_BUTTON_LABEL}`}
-              value={b.label}
-              maxLength={MAX_BUTTON_LABEL}
-              onChange={(e) => setButton(i, { ...b, label: e.target.value })}
-            />
-            <TextInputField
-              label={t('editor_button_url')}
-              type="url"
-              value={b.url ?? ''}
-              placeholder="https://"
-              onChange={(e) => {
-                const url = e.target.value
-                setButton(i, url ? { label: b.label, url } : { label: b.label, next: b.next ?? null })
-              }}
-            />
-          </div>
-          <HStack spacing={8} align="end">
-            <div className="fe-grow">{!b.url && <StepPicker label={t('editor_next')} value={b.next} steps={steps} t={t} onChange={(next) => setButton(i, { ...b, next })} />}</div>
-            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => onChange(buttons.filter((_, j) => j !== i))} />
-          </HStack>
-        </div>
-      ))}
+      <AnimatePresence initial={false}>
+        {buttons.map((b, i) => (
+          <m.div className="fe-subitem" key={keys[i]} {...LIST_ITEM_MOTION}>
+            <div className="fe-grid-2">
+              <TextInputField
+                label={t('editor_button_label')}
+                helperText={`${b.label.length}/${MAX_BUTTON_LABEL}`}
+                value={b.label}
+                maxLength={MAX_BUTTON_LABEL}
+                onChange={(e) => setButton(i, { ...b, label: e.target.value })}
+              />
+              <TextInputField
+                label={t('editor_button_url')}
+                type="url"
+                value={b.url ?? ''}
+                placeholder="https://"
+                onChange={(e) => {
+                  const url = e.target.value
+                  setButton(i, url ? { label: b.label, url } : { label: b.label, next: b.next ?? null })
+                }}
+              />
+            </div>
+            <HStack spacing={8} align="end">
+              <div className="fe-grow">{!b.url && <StepPicker label={t('editor_next')} value={b.next} steps={steps} t={t} onChange={(next) => setButton(i, { ...b, next })} />}</div>
+              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => onChange(without(buttons, i))} />
+            </HStack>
+          </m.div>
+        ))}
+      </AnimatePresence>
       <div>
         <AddButton text={t('editor_add_button')} disabled={buttons.length >= max} onClick={() => onChange([...buttons, { label: '', next: null }])} />
       </div>
@@ -83,6 +88,7 @@ function ButtonList({ buttons, max, steps, t, onChange }: { buttons: ButtonDef[]
 function CardsEditor({ cards, steps, t, onChange }: { cards: CardDef[]; steps: Step[]; t: TFn; onChange: (cs: CardDef[]) => void }) {
   const setCard = (i: number, c: CardDef) => onChange(cards.map((x, j) => (j === i ? c : x)))
   const mismatch = new Set(cards.map((c) => c.buttons.length)).size > 1
+  const { keys, without } = useItemKeys(cards.length)
   // New cards copy the first card's button count (LINE needs the same count on every card).
   const newButtons = () => Array.from({ length: cards[0]?.buttons.length || 1 }, (): ButtonDef => ({ label: '', next: null }))
   return (
@@ -90,28 +96,30 @@ function CardsEditor({ cards, steps, t, onChange }: { cards: CardDef[]; steps: S
       <Text typo="13" bold color="txt-black-darker">
         {t('editor_cards')} <span className="fe-count">({cards.length}/{MAX_CARDS})</span>
       </Text>
-      {cards.map((c, i) => (
-        <div className="fe-subitem" key={i}>
-          <HStack spacing={8} align="center" justify="between">
-            <Text typo="12" bold color="txt-black-dark">
-              #{i + 1}
-            </Text>
-            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${c.title || t('editor_card_title')}`} onClick={() => onChange(cards.filter((_, j) => j !== i))} />
-          </HStack>
-          <div className="fe-grid-2">
-            <TextInputField label={t('editor_card_title')} helperText={`${c.title.length}/${MAX_CARD_TITLE}`} value={c.title} maxLength={MAX_CARD_TITLE} onChange={(e) => setCard(i, { ...c, title: e.target.value })} />
-            <TextInputField
-              label={t('editor_card_subtitle')}
-              helperText={`${c.subtitle?.length ?? 0}/${MAX_CARD_SUBTITLE}`}
-              value={c.subtitle ?? ''}
-              maxLength={MAX_CARD_SUBTITLE}
-              onChange={(e) => setCard(i, { ...c, subtitle: e.target.value || undefined })}
-            />
-          </div>
-          <TextInputField label={t('editor_image')} type="url" value={c.imageUrl ?? ''} placeholder="https://" onChange={(e) => setCard(i, { ...c, imageUrl: e.target.value || undefined })} />
-          <ButtonList buttons={c.buttons} max={MAX_CARD_BUTTONS} steps={steps} t={t} onChange={(buttons) => setCard(i, { ...c, buttons })} />
-        </div>
-      ))}
+      <AnimatePresence initial={false}>
+        {cards.map((c, i) => (
+          <m.div className="fe-subitem" key={keys[i]} {...LIST_ITEM_MOTION}>
+            <HStack spacing={8} align="center" justify="between">
+              <Text typo="12" bold color="txt-black-dark">
+                #{i + 1}
+              </Text>
+              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${c.title || t('editor_card_title')}`} onClick={() => onChange(without(cards, i))} />
+            </HStack>
+            <div className="fe-grid-2">
+              <TextInputField label={t('editor_card_title')} helperText={`${c.title.length}/${MAX_CARD_TITLE}`} value={c.title} maxLength={MAX_CARD_TITLE} onChange={(e) => setCard(i, { ...c, title: e.target.value })} />
+              <TextInputField
+                label={t('editor_card_subtitle')}
+                helperText={`${c.subtitle?.length ?? 0}/${MAX_CARD_SUBTITLE}`}
+                value={c.subtitle ?? ''}
+                maxLength={MAX_CARD_SUBTITLE}
+                onChange={(e) => setCard(i, { ...c, subtitle: e.target.value || undefined })}
+              />
+            </div>
+            <TextInputField label={t('editor_image')} type="url" value={c.imageUrl ?? ''} placeholder="https://" onChange={(e) => setCard(i, { ...c, imageUrl: e.target.value || undefined })} />
+            <ButtonList buttons={c.buttons} max={MAX_CARD_BUTTONS} steps={steps} t={t} onChange={(buttons) => setCard(i, { ...c, buttons })} />
+          </m.div>
+        ))}
+      </AnimatePresence>
       {mismatch && (
         <Text typo="12" color="bgtxt-orange-normal" className="fe-wrap">
           {t('editor_cards_same_buttons')}
@@ -265,28 +273,31 @@ function ActionFields({ action, onChange, flows, t }: { action: Action; onChange
 
 function ActionBody({ step, onChange, steps, t, flows }: BodyProps<'action'> & { flows: FlowRecord[] }) {
   const setAction = (i: number, a: Action) => onChange({ ...step, actions: step.actions.map((x, j) => (j === i ? a : x)) })
+  const { keys, without } = useItemKeys(step.actions.length)
   return (
     <>
       <VStack spacing={8}>
         <Text typo="13" bold color="txt-black-darker">
           {t('editor_actions')}
         </Text>
-        {step.actions.map((a, i) => (
-          <div className="fe-subitem" key={i}>
-            <HStack spacing={8} align="center">
-              <div className="fe-grow">
-                <SelectInput
-                  aria-label={t('editor_actions')}
-                  value={a.type}
-                  options={ACTION_TYPES.map((type) => ({ value: type, label: t(`action_${type}` as Key) }))}
-                  onChange={(type: ActionType) => setAction(i, defaultAction(type))}
-                />
-              </div>
-              <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.actions.length <= 1} onClick={() => onChange({ ...step, actions: step.actions.filter((_, j) => j !== i) })} />
-            </HStack>
-            <ActionFields action={a} flows={flows} t={t} onChange={(na) => setAction(i, na)} />
-          </div>
-        ))}
+        <AnimatePresence initial={false}>
+          {step.actions.map((a, i) => (
+            <m.div className="fe-subitem" key={keys[i]} {...LIST_ITEM_MOTION}>
+              <HStack spacing={8} align="center">
+                <div className="fe-grow">
+                  <SelectInput
+                    aria-label={t('editor_actions')}
+                    value={a.type}
+                    options={ACTION_TYPES.map((type) => ({ value: type, label: t(`action_${type}` as Key) }))}
+                    onChange={(type: ActionType) => setAction(i, defaultAction(type))}
+                  />
+                </div>
+                <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.actions.length <= 1} onClick={() => onChange({ ...step, actions: without(step.actions, i) })} />
+              </HStack>
+              <ActionFields action={a} flows={flows} t={t} onChange={(na) => setAction(i, na)} />
+            </m.div>
+          ))}
+        </AnimatePresence>
         <div>
           <AddButton text={t('editor_add_action')} onClick={() => onChange({ ...step, actions: [...step.actions, defaultAction('add_tag')] })} />
         </div>
@@ -331,23 +342,26 @@ function DelayBody({ step, onChange, steps, t }: BodyProps<'delay'>) {
 function RandomBody({ step, onChange, steps, t }: BodyProps<'random'>) {
   const total = step.branches.reduce((sum, b) => sum + (b.weight > 0 ? b.weight : 0), 0)
   const setBranch = (i: number, b: { weight: number; next?: string | null }) => onChange({ ...step, branches: step.branches.map((x, j) => (j === i ? b : x)) })
+  const { keys, without } = useItemKeys(step.branches.length)
   return (
     <VStack spacing={8}>
       <Text typo="13" bold color="txt-black-darker">
         {t('editor_branches')}
       </Text>
-      {step.branches.map((b, i) => (
-        <div className="fe-branch" key={i}>
-          <NumberInput className="fe-branch__weight" ariaLabel={`${t('editor_branches')} ${i + 1}`} min={0} value={b.weight} onChange={(raw) => setBranch(i, { ...b, weight: Math.max(0, Number(raw) || 0) })} />
-          <Badge size="m" variant="monochrome-light" className="fe-branch__pct">
-            {total > 0 ? `${Math.round((Math.max(0, b.weight) / total) * 100)}%` : '—'}
-          </Badge>
-          <div className="fe-branch__next">
-            <StepPicker value={b.next} steps={steps} selfId={step.id} t={t} ariaLabel={`${t('editor_next')} ${i + 1}`} onChange={(next) => setBranch(i, { ...b, next })} />
-          </div>
-          <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.branches.length <= 1} onClick={() => onChange({ ...step, branches: step.branches.filter((_, j) => j !== i) })} />
-        </div>
-      ))}
+      <AnimatePresence initial={false}>
+        {step.branches.map((b, i) => (
+          <m.div className="fe-branch" key={keys[i]} {...LIST_ITEM_MOTION}>
+            <NumberInput className="fe-branch__weight" ariaLabel={`${t('editor_branches')} ${i + 1}`} min={0} value={b.weight} onChange={(raw) => setBranch(i, { ...b, weight: Math.max(0, Number(raw) || 0) })} />
+            <Badge size="m" variant="monochrome-light" className="fe-branch__pct">
+              {total > 0 ? `${Math.round((Math.max(0, b.weight) / total) * 100)}%` : '—'}
+            </Badge>
+            <div className="fe-branch__next">
+              <StepPicker value={b.next} steps={steps} selfId={step.id} t={t} ariaLabel={`${t('editor_next')} ${i + 1}`} onChange={(next) => setBranch(i, { ...b, next })} />
+            </div>
+            <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.branches.length <= 1} onClick={() => onChange({ ...step, branches: without(step.branches, i) })} />
+          </m.div>
+        ))}
+      </AnimatePresence>
       <div>
         <AddButton text={t('editor_add_branch')} onClick={() => onChange({ ...step, branches: [...step.branches, { weight: 50, next: null }] })} />
       </div>
@@ -366,6 +380,7 @@ function GotoBody({ step, onChange, t, flows, currentId }: BodyProps<'goto'> & {
 function CommentReplyBody({ step, onChange, steps, t }: BodyProps<'comment_reply'>) {
   const texts = step.texts ?? []
   const setTexts = (ts: string[]) => onChange({ ...step, texts: ts.length ? ts : undefined })
+  const { keys, without } = useItemKeys(texts.length)
   return (
     <>
       <TextAreaField label={t('editor_text')} value={step.text} maxLength={1000} helperText={`${step.text.length}/1000`} onChange={(e) => onChange({ ...step, text: e.target.value })} />
@@ -373,14 +388,18 @@ function CommentReplyBody({ step, onChange, steps, t }: BodyProps<'comment_reply
         <Text typo="13" bold color="txt-black-darker">
           {t('editor_reply_variants')} <span className="fe-count">({texts.length}/{MAX_REPLY_VARIANTS})</span>
         </Text>
-        {texts.map((v, i) => (
-          <HStack spacing={8} align="start" key={i}>
-            <div className="fe-grow">
-              <TextArea minRows={3} maxLength={1000} value={v} aria-label={`${t('editor_reply_variants')} ${i + 1}`} onChange={(e) => setTexts(texts.map((x, j) => (j === i ? e.target.value : x)))} />
-            </div>
-            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${t('editor_reply_variants')} ${i + 1}`} onClick={() => setTexts(texts.filter((_, j) => j !== i))} />
-          </HStack>
-        ))}
+        <AnimatePresence initial={false}>
+          {texts.map((v, i) => (
+            <m.div key={keys[i]} {...LIST_ITEM_MOTION}>
+              <HStack spacing={8} align="start">
+                <div className="fe-grow">
+                  <TextArea minRows={3} maxLength={1000} value={v} aria-label={`${t('editor_reply_variants')} ${i + 1}`} onChange={(e) => setTexts(texts.map((x, j) => (j === i ? e.target.value : x)))} />
+                </div>
+                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${t('editor_reply_variants')} ${i + 1}`} onClick={() => setTexts(without(texts, i))} />
+              </HStack>
+            </m.div>
+          ))}
+        </AnimatePresence>
         <div>
           <AddButton text={t('editor_add_variant')} disabled={texts.length >= MAX_REPLY_VARIANTS} onClick={() => setTexts([...texts, ''])} />
         </div>
@@ -415,6 +434,7 @@ function HeadersField({ headers, t, onChange }: { headers: Record<string, string
 function RequestBody({ step, onChange, steps, t }: BodyProps<'request'>) {
   const save = step.save ?? []
   const setSave = (rows: { field: string; path: string }[]) => onChange({ ...step, save: rows.length ? rows : undefined })
+  const { keys, without } = useItemKeys(save.length)
   return (
     <>
       <div className="fe-grid-2">
@@ -434,17 +454,19 @@ function RequestBody({ step, onChange, steps, t }: BodyProps<'request'>) {
         <Text typo="13" bold color="txt-black-darker">
           {t('editor_save_fields')} <span className="fe-count">({save.length}/{MAX_REQUEST_SAVES})</span>
         </Text>
-        {save.map((r, i) => (
-          <div className="fe-subitem" key={i}>
-            <HStack spacing={8} align="end">
-              <div className="fe-grow fe-grid-2">
-                <TextInputField label={t('test_result_fields')} value={r.field} placeholder="price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, field: e.target.value.replace(/\s/g, '') } : x)))} />
-                <TextInputField label={t('editor_path')} value={r.path} maxLength={200} placeholder="data.price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, path: e.target.value } : x)))} />
-              </div>
-              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${r.field || t('editor_save_fields')}`} onClick={() => setSave(save.filter((_, j) => j !== i))} />
-            </HStack>
-          </div>
-        ))}
+        <AnimatePresence initial={false}>
+          {save.map((r, i) => (
+            <m.div className="fe-subitem" key={keys[i]} {...LIST_ITEM_MOTION}>
+              <HStack spacing={8} align="end">
+                <div className="fe-grow fe-grid-2">
+                  <TextInputField label={t('test_result_fields')} value={r.field} placeholder="price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, field: e.target.value.replace(/\s/g, '') } : x)))} />
+                  <TextInputField label={t('editor_path')} value={r.path} maxLength={200} placeholder="data.price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, path: e.target.value } : x)))} />
+                </div>
+                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${r.field || t('editor_save_fields')}`} onClick={() => setSave(without(save, i))} />
+              </HStack>
+            </m.div>
+          ))}
+        </AnimatePresence>
         <div>
           <AddButton text={t('editor_add_save')} disabled={save.length >= MAX_REQUEST_SAVES} onClick={() => setSave([...save, { field: '', path: '' }])} />
         </div>

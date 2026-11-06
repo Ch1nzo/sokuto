@@ -64,6 +64,17 @@ export function inboxWhere(filter: string) {
   return filter === 'paused' ? eq(c.botPaused, 1) : filter === 'unread' ? sql`${c.unread} > 0` : filter === 'open' || filter === 'closed' ? eq(c.status, filter) : undefined
 }
 
+/** Open conversations (`inboxWhere('open')`) and conversations with unread messages, counted in one query. */
+export async function inboxCounts(db: Db, ws: number): Promise<{ open: number; unread: number }> {
+  const c = schema.contacts
+  const row = await db
+    .select({ open: sql<number>`count(*) filter (where ${inboxWhere('open')})`, unread: sql<number>`count(*) filter (where ${inboxWhere('unread')})` })
+    .from(c)
+    .where(eq(c.workspaceId, ws))
+    .get()
+  return { open: Number(row?.open ?? 0), unread: Number(row?.unread ?? 0) }
+}
+
 export function parseFields(contact: ContactRow): Record<string, string> {
   try {
     return JSON.parse(contact.fields) as Record<string, string>

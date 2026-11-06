@@ -142,7 +142,7 @@ export function WorkspaceSwitcher() {
         }
         placeholder={t('workspace')}
         dropdownContainer={typeof document === 'undefined' ? undefined : document.body}
-        dropdownClassName="ws-switcher__menu"
+        dropdownClassName="ws-switcher__menu select-dropdown"
         onClickTrigger={() => setOpen(true)}
         onHideDropdown={() => setOpen(false)}
       >

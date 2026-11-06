@@ -72,6 +72,9 @@
 .fe-unsaved { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--txt-black-dark); white-space: nowrap; }
 .fe-unsaved:empty { display: none; }
 .fe-unsaved__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bgtxt-orange-normal); }
+/* Appears with the first edit (the span goes from display:none to inline-flex, which starts the animation). */
+.fe-unsaved:not(:empty) { transform-origin: left center; animation: fe-unsaved-in 150ms var(--ease-out); }
+@keyframes fe-unsaved-in { from { opacity: 0; transform: scale(0.9); } }
 
 /* ---------- canvas tools (bottom centre of the canvas, between React Flow's controls and minimap) ---------- */
 .fe-canvasbar {
@@ -150,6 +153,9 @@
 .fe-node .react-flow__handle { width: 10px; height: 10px; background: var(--bg-white-normal); border: 2px solid var(--txt-black-dark); }
 .fe-node .react-flow__handle-connecting, .fe-node .react-flow__handle:hover { border-color: var(--bgtxt-blue-normal); }
 @media (pointer: coarse) { .fe-node .react-flow__handle { width: 16px; height: 16px; } }
+/* A step just added from the toolbar. On the inner card: React Flow positions the node wrapper with a transform. */
+.fe-node.is-new { animation: fe-node-in 200ms var(--ease-out); }
+@keyframes fe-node-in { from { opacity: 0; transform: scale(0.95); } }
 
 /* ---------- generic editor pieces ---------- */
 .fe-grow { flex: 1 1 auto; min-width: 0; }
@@ -250,6 +256,11 @@ a.chip { text-decoration: none; }
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
   .fe-panel.is-open { display: block; }
+  /* Slides up on open and back down on close (display flips to none after the transition; FlowEditor keeps the
+     last content in it meanwhile). The desktop column above stays instant. */
+  .fe-panel { transform: translateY(100%); transition: transform 220ms var(--ease-drawer), display 220ms allow-discrete; }
+  .fe-panel.is-open { transform: none; }
+  @starting-style { .fe-panel.is-open { transform: translateY(100%); } }
   .fe-canvas .react-flow__minimap { display: none; }
   /* The step panel is a bottom sheet over the canvas here: hide the canvas tools while it is open. */
   .fe-layout.has-panel .fe-canvasbar { display: none; }
@@ -271,4 +282,15 @@ a.chip { text-decoration: none; }
   .fe-delay__input { width: 100%; }
   .fe-test__sends { display: grid; grid-template-columns: minmax(0, 1fr); }
   .fe-item { padding: 12px; }
+}
+
+/* ---------- reduced motion: fades instead of slides / scales ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .fe-unsaved:not(:empty), .fe-node.is-new { animation-name: fade-in; }
+}
+@media (max-width: 860px) and (prefers-reduced-motion: reduce) {
+  .fe-panel, .fe-panel.is-open { transform: none; }
+  .fe-panel { opacity: 0; transition: opacity 220ms ease, display 220ms allow-discrete; }
+  .fe-panel.is-open { opacity: 1; }
+  @starting-style { .fe-panel.is-open { opacity: 0; } }
 }

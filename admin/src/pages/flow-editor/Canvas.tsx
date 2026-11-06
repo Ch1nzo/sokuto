@@ -41,7 +41,7 @@ import { START, autoLayout, edgesOf, outlets, setPointer } from './graph'
 import { triggerSummary, type StepType, type TFn } from './model'
 
 type StartNode = Node<{ triggers: Trigger[]; isSequence: boolean }, 'start'>
-type StepNode = Node<{ step: Step; isEntry: boolean; hasError: boolean }, 'step'>
+type StepNode = Node<{ step: Step; isEntry: boolean; hasError: boolean; isNew: boolean }, 'step'>
 type FlowNode = StartNode | StepNode
 export type CanvasInstance = ReactFlowInstance<FlowNode>
 
@@ -75,7 +75,7 @@ function summary(step: Step, t: TFn): string {
   }
 }
 
-const nodeClass = (selected: boolean, error = false) => ['fe-node', selected ? 'is-selected' : '', error ? 'is-error' : ''].filter(Boolean).join(' ')
+const nodeClass = (selected: boolean, error = false, isNew = false) => ['fe-node', selected ? 'is-selected' : '', error ? 'is-error' : '', isNew ? 'is-new' : ''].filter(Boolean).join(' ')
 
 function StartNodeView({ data, selected }: NodeProps<StartNode>) {
   const t = useT()
@@ -108,7 +108,7 @@ function StepNodeView({ id, data, selected }: NodeProps<StepNode>) {
   const handleKey = outs.map((o) => o.handle).join()
   useEffect(() => updateInternals(id), [id, handleKey, updateInternals])
   return (
-    <div className={nodeClass(selected, data.hasError)}>
+    <div className={nodeClass(selected, data.hasError, data.isNew)}>
       <Handle type="target" position={Position.Left} />
       <div className="fe-node__head">
         <Icon source={STEP_ICONS[step.type]} size="s" color="txt-black-dark" />
@@ -158,6 +158,8 @@ export function Canvas({
   onChange,
   onRemove,
   onInit,
+  appearId,
+  onNodeDragStart,
 }: {
   definition: FlowDefinition
   isSequence: boolean
@@ -167,6 +169,9 @@ export function Canvas({
   onChange: (fn: (d: FlowDefinition) => FlowDefinition) => void
   onRemove: (ids: string[]) => void
   onInit: (rf: CanvasInstance) => void
+  /** The step just added from the toolbar: its node fades / scales in once (not on load). */
+  appearId?: string | null
+  onNodeDragStart?: () => void
 }) {
   const { themeName } = useTheme()
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
@@ -177,10 +182,10 @@ export function Canvas({
     return [
       { id: START, type: 'start', position: pos(START), deletable: false, selected: selectedId === START, data: { triggers: definition.triggers, isSequence } },
       ...definition.steps.map(
-        (step): StepNode => ({ id: step.id, type: 'step', position: pos(step.id), selected: selectedId === step.id, data: { step, isEntry: definition.entry === step.id, hasError: errorIds.has(step.id) } }),
+        (step): StepNode => ({ id: step.id, type: 'step', position: pos(step.id), selected: selectedId === step.id, data: { step, isEntry: definition.entry === step.id, hasError: errorIds.has(step.id), isNew: step.id === appearId } }),
       ),
     ]
-  }, [definition, isSequence, selectedId, errorIds])
+  }, [definition, isSequence, selectedId, errorIds, appearId])
 
   // React Flow needs the measured size on every node object it gets; keep it across re-derivations.
   const [nodes, setNodes] = useState<FlowNode[]>(derived)
@@ -237,6 +242,7 @@ export function Canvas({
       onConnect={onConnect}
       onReconnect={onReconnect}
       onDelete={onDelete}
+      onNodeDragStart={onNodeDragStart}
       // React Flow listens for Delete on the whole document: ignore it while focus is outside the canvas (panel buttons, dropdowns).
       onBeforeDelete={async () => !document.activeElement || document.activeElement === document.body || !!document.activeElement.closest('.react-flow')}
       onInit={onInit}

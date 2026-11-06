@@ -23,6 +23,12 @@
     { "binding": "KV" }
   ],
   "ai": { "binding": "AI" },
+  // Realtime inbox: one InboxHub per workspace holds the admin tabs' WebSockets (src/inbox-hub.ts).
+  // SQLite-backed (the only kind on the free plan); wrangler deploy applies the migration.
+  "durable_objects": {
+    "bindings": [{ "name": "INBOX_HUB", "class_name": "InboxHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxHub"] }],
   "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "META_GRAPH_VERSION": "v25.0"

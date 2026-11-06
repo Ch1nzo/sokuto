@@ -11,11 +11,14 @@ import { getGeneral, type GeneralSettings } from './settings'
 import { loadSegment, matchesSegment, tagsByContact } from './segments'
 import { broadcastSendPlan, buildBroadcastMessage } from './broadcasts'
 import { lazyAi, type AiCaller } from './ai'
+import { InboxChanges } from './realtime'
 
 const BROADCAST_PER_TICK = 30
 
 export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: number; broadcastSent: number }> {
   let resumed = 0
+  // Conversations this tick wrote to: one inbox publish per workspace at the end (src/realtime.ts).
+  const changes = new InboxChanges()
   // Settings and AI of each workspace, loaded once per tick (the workspace comes from the contact).
   const perWs = new Map<number, { general: GeneralSettings; ai: AiCaller }>()
   const wsSettings = async (ws: number) => {
@@ -38,6 +41,7 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
     const { general, ai } = await wsSettings(ws)
     const ctx: RunContext = { db, ws, adapter, contact, flow, timezone: general.timezone, botFields: general.botFields, ai }
     await runFrom(ctx, step && step.type === 'delay' ? step.next : null)
+    changes.add(ws, contact.id)
     resumed++
   }
 
@@ -60,18 +64,20 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
     const adapter = await getAdapter(env, db, ws, contact.channel as Channel)
     if (!adapter) continue
     await runFrom({ db, ws, adapter, contact, flow: parseFlow(row), timezone: general.timezone, botFields: general.botFields, ai, sequence: { id: s.id } }, s.stepId)
+    changes.add(ws, contact.id)
     resumed++
   }
 
-  const broadcastSent = await processBroadcasts(env, db)
+  const broadcastSent = await processBroadcasts(env, db, changes)
   // Keep the de-duplication table small.
   const cutoff = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString()
   await db.delete(schema.processedEvents).where(lt(schema.processedEvents.createdAt, cutoff))
+  await changes.publish(env)
   return { resumed, broadcastSent }
 }
 
-/** Creates jobs for newly due broadcasts and sends a batch of pending jobs. */
-export async function processBroadcasts(env: Env, db: Db): Promise<number> {
+/** Creates jobs for newly due broadcasts and sends a batch of pending jobs (noting each workspace that sent in `changes`). */
+export async function processBroadcasts(env: Env, db: Db, changes?: InboxChanges): Promise<number> {
   const now = new Date().toISOString()
   const due = await db.select().from(schema.broadcasts).where(and(eq(schema.broadcasts.status, 'scheduled'), lte(schema.broadcasts.scheduledAt, now)))
   for (const b of due) {
@@ -112,6 +118,8 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
         continue
       }
       const res = await adapter.send(contact.channelUserId, msg, plan.tag ? { tag: plan.tag } : undefined)
+      // Workspace-wide (no contact id): a batch touches many conversations.
+      changes?.add(b.workspaceId, null)
       await logMessage(db, { contactId: contact.id, direction: 'out', source: 'bot', kind: 'text', text: b.text, payload: { ...msg, broadcastId: b.id }, error: res.ok ? undefined : res.error })
       await db.update(schema.broadcastJobs).set({ status: res.ok ? 'sent' : 'failed', error: res.ok ? null : res.error }).where(eq(schema.broadcastJobs.id, job.id))
       await db

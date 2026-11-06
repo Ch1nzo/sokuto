@@ -39,7 +39,8 @@ import {
 import { IG_PROFILE_FIELDS, PROFILE_FIELDS, buildMessengerProfile, metaDeleteProfile, metaInspectPageToken, metaSetProfile, metaSubscribePage } from '../channels/meta'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
-import { addTag, getContact, getTags, inboxWhere, ofWorkspace, parseFields, removeTag, setBotPaused } from '../contacts'
+import { addTag, getContact, getTags, inboxCounts, inboxWhere, ofWorkspace, parseFields, removeTag, setBotPaused } from '../contacts'
+import { connectInbox, notifyInbox, realtimeRejection } from '../realtime'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
 import { broadcastButtonsSchema, flowChannelSchema, flowKindSchema, messageTagSchema, segmentInputSchema, validateFlow } from '../flows/validate'
@@ -90,6 +91,9 @@ const aiFail = (c: Context<AppEnv>, err: unknown) => {
   const detail = err instanceof Error ? err.message : String(err)
   return detail === 'ai_not_configured' ? c.json({ error: 'ai_not_configured' }, 400) : c.json({ error: 'ai_error', detail }, 502)
 }
+
+/** Tells the workspace's open inbox tabs (src/realtime.ts) after the response; never fails the request. */
+const publish = (c: Context<AppEnv>, contactId?: number) => c.executionCtx.waitUntil(notifyInbox(c.env, c.get('ws'), contactId))
 
 /* ---------- Overview ---------- */
 apiRoutes.get('/overview', async (c) => {
@@ -496,6 +500,7 @@ apiRoutes.patch('/contacts/:id', async (c) => {
   if (notes !== undefined) patch.notes = notes || null
   await d.update(schema.contacts).set(patch).where(eq(schema.contacts.id, contact.id))
   if (body.botPaused !== undefined) await setBotPaused(d, contact.id, Boolean(body.botPaused))
+  publish(c, contact.id)
   // Closing a conversation may turn it into FAQ suggestions (Soku → learning), after the response.
   if (body.status === 'closed' && contact.status !== 'closed' && (await getBotConfig(d, c.get('ws'))).suggestFaqs && (await isAiConfigured(d, c.get('ws')))) {
     c.executionCtx.waitUntil(suggestFaqs(d, c.get('ws'), lazyAi(c.env, d, c.get('ws')), contact.id).catch(() => 0))
@@ -510,6 +515,7 @@ apiRoutes.post('/contacts/:id/tags', async (c) => {
   const body = await c.req.json<{ tag?: string }>()
   if (!body.tag?.trim()) return c.json({ error: 'missing_tag' }, 400)
   await addTag(d, contact.id, body.tag)
+  publish(c, contact.id)
   return c.json({ tags: await getTags(d, contact.id) })
 })
 
@@ -518,6 +524,7 @@ apiRoutes.delete('/contacts/:id/tags/:tag', async (c) => {
   const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   await removeTag(d, contact.id, c.req.param('tag'))
+  publish(c, contact.id)
   return c.json({ tags: await getTags(d, contact.id) })
 })
 
@@ -529,6 +536,7 @@ apiRoutes.post('/contacts/:id/sequences', async (c) => {
   if (!Number.isInteger(body.flowId)) return c.json({ error: 'missing_flow_id' }, 400)
   const res = await subscribeSequence(d, contact, body.flowId!)
   if (res !== 'ok') return c.json({ error: res }, 400)
+  publish(c, contact.id)
   return c.json({ sequences: await contactSequences(d, contact.id) }, 201)
 })
 
@@ -537,6 +545,7 @@ apiRoutes.delete('/contacts/:id/sequences/:flowId', async (c) => {
   const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   await unsubscribeSequence(d, contact.id, Number(c.req.param('flowId')))
+  publish(c, contact.id)
   return c.json({ sequences: await contactSequences(d, contact.id) })
 })
 
@@ -549,10 +558,25 @@ apiRoutes.delete('/contacts/:id', async (c) => {
   await d.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
   await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
   await d.delete(schema.contacts).where(eq(schema.contacts.id, contact.id))
+  publish(c, contact.id)
   return c.json({ ok: true })
 })
 
 /* ---------- Inbox ---------- */
+/** Badge and tab title: open conversations and conversations with unread messages (exact counts). */
+apiRoutes.get('/inbox/counts', async (c) => c.json(await inboxCounts(db(c.env), c.get('ws'))))
+
+/**
+ * WebSocket for inbox events (src/realtime.ts): session only, workspace from `?ws=` (see resolveWorkspace),
+ * same-origin handshakes only. The socket lives in the workspace's InboxHub Durable Object.
+ */
+apiRoutes.get('/realtime', async (c) => {
+  const rejected = realtimeRejection(c.req.raw)
+  if (rejected) return rejected
+  if (c.get('auth') !== 'session') return c.json({ error: 'session_required' }, 403)
+  return connectInbox(c.env, c.get('ws'), c.req.raw)
+})
+
 apiRoutes.get('/inbox', async (c) => {
   const d = db(c.env)
   const rows = await d
@@ -568,7 +592,7 @@ apiRoutes.get('/inbox', async (c) => {
         .from(schema.messages)
         .where(sql`${schema.messages.id} in (select max(id) from messages where contact_id in ${ids} group by contact_id)`)
     : []
-  // Notes (up to 5,000 chars each) stay out of the 10 s list poll; the chat loads them via GET /contacts/:id.
+  // Notes (up to 5,000 chars each) stay out of the list, which is refetched on every inbox event; the chat loads them via GET /contacts/:id.
   return c.json({ conversations: rows.map((r) => ({ contact: { ...r, notes: undefined, fields: parseFields(r) }, lastMessage: last.find((m) => m.contactId === r.id) ?? null })) })
 })
 
@@ -598,7 +622,11 @@ apiRoutes.get('/inbox/:id/messages', async (c) => {
   const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const rows = await d.select().from(schema.messages).where(eq(schema.messages.contactId, contact.id)).orderBy(desc(schema.messages.id)).limit(200)
-  await d.update(schema.contacts).set({ unread: 0 }).where(eq(schema.contacts.id, contact.id))
+  if (contact.unread) {
+    await d.update(schema.contacts).set({ unread: 0 }).where(eq(schema.contacts.id, contact.id))
+    // Other tabs' unread badges. Only when it changed: the tab that reads refetches on the event, and must not loop.
+    publish(c, contact.id)
+  }
   return c.json({ messages: rows.reverse().map((m) => ({ ...m, payload: m.payload ? JSON.parse(m.payload) : null })) })
 })
 
@@ -617,6 +645,7 @@ apiRoutes.post('/inbox/:id/send', async (c) => {
     await setBotPaused(d, contact.id, true)
     await d.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
   }
+  publish(c, contact.id)
   return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502)
 })
 
@@ -626,6 +655,7 @@ apiRoutes.post('/inbox/:id/bot', async (c) => {
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ paused?: boolean }>()
   await setBotPaused(d, contact.id, Boolean(body.paused))
+  publish(c, contact.id)
   return c.json({ ok: true })
 })
 
@@ -664,6 +694,7 @@ apiRoutes.post('/inbox/:id/products', async (c) => {
     await setBotPaused(d, contact.id, true)
     await d.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
   }
+  publish(c, contact.id)
   return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502)
 })
 

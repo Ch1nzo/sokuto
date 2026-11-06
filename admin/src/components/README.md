@@ -27,7 +27,7 @@ Ground truth for props is `node_modules/@channel.io/bezier-react/dist/types/comp
 
 Direction: white surfaces on the grey canvas (`--bg-grey-lightest`), 1px `--bdr-black-light` rules, dense rows, **one blue
 primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (pill chips `--radius-32`), modals/sheets
-`--radius-12`. Shadows only on floating things (dropdowns, sheets): `--ev-2/3`. No entrance animations.
+`--radius-12`. Shadows only on floating things (dropdowns, sheets): `--ev-2/3`. No page / route entrance animations.
 
 - **Shell** (`App.tsx`, `styles.css` "shell"): 220px white sidebar (`--sidebar-width`) = brand row (link to `/`, the
   dashboard/home) → `WorkspaceSwitcher` → nav (受信箱 first, with the unread `.nav-count` badge, then 連絡先 / 自動化 /
@@ -69,9 +69,17 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
   `<SelectInput className={value ? 'filter-select is-set' : 'filter-select'} …/>` (inbox filters, report periods,
   contacts toolbar). Not `SegmentedControl` when there are more than 3 options or labels differ in length.
 - **Hover** effects only inside `@media (hover: hover)`, 120ms `ease`, `transform`/`opacity`/colors only; never
-  `transition: all`. The only custom motion is the sheet/drawer slide (`.sheet` and `.drawer`: 220ms
-  `var(--ease-drawer)`, fade only under `prefers-reduced-motion`). Dropdowns, modals, toasts and button presses are
-  Bezier's own.
+  `transition: all`.
+- **Motion**: three curves only, `--ease-drawer` (sheets / drawers), `--ease-out` (things appearing),
+  `--ease-in-out` (things moving on screen), plus plain `ease` for color; mirrored for Motion in `lib/motion.ts`.
+  Only `transform`/`opacity`, ≤ 300ms, never `ease-in` or `scale(0)`, and every motion has a
+  `prefers-reduced-motion` fallback that keeps the fade and drops the movement. What moves: sheet/drawer slides
+  (`.sheet`, `.drawer`, flow editor test drawer and mobile step sheet: 220ms `--ease-drawer`), menus and Select
+  dropdowns popping from their trigger (`.menu-pop`, `.select-dropdown`: 150ms), Bezier `Button` press
+  (`scale(0.97)`), list items added/removed in the flow editor panel (Motion `AnimatePresence initial={false}` +
+  `useItemKeys`), new inbox messages, the canvas "Arrange" glide and new nodes. JS motion uses `m.*` components
+  from `motion/react` (the app is wrapped in `LazyMotion strict` + `MotionConfig reducedMotion="user"`). Modals and
+  toasts are Bezier's own; pages, charts, numbers and loading states do not animate.
 - **Drawers** (forms that keep the list visible, e.g. 新しい配信): `<Drawer show onHide title footer? width? sheetOnMobile?>`.
   It is a Bezier Modal pinned to the right (420px, full width ≤ 860px, or a bottom sheet with `sheetOnMobile`), so
   Bezier dropdowns and toasts work inside it (a native `<dialog>` puts them behind the top layer); focus goes to the
