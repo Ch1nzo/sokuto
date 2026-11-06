@@ -34,7 +34,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   const kind = event.type === 'comment' ? 'comment' : event.type === 'postback' ? 'postback' : event.attachments?.length && !event.text ? (event.attachments[0]!.type === 'image' ? 'image' : 'event') : event.type === 'message' ? 'text' : 'event'
   const displayText = event.text ?? (event.type === 'postback' ? (event.payload?.startsWith('sk-choice:') ? event.payload.slice(10) : undefined) : undefined) ?? (event.type === 'follow' ? 'follow' : event.type === 'ref' ? `ref:${event.ref}` : event.type === 'story_mention' ? 'story mention' : undefined)
   await logMessage(db, { contactId: contact.id, direction: 'in', source: 'user', kind, text: displayText ?? null, payload: { type: event.type, payload: event.payload, commentId: event.commentId, postId: event.postId, attachments: event.attachments } })
-  await db.update(schema.contacts).set({ unread: (contact.unread ?? 0) + 1 }).where(eq(schema.contacts.id, contact.id))
+  await db.update(schema.contacts).set({ unread: (contact.unread ?? 0) + 1, status: 'open' }).where(eq(schema.contacts.id, contact.id))
 
   const general = await getGeneral(db)
   if (general.paused) return

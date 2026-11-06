@@ -33,7 +33,7 @@ import {
 import { IG_PROFILE_FIELDS, PROFILE_FIELDS, buildMessengerProfile, metaDeleteProfile, metaInspectPageToken, metaSetProfile, metaSubscribePage } from '../channels/meta'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
-import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
+import { addTag, getTags, inboxWhere, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
 import { flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
@@ -385,12 +385,12 @@ apiRoutes.get('/contacts/export.csv', async (c) => {
   const fieldNames = new Set<string>()
   const parsed = rows.map((r) => ({ r, f: parseFields(r) }))
   for (const { f } of parsed) for (const k of Object.keys(f)) fieldNames.add(k)
-  const cols = ['id', 'channel', 'channel_user_id', 'name', 'username', 'tags', 'created_at', 'last_inbound_at', ...fieldNames]
+  const cols = ['id', 'channel', 'channel_user_id', 'name', 'username', 'tags', 'created_at', 'last_inbound_at', 'status', 'notes', ...fieldNames]
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const lines = [cols.map(esc).join(',')]
   for (const { r, f } of parsed) {
     const t = tags.filter((x) => x.contactId === r.id).map((x) => x.tag).join('|')
-    lines.push([r.id, r.channel, r.channelUserId, r.displayName, r.username, t, r.createdAt, r.lastInboundAt, ...[...fieldNames].map((k) => f[k])].map(esc).join(','))
+    lines.push([r.id, r.channel, r.channelUserId, r.displayName, r.username, t, r.createdAt, r.lastInboundAt, r.status, r.notes, ...[...fieldNames].map((k) => f[k])].map(esc).join(','))
   }
   return c.body('﻿' + lines.join('\r\n'), 200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="contacts.csv"' })
 })
@@ -414,10 +414,15 @@ apiRoutes.patch('/contacts/:id', async (c) => {
   const d = db(c.env)
   const contact = await loadContact(d, c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
-  const body = await c.req.json<{ displayName?: string; fields?: Record<string, string>; botPaused?: boolean }>()
+  const body = await c.req.json<{ displayName?: string; fields?: Record<string, string>; botPaused?: boolean; status?: string; notes?: string | null }>()
+  if (body.status !== undefined && body.status !== 'open' && body.status !== 'closed') return c.json({ error: 'invalid_status' }, 400)
+  const notes = body.notes === undefined ? undefined : String(body.notes ?? '').trim()
+  if (notes && notes.length > 5000) return c.json({ error: 'notes_too_long' }, 400)
   const patch: Partial<typeof schema.contacts.$inferInsert> = { updatedAt: new Date().toISOString() }
   if (body.displayName !== undefined) patch.displayName = String(body.displayName)
   if (body.fields !== undefined) patch.fields = JSON.stringify(body.fields)
+  if (body.status !== undefined) patch.status = body.status
+  if (notes !== undefined) patch.notes = notes || null
   await d.update(schema.contacts).set(patch).where(eq(schema.contacts.id, contact.id))
   if (body.botPaused !== undefined) await setBotPaused(d, contact.id, Boolean(body.botPaused))
   return c.json({ ok: true })
@@ -475,11 +480,10 @@ apiRoutes.delete('/contacts/:id', async (c) => {
 /* ---------- Inbox ---------- */
 apiRoutes.get('/inbox', async (c) => {
   const d = db(c.env)
-  const filter = c.req.query('filter') ?? 'all'
   const rows = await d
     .select()
     .from(schema.contacts)
-    .where(filter === 'paused' ? eq(schema.contacts.botPaused, 1) : filter === 'unread' ? sql`${schema.contacts.unread} > 0` : undefined)
+    .where(inboxWhere(c.req.query('filter') ?? 'all'))
     .orderBy(desc(sql`coalesce(${schema.contacts.lastInboundAt}, ${schema.contacts.lastOutboundAt}, ${schema.contacts.createdAt})`))
     .limit(100)
   const ids = rows.map((r) => r.id)
@@ -489,7 +493,25 @@ apiRoutes.get('/inbox', async (c) => {
         .from(schema.messages)
         .where(sql`${schema.messages.id} in (select max(id) from messages where contact_id in ${ids} group by contact_id)`)
     : []
-  return c.json({ conversations: rows.map((r) => ({ contact: { ...r, fields: parseFields(r) }, lastMessage: last.find((m) => m.contactId === r.id) ?? null })) })
+  // Notes (up to 5,000 chars each) stay out of the 10 s list poll; the chat loads them via GET /contacts/:id.
+  return c.json({ conversations: rows.map((r) => ({ contact: { ...r, notes: undefined, fields: parseFields(r) }, lastMessage: last.find((m) => m.contactId === r.id) ?? null })) })
+})
+
+/* ---------- Snippets (canned inbox replies) ---------- */
+apiRoutes.get('/snippets', async (c) => c.json({ snippets: await db(c.env).select().from(schema.snippets).orderBy(schema.snippets.id) }))
+
+apiRoutes.post('/snippets', async (c) => {
+  const body = await c.req.json<{ name?: string; text?: string }>()
+  const name = String(body.name ?? '').trim()
+  const text = String(body.text ?? '').trim()
+  if (!name || !text) return c.json({ error: 'missing_fields' }, 400)
+  if (name.length > 60 || text.length > 2000) return c.json({ error: 'too_long' }, 400)
+  return c.json({ snippet: await db(c.env).insert(schema.snippets).values({ name, text }).returning().get() }, 201)
+})
+
+apiRoutes.delete('/snippets/:id', async (c) => {
+  const row = await db(c.env).delete(schema.snippets).where(eq(schema.snippets.id, Number(c.req.param('id')))).returning().get()
+  return row ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
 })
 
 apiRoutes.get('/inbox/:id/messages', async (c) => {

@@ -8,6 +8,7 @@ import {
   Select,
   TextArea,
   TextField,
+  type SelectProps,
   type SelectRef,
   type TextAreaProps,
   type TextFieldProps,
@@ -89,7 +90,7 @@ export function SelectInput<V extends string>({
   onChange,
   placeholder,
   ...rest
-}: { value: V; options: SelectOption<V>[]; onChange: (value: V) => void; placeholder?: string; 'aria-label'?: string }) {
+}: { value: V; options: SelectOption<V>[]; onChange: (value: V) => void; placeholder?: string; 'aria-label'?: string; dropdownPosition?: SelectProps['dropdownPosition'] }) {
   const ref = useRef<SelectRef>(null)
   const current = options.find((o) => o.value === value)
   return (

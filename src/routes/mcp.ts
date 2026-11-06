@@ -7,7 +7,7 @@ import { checkBearer, type AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
 import { configuredChannels, getGeneral } from '../settings'
-import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
+import { addTag, getTags, inboxWhere, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
 import { FLOW_SCHEMA_DOC, flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
@@ -149,11 +149,11 @@ export function buildMcpServer(env: Env): McpServer {
     },
   )
 
-  server.registerTool('get_contact', { title: 'Get contact', description: 'One contact with fields, tags, sequence enrollments and recent messages.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
+  server.registerTool('get_contact', { title: 'Get contact', description: 'One contact with status (open/closed), internal notes, fields, tags, sequence enrollments and recent messages.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
     const r = await d.select().from(schema.contacts).where(eq(schema.contacts.id, id)).get()
     if (!r) return fail('not_found')
     const messages = await d.select().from(schema.messages).where(eq(schema.messages.contactId, id)).orderBy(desc(schema.messages.id)).limit(30)
-    return json({ id: r.id, channel: r.channel, name: r.displayName, username: r.username, fields: parseFields(r), tags: await getTags(d, r.id), botPaused: Boolean(r.botPaused), sequences: await contactSequences(d, r.id), messages: messages.reverse().map((m) => ({ at: m.createdAt, direction: m.direction, source: m.source, kind: m.kind, text: m.text, error: m.error })) })
+    return json({ id: r.id, channel: r.channel, name: r.displayName, username: r.username, fields: parseFields(r), tags: await getTags(d, r.id), botPaused: Boolean(r.botPaused), status: r.status, notes: r.notes, sequences: await contactSequences(d, r.id), messages: messages.reverse().map((m) => ({ at: m.createdAt, direction: m.direction, source: m.source, kind: m.kind, text: m.text, error: m.error })) })
   })
 
   server.registerTool('tag_contact', { title: 'Add / remove tag', description: 'Adds or removes a tag on a contact.', inputSchema: { id: z.number().int(), tag: z.string().min(1), remove: z.boolean().default(false) } }, async ({ id, tag, remove }) => {
@@ -167,17 +167,17 @@ export function buildMcpServer(env: Env): McpServer {
     return json({ ok: true })
   })
 
-  server.registerTool('list_conversations', { title: 'List conversations', description: 'Recent conversations with the last message. filter: all | unread | paused.', inputSchema: { filter: z.enum(['all', 'unread', 'paused']).default('all'), limit: z.number().int().min(1).max(100).default(30) } }, async ({ filter, limit }) => {
+  server.registerTool('list_conversations', { title: 'List conversations', description: 'Recent conversations with the last message. filter: all | open | unread | paused (bot paused, a person is replying) | closed.', inputSchema: { filter: z.enum(['all', 'open', 'unread', 'paused', 'closed']).default('all'), limit: z.number().int().min(1).max(100).default(30) } }, async ({ filter, limit }) => {
     const rows = await d
       .select()
       .from(schema.contacts)
-      .where(filter === 'paused' ? eq(schema.contacts.botPaused, 1) : filter === 'unread' ? sql`${schema.contacts.unread} > 0` : undefined)
+      .where(inboxWhere(filter))
       .orderBy(desc(sql`coalesce(${schema.contacts.lastInboundAt}, ${schema.contacts.createdAt})`))
       .limit(limit)
     const out = []
     for (const r of rows) {
       const last = await d.select().from(schema.messages).where(eq(schema.messages.contactId, r.id)).orderBy(desc(schema.messages.id)).limit(1).get()
-      out.push({ contactId: r.id, name: r.displayName, channel: r.channel, unread: r.unread, botPaused: Boolean(r.botPaused), lastMessage: last ? { at: last.createdAt, direction: last.direction, text: last.text } : null })
+      out.push({ contactId: r.id, name: r.displayName, channel: r.channel, status: r.status, unread: r.unread, botPaused: Boolean(r.botPaused), lastMessage: last ? { at: last.createdAt, direction: last.direction, text: last.text } : null })
     }
     return json(out)
   })
@@ -226,6 +226,23 @@ export function buildMcpServer(env: Env): McpServer {
         if (res !== 'ok') return fail(res)
       }
       return json({ sequences: await contactSequences(d, contactId) })
+    },
+  )
+
+  server.registerTool(
+    'update_contact',
+    {
+      title: 'Update contact',
+      description: 'Closes or reopens a conversation (status; a new message from the person reopens it), replaces the internal notes (not visible to the customer; empty string clears them) and/or renames the contact.',
+      inputSchema: { id: z.number().int(), status: z.enum(['open', 'closed']).optional(), notes: z.string().trim().max(5000).optional(), displayName: z.string().optional() },
+    },
+    async ({ id, status, notes, displayName }) => {
+      const patch: Partial<typeof schema.contacts.$inferInsert> = { updatedAt: new Date().toISOString() }
+      if (status) patch.status = status
+      if (notes !== undefined) patch.notes = notes || null
+      if (displayName !== undefined) patch.displayName = displayName
+      const r = await d.update(schema.contacts).set(patch).where(eq(schema.contacts.id, id)).returning().get()
+      return r ? json({ id: r.id, name: r.displayName, status: r.status, notes: r.notes }) : fail('not_found')
     },
   )
 

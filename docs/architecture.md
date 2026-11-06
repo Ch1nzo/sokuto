@@ -34,7 +34,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | テーブル | 内容 |
 | --- | --- |
 | `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み)、`profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID) |
-| `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数 |
+| `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数、会話の状態 `status` (`open` / `closed`。メッセージを受信すると `open` に戻る)、社内メモ `notes` (5,000 文字まで) |
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
 | `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、種類 (`flow` / `sequence`。作成時にだけ決まる)、定義 (JSON) |
@@ -45,6 +45,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | `events` | レポート用の記録。`trigger_fired`, `step_sent`, `button_clicked`, `input_saved`, `flow_completed`, `comment_replied`, `error` |
 | `processed_events` | 処理済みの Webhook イベント ID。再送されたイベントを二重に処理しないため。2 日より古いものは定期処理で削除 |
 | `notifications` | 「担当者に通知」アクションや担当者呼び出しで作られる通知 |
+| `snippets` | 受信箱の返信欄に挿入する定型文。名前 (60 文字まで) と本文 (2,000 文字まで) |
 
 KV には次のキーが入ります。
 
@@ -168,7 +169,7 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
-- **Data**: D1 tables `settings` (incl. `profile:meta` and `richmenu:line`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
+- **Data**: D1 tables `settings` (incl. `profile:meta` and `richmenu:line`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`, `snippets` (canned inbox replies); contacts carry an inbox `status` (`open`/`closed`, reopened by any inbound message) and internal `notes`. KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
 - **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.

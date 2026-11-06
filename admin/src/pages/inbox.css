@@ -79,6 +79,7 @@
 .ibx-chat__title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ibx-chat__name { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ibx-chat__badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.ibx-chat__tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; }
 .ibx-chat__bot { display: flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; }
 .ibx-back { display: none !important; }
 
@@ -107,6 +108,8 @@
 .ibx-tag-more:hover { background: var(--bg-black-lightest); }
 .ibx-tag-add { display: inline-flex; align-items: center; gap: 4px; }
 .ibx-tag-add > :first-child { width: 160px; }
+/* Internal notes under the tags row (TextArea scrolls after 6 rows). */
+.ibx-notes { grid-column: 1 / -1; }
 
 .ibx-messages {
   flex: 1; min-height: 200px; overflow-y: auto; overscroll-behavior: contain;
@@ -128,7 +131,8 @@
 .ibx-att__url { min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; text-decoration: underline; }
 .ibx-error-text { margin-top: 4px; font-size: 12px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.ibx-composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--bdr-black-light); }
+.ibx-composer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--bdr-black-light); }
+.ibx-composer__snippets { flex: 0 0 160px; min-width: 0; }
 .ibx-composer__input { flex: 1; min-width: 0; }
 .ibx-composer button[type='submit'] { flex: none; }
 
@@ -144,8 +148,11 @@
   .ibx:not(.has-selection) .ibx-chat { display: none; }
   .ibx-back { display: inline-flex !important; margin-left: -6px; }
   .ibx-chat__header { padding: 10px 12px; }
+  /* Close/reopen + bot switch get their own row so the name keeps the full width. */
+  .ibx-chat__tools { grid-column: 1 / -1; justify-content: space-between; }
   .ibx-messages { padding: 12px; }
   .ibx-composer { padding: 8px; }
+  .ibx-composer__snippets { flex-basis: 100%; }
   .ibx-tag { max-width: 150px; }
 }
 
