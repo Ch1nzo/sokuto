@@ -402,7 +402,7 @@ describe('ai step', () => {
       triggers: [{ type: 'keyword', keywords: ['help'] }],
       entry: 'ai1',
       steps: [
-        { id: 'ai1', type: 'ai', instructions: 'You help {{first_name}}.', knowledge: 'Open 9-17', maxTurns, next: 'm1' },
+        { id: 'ai1', type: 'ai', instructions: 'You help {{first_name}} at {{bot.shop}}.', knowledge: 'Open 9-17', maxTurns, next: 'm1' },
         { id: 'm1', type: 'message', text: 'Bye' },
       ],
     })
@@ -416,11 +416,12 @@ describe('ai step', () => {
 
   it('ai step keeps the conversation until done', async () => {
     const calls: AiRequest[] = []
-    const r = await simulateFlow(db, aiFlow(), [{ type: 'message', text: 'help' }, { type: 'message', text: 'hours?' }, { type: 'message', text: 'thanks' }], undefined, true, { ai: echo(calls) })
+    const r = await simulateFlow(db, aiFlow(), [{ type: 'message', text: 'help' }, { type: 'message', text: 'hours?' }, { type: 'message', text: 'thanks' }], undefined, true, { ai: echo(calls), botFields: { shop: 'Cafe X' } })
     expect(texts(r)).toEqual([['echo: help'], ['echo: hours?'], ['echo: thanks', 'Bye']])
     expect(r.steps.map((s) => s.waiting)).toEqual(['ai', 'ai', null])
     expect(r.completed).toBe(true)
-    expect(calls[0]!.system).toContain('You help テスト.')
+    // Contact data never reaches the system prompt; only {{bot.*}} is expanded there.
+    expect(calls[0]!.system).toContain('You help {{first_name}} at Cafe X.')
     expect(calls[0]!.system).toContain('# Knowledge\nOpen 9-17')
     expect(calls[0]!.system).toContain('"done"')
     expect(calls[2]!.messages.map((m) => `${m.role}:${m.content.slice(0, 10)}`)).toEqual(['user:help', 'assistant:{"reply":"', 'user:hours?', 'assistant:{"reply":"', 'user:thanks'])

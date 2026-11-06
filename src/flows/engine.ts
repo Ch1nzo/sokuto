@@ -322,6 +322,11 @@ type AiState = { t: AiMessage[]; n: number }
  * One AI reply. Returns true when the step is over (done, maxTurns reached, AI missing or failing) and the
  * flow should go on to `next`; false when it stopped here (waiting for the next message, or the send failed).
  */
+/** Instructions go into the system prompt, so only {{bot.*}} placeholders are expanded there: contact-controlled values (name, fields, last input) must not be able to rewrite the model's instructions. */
+function renderBotFields(text: string, botFields?: Record<string, string>): string {
+  return text.replace(/\{\{\s*bot\.([\w-]+)\s*\}\}|\{bot\.([\w-]+)\}/g, (m, a: string | undefined, b: string | undefined) => botFields?.[(a ?? b)!] ?? m)
+}
+
 async function aiTurn(ctx: RunContext, step: Step & { type: 'ai' }, input: string | undefined, state: AiState): Promise<boolean> {
   const fail = async (error: string) => {
     if (ctx.dryRun) (ctx.dryRunNotes ??= []).push(`ai ${step.id}: ${error}`)
@@ -329,7 +334,7 @@ async function aiTurn(ctx: RunContext, step: Step & { type: 'ai' }, input: strin
     return true
   }
   if (!ctx.ai) return fail('ai_not_configured')
-  const system = [render(ctx, step.instructions), step.knowledge ? `# Knowledge\n${step.knowledge}` : '', AI_FORMAT].filter(Boolean).join('\n\n')
+  const system = [renderBotFields(step.instructions, ctx.botFields), step.knowledge ? `# Knowledge\n${step.knowledge}` : '', AI_FORMAT].filter(Boolean).join('\n\n')
   // The stored transcript is user/assistant pairs, so the request always starts with a user message (Anthropic requires it).
   const messages: AiMessage[] = [...state.t, { role: 'user', content: input || AI_GREETING }]
   let reply: { reply: string; done: boolean }
