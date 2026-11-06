@@ -9,9 +9,9 @@ import { metaInspectPageToken, metaSubscribePage } from '../channels/meta'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
-import { logMessage, parseFlow } from '../flows/engine'
+import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { flowChannelSchema, validateFlow } from '../flows/validate'
+import { flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
 import { simulateFlow, type SimulatedInput } from '../flows/simulate'
 import { broadcastReach, runScheduledTasks } from '../scheduler'
 import { randomToken, sha256Hex } from '../crypto'
@@ -138,16 +138,20 @@ apiRoutes.get('/flows', async (c) => {
 
 apiRoutes.post('/flows', async (c) => {
   const d = db(c.env)
-  const body = await c.req.json<{ name?: string; channel?: string; definition?: unknown; template?: string }>()
+  const body = await c.req.json<{ name?: string; channel?: string; kind?: string; definition?: unknown; template?: string }>()
   const template = body.template ? TEMPLATES.find((t) => t.slug === body.template) : undefined
   const channelParsed = flowChannelSchema.safeParse(body.channel ?? template?.channel ?? 'any')
   if (!channelParsed.success) return c.json({ error: 'invalid_channel' }, 400)
+  // Templates are flows: a template with kind "sequence" fails validation below (triggers / question steps).
+  const kindParsed = flowKindSchema.safeParse(body.kind ?? 'flow')
+  if (!kindParsed.success) return c.json({ error: 'invalid_kind' }, 400)
+  const kind = kindParsed.data
   const definitionInput = body.definition ?? template?.definition ?? { triggers: [], entry: null, steps: [] }
-  const v = validateFlow(definitionInput)
+  const v = validateFlow(definitionInput, kind)
   if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
   const general = await getGeneral(d)
-  const name = body.name?.trim() || template?.name[general.language] || '新しい自動化'
-  const row = await d.insert(schema.flows).values({ name, channel: channelParsed.data, definition: JSON.stringify(v.definition) }).returning().get()
+  const name = body.name?.trim() || template?.name[general.language] || (kind === 'sequence' ? '新しいシーケンス' : '新しい自動化')
+  const row = await d.insert(schema.flows).values({ name, channel: channelParsed.data, kind, definition: JSON.stringify(v.definition) }).returning().get()
   return c.json({ flow: parseFlow(row!), warnings: v.warnings }, 201)
 })
 
@@ -177,13 +181,14 @@ apiRoutes.put('/flows/:id', async (c) => {
     patch.channel = ch.data
   }
   if (body.definition !== undefined) {
-    const v = validateFlow(body.definition)
+    const v = validateFlow(body.definition, flow.kind)
     if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
     patch.definition = JSON.stringify(v.definition)
     warnings = v.warnings
   }
   if (body.status === 'live' || body.status === 'draft') patch.status = body.status
   const row = await d.update(schema.flows).set(patch).where(eq(schema.flows.id, flow.id)).returning().get()
+  if (patch.status === 'draft') await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, flow.id))
   return c.json({ flow: parseFlow(row!), warnings })
 })
 
@@ -191,7 +196,7 @@ apiRoutes.post('/flows/:id/publish', async (c) => {
   const d = db(c.env)
   const flow = await loadFlow(d, c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
-  const v = validateFlow(flow.definition)
+  const v = validateFlow(flow.definition, flow.kind)
   if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
   await d.update(schema.flows).set({ status: 'live', updatedAt: new Date().toISOString() }).where(eq(schema.flows.id, flow.id))
   return c.json({ ok: true, warnings: v.warnings })
@@ -202,6 +207,7 @@ apiRoutes.post('/flows/:id/unpublish', async (c) => {
   const flow = await loadFlow(d, c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   await d.update(schema.flows).set({ status: 'draft', updatedAt: new Date().toISOString() }).where(eq(schema.flows.id, flow.id))
+  await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, flow.id))
   return c.json({ ok: true })
 })
 
@@ -211,6 +217,7 @@ apiRoutes.delete('/flows/:id', async (c) => {
   if (!flow) return c.json({ error: 'not_found' }, 404)
   await d.delete(schema.flows).where(eq(schema.flows.id, flow.id))
   await d.delete(schema.sessions).where(eq(schema.sessions.flowId, flow.id))
+  await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, flow.id))
   return c.json({ ok: true })
 })
 
@@ -221,7 +228,7 @@ apiRoutes.post('/flows/:id/test', async (c) => {
   const body = await c.req.json<{ inputs?: SimulatedInput[]; channel?: Channel; newContact?: boolean; definition?: unknown }>()
   let target = flow
   if (body.definition !== undefined) {
-    const v = validateFlow(body.definition)
+    const v = validateFlow(body.definition, flow.kind)
     if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
     target = { ...flow, definition: v.definition }
   }
@@ -284,7 +291,7 @@ apiRoutes.get('/contacts/:id', async (c) => {
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const tags = await getTags(d, contact.id)
   const session = await d.select().from(schema.sessions).where(eq(schema.sessions.contactId, contact.id)).get()
-  return c.json({ contact: { ...contact, fields: parseFields(contact), tags }, session: session ?? null })
+  return c.json({ contact: { ...contact, fields: parseFields(contact), tags }, session: session ?? null, sequences: await contactSequences(d, contact.id) })
 })
 
 apiRoutes.patch('/contacts/:id', async (c) => {
@@ -318,6 +325,25 @@ apiRoutes.delete('/contacts/:id/tags/:tag', async (c) => {
   return c.json({ tags: await getTags(d, contact.id) })
 })
 
+apiRoutes.post('/contacts/:id/sequences', async (c) => {
+  const d = db(c.env)
+  const contact = await loadContact(d, c.req.param('id'))
+  if (!contact) return c.json({ error: 'not_found' }, 404)
+  const body = await c.req.json<{ flowId?: number }>()
+  if (!Number.isInteger(body.flowId)) return c.json({ error: 'missing_flow_id' }, 400)
+  const res = await subscribeSequence(d, contact, body.flowId!)
+  if (res !== 'ok') return c.json({ error: res }, 400)
+  return c.json({ sequences: await contactSequences(d, contact.id) }, 201)
+})
+
+apiRoutes.delete('/contacts/:id/sequences/:flowId', async (c) => {
+  const d = db(c.env)
+  const contact = await loadContact(d, c.req.param('id'))
+  if (!contact) return c.json({ error: 'not_found' }, 404)
+  await unsubscribeSequence(d, contact.id, Number(c.req.param('flowId')))
+  return c.json({ sequences: await contactSequences(d, contact.id) })
+})
+
 apiRoutes.delete('/contacts/:id', async (c) => {
   const d = db(c.env)
   const contact = await loadContact(d, c.req.param('id'))
@@ -325,6 +351,7 @@ apiRoutes.delete('/contacts/:id', async (c) => {
   await d.delete(schema.messages).where(eq(schema.messages.contactId, contact.id))
   await d.delete(schema.contactTags).where(eq(schema.contactTags.contactId, contact.id))
   await d.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
+  await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
   await d.delete(schema.contacts).where(eq(schema.contacts.id, contact.id))
   return c.json({ ok: true })
 })

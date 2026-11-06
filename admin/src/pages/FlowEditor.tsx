@@ -22,7 +22,7 @@ import { useT, type Key } from '../lib/i18n'
 import { Card, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectInput } from '../components'
 import { formatFlowError } from './flow-editor/errors'
 import { AddButton, StepPicker } from './flow-editor/fields'
-import { clearRefs, defaultStep, FLOW_CHANNELS, newStepId, STEP_TYPES, type FlowChannel, type StepType } from './flow-editor/model'
+import { clearRefs, defaultStep, FLOW_CHANNELS, newStepId, SEQUENCE_STEP_TYPES, STEP_TYPES, type FlowChannel, type StepType } from './flow-editor/model'
 import { StepCard } from './flow-editor/StepCard'
 import { TestPanel } from './flow-editor/TestPanel'
 import { TriggerList } from './flow-editor/TriggerCard'
@@ -226,6 +226,8 @@ export default function FlowEditor() {
   }
 
   const live = flow.status === 'live'
+  const isSequence = flow.kind === 'sequence'
+  const stepTypes = isSequence ? SEQUENCE_STEP_TYPES : STEP_TYPES
 
   return (
     <div className="stack fe-page">
@@ -248,6 +250,11 @@ export default function FlowEditor() {
             <Badge size="m" variant={live ? 'green' : 'monochrome-light'}>
               {live ? t('status_live') : t('status_draft')}
             </Badge>
+            {isSequence && (
+              <Badge size="m" variant="purple">
+                {t('flows_kind_sequence')}
+              </Badge>
+            )}
             <div className="fe-channel">
               <Text typo="13" color="txt-black-darker">
                 {t('editor_channel')}
@@ -299,9 +306,13 @@ export default function FlowEditor() {
 
       <div className="fe-layout">
         <div className="fe-main stack">
-          <Card title={t('editor_triggers')}>
-            <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />
-          </Card>
+          {isSequence ? (
+            <Banner variant="default" icon={InfoIcon} content={t('editor_sequence_note')} />
+          ) : (
+            <Card title={t('editor_triggers')}>
+              <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />
+            </Card>
+          )}
 
           <Card title={t('editor_steps')}>
             <VStack spacing={16}>
@@ -318,6 +329,7 @@ export default function FlowEditor() {
                     count={def.steps.length}
                     isEntry={def.entry === s.id}
                     steps={def.steps}
+                    stepTypes={stepTypes}
                     flows={allFlows}
                     currentId={flow.id}
                     t={t}
@@ -332,7 +344,7 @@ export default function FlowEditor() {
                   <SelectInput
                     aria-label={t('editor_step_type')}
                     value={newStepType}
-                    options={STEP_TYPES.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
+                    options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
                     onChange={setNewStepType}
                   />
                 </div>
@@ -352,6 +364,7 @@ export default function FlowEditor() {
             <TestPanel
               flowId={id}
               definition={def}
+              kind={flow.kind}
               defaultChannel={channel === 'any' ? 'line' : channel}
               t={t}
               onClose={isMobile ? () => setTestOpen(false) : undefined}

@@ -27,6 +27,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   if (event.type === 'unfollow') {
     await logMessage(db, { contactId: contact.id, direction: 'in', source: 'system', kind: 'event', text: 'unfollow' })
     await db.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
+    await db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
     return
   }
 

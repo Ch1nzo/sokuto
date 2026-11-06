@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
@@ -35,6 +35,8 @@ export type RunContext = {
   followsBusiness?: boolean
   /** Seconds already waited inline (short delays) in this run. */
   inlineWaited?: number
+  /** Set when running a sequence enrollment (sequence_subscriptions row id): no sessions, buttons do not wait. */
+  sequence?: { id: number }
 }
 
 const MAX_STEPS_PER_RUN = 50
@@ -212,7 +214,8 @@ async function endSession(ctx: RunContext) {
     ctx.dryRunSession = null
     return
   }
-  await ctx.db.delete(schema.sessions).where(eq(schema.sessions.contactId, ctx.contact.id))
+  if (ctx.sequence) await ctx.db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.id, ctx.sequence.id))
+  else await ctx.db.delete(schema.sessions).where(eq(schema.sessions.contactId, ctx.contact.id))
   await logEvent(ctx.db, { type: 'flow_completed', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id })
 }
 
@@ -258,6 +261,14 @@ export async function performActions(ctx: RunContext, actions: Array<{ type: str
         await setBotPaused(ctx.db, ctx.contact.id, true, typeof a.minutes === 'number' ? a.minutes : undefined)
         ctx.contact = { ...ctx.contact, botPaused: 1 }
         break
+      case 'subscribe': {
+        const res = await subscribeSequence(ctx.db, ctx.contact, Number(a.flowId))
+        if (res !== 'ok' && res !== 'exists') await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'subscribe', sequenceId: a.flowId, error: res } })
+        break
+      }
+      case 'unsubscribe':
+        await unsubscribeSequence(ctx.db, ctx.contact.id, Number(a.flowId))
+        break
       case 'webhook': {
         const url = String(a.url ?? '')
         if (!/^https?:\/\//.test(url)) break
@@ -290,7 +301,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         }
         const result = await deliver(ctx, step, msg)
         if (!result.ok) return endSession(ctx)
-        const waitsForButton = buttons.some((b) => !b.url && b.next)
+        const waitsForButton = !ctx.sequence && buttons.some((b) => !b.url && b.next)
         if (waitsForButton) {
           await saveSession(ctx, { stepId: step.id, waiting: 'button' })
           return
@@ -330,6 +341,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
           break
         }
         const resumeAt = new Date(Date.now() + Math.max(0, step.seconds) * 1000).toISOString()
+        if (ctx.sequence) {
+          await ctx.db.update(schema.sequenceSubscriptions).set({ stepId: step.next ?? null, resumeAt }).where(eq(schema.sequenceSubscriptions.id, ctx.sequence.id))
+          return
+        }
         await saveSession(ctx, { stepId: step.id, waiting: 'delay', resumeAt })
         return
       }
@@ -443,4 +458,32 @@ export async function resumeFromButton(ctx: RunContext, payload: string): Promis
   if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
   await runFrom(ctx, button.next)
   return true
+}
+
+/** Enrolls a contact in a live sequence; the scheduler runs the first step on its next tick (within a minute). */
+export async function subscribeSequence(db: Db, contact: ContactRow, flowId: number): Promise<'ok' | 'exists' | 'not_a_sequence' | 'flow_not_live'> {
+  const row = await db.select().from(schema.flows).where(eq(schema.flows.id, flowId)).get()
+  if (!row || row.kind !== 'sequence') return 'not_a_sequence'
+  if (row.status !== 'live') return 'flow_not_live'
+  const values = { contactId: contact.id, flowId, stepId: parseFlow(row).definition.entry, resumeAt: new Date().toISOString() }
+  const inserted = await db.insert(schema.sequenceSubscriptions).values(values).onConflictDoNothing().returning().get()
+  if (!inserted) return 'exists'
+  await logEvent(db, { type: 'trigger_fired', channel: contact.channel, flowId, contactId: contact.id, meta: { trigger: 'subscribe' } })
+  return 'ok'
+}
+
+export async function unsubscribeSequence(db: Db, contactId: number, flowId: number) {
+  const s = schema.sequenceSubscriptions
+  await db.delete(s).where(and(eq(s.contactId, contactId), eq(s.flowId, flowId)))
+}
+
+/** Sequences the contact is enrolled in, soonest next step first. */
+export async function contactSequences(db: Db, contactId: number) {
+  const s = schema.sequenceSubscriptions
+  return db
+    .select({ id: s.id, flowId: s.flowId, name: schema.flows.name, stepId: s.stepId, resumeAt: s.resumeAt })
+    .from(s)
+    .innerJoin(schema.flows, eq(schema.flows.id, s.flowId))
+    .where(eq(s.contactId, contactId))
+    .orderBy(s.resumeAt)
 }

@@ -13,7 +13,6 @@ import {
   MAX_REPLY_VARIANTS,
   OPS_WITHOUT_VALUE,
   RULE_OPS,
-  STEP_TYPES,
   VALIDATE_TYPES,
   changeStepType,
   defaultAction,
@@ -165,7 +164,7 @@ function ConditionBody({ step, onChange, steps, t }: BodyProps<'condition'>) {
   )
 }
 
-function ActionFields({ action, onChange, t }: { action: Action; onChange: (a: Action) => void; t: TFn }) {
+function ActionFields({ action, onChange, flows, t }: { action: Action; onChange: (a: Action) => void; flows: FlowRecord[]; t: TFn }) {
   switch (action.type) {
     case 'add_tag':
     case 'remove_tag':
@@ -195,10 +194,23 @@ function ActionFields({ action, onChange, t }: { action: Action; onChange: (a: A
       )
     case 'webhook':
       return <TextInputField label="URL" type="url" value={action.url} placeholder="https://" onChange={(e) => onChange({ ...action, url: e.target.value })} />
+    case 'subscribe':
+    case 'unsubscribe': {
+      const sequences = flows.filter((f) => f.kind === 'sequence')
+      return (
+        <SelectField
+          label={t('flows_kind_sequence')}
+          value={action.flowId ? String(action.flowId) : ''}
+          placeholder={sequences.length ? '—' : t('editor_no_sequences')}
+          options={sequences.map((f) => ({ value: String(f.id), label: `#${f.id} ${f.name}${f.status === 'live' ? '' : ` (${t('status_draft')})`}` }))}
+          onChange={(v) => onChange({ ...action, flowId: Number(v) || 0 })}
+        />
+      )
+    }
   }
 }
 
-function ActionBody({ step, onChange, steps, t }: BodyProps<'action'>) {
+function ActionBody({ step, onChange, steps, t, flows }: BodyProps<'action'> & { flows: FlowRecord[] }) {
   const setAction = (i: number, a: Action) => onChange({ ...step, actions: step.actions.map((x, j) => (j === i ? a : x)) })
   return (
     <>
@@ -219,7 +231,7 @@ function ActionBody({ step, onChange, steps, t }: BodyProps<'action'>) {
               </div>
               <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.actions.length <= 1} onClick={() => onChange({ ...step, actions: step.actions.filter((_, j) => j !== i) })} />
             </HStack>
-            <ActionFields action={a} t={t} onChange={(na) => setAction(i, na)} />
+            <ActionFields action={a} flows={flows} t={t} onChange={(na) => setAction(i, na)} />
           </div>
         ))}
         <div>
@@ -330,7 +342,7 @@ function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; 
     case 'message': return <MessageBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'question': return <QuestionBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'condition': return <ConditionBody step={step} onChange={onChange} steps={steps} t={t} />
-    case 'action': return <ActionBody step={step} onChange={onChange} steps={steps} t={t} />
+    case 'action': return <ActionBody step={step} onChange={onChange} steps={steps} t={t} flows={flows} />
     case 'delay': return <DelayBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'random': return <RandomBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'goto': return <GotoBody step={step} onChange={onChange} steps={steps} t={t} flows={flows} currentId={currentId} />
@@ -344,6 +356,7 @@ export function StepCard({
   count,
   isEntry,
   steps,
+  stepTypes,
   flows,
   currentId,
   onChange,
@@ -356,6 +369,8 @@ export function StepCard({
   count: number
   isEntry: boolean
   steps: Step[]
+  /** Step types offered in the type select (sequences allow fewer). */
+  stepTypes: StepType[]
   flows: FlowRecord[]
   currentId: number
   onChange: (s: Step) => void
@@ -380,7 +395,7 @@ export function StepCard({
           <SelectInput
             aria-label={t('editor_step_type')}
             value={step.type}
-            options={STEP_TYPES.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
+            options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
             onChange={(type: StepType) => onChange(changeStepType(step, type))}
           />
         </div>

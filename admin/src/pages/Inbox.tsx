@@ -15,6 +15,7 @@ import {
 } from '@channel.io/bezier-react'
 import {
   ArrowLeftIcon,
+  CalendarIcon,
   CancelSmallIcon,
   ChatBubbleIcon,
   ClipIcon,
@@ -28,7 +29,7 @@ import {
   type BezierIcon,
 } from '@channel.io/bezier-icons'
 import { api, errorMessage } from '../lib/api'
-import { useT, type Key } from '../lib/i18n'
+import { useLang, useT, type Key } from '../lib/i18n'
 import {
   BotStatusBadge,
   ChannelBadge,
@@ -39,6 +40,7 @@ import {
   PageHeader,
   RelativeTime,
   contactDisplayName,
+  formatDateTime,
 } from '../components'
 import './inbox.css'
 
@@ -94,6 +96,9 @@ type Message = {
 }
 
 type ContactDetail = ContactSummary & { tags: string[] }
+
+/** GET /api/contacts/:id → sequences (src/flows/engine.ts contactSequences). */
+type SequenceEnrollment = { id: number; flowId: number; name: string; stepId: string | null; resumeAt: string }
 
 const POLL_MS = 10_000
 /** Tag chips shown in the chat header before "+N". */
@@ -176,6 +181,7 @@ function ChatImage({ url }: { url: string }) {
 
 export default function Inbox() {
   const t = useT()
+  const { lang } = useLang()
   const navigate = useNavigate()
   const toast = useToast()
   const attachmentLabel = useAttachmentLabel()
@@ -184,6 +190,7 @@ export default function Inbox() {
   const [conversations, setConversations] = useState<Conversation[] | null>(null)
   const [listError, setListError] = useState<unknown>(null)
   const [contact, setContact] = useState<ContactDetail | null>(null)
+  const [sequences, setSequences] = useState<SequenceEnrollment[]>([])
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [chatError, setChatError] = useState<unknown>(null)
   const [text, setText] = useState('')
@@ -208,10 +215,11 @@ export default function Inbox() {
     try {
       const [m, c] = await Promise.all([
         api.get<{ messages: Message[] }>(`/api/inbox/${id}/messages`),
-        api.get<{ contact: ContactDetail }>(`/api/contacts/${id}`),
+        api.get<{ contact: ContactDetail; sequences?: SequenceEnrollment[] }>(`/api/contacts/${id}`),
       ])
       setMessages(m.messages)
       setContact(c.contact)
+      setSequences(c.sequences ?? [])
       setChatError(null)
     } catch (err) {
       setChatError(err)
@@ -227,6 +235,7 @@ export default function Inbox() {
   useEffect(() => {
     setMessages(null)
     setContact(null)
+    setSequences([])
     setChatError(null)
     setText('')
     setTagsExpanded(false)
@@ -290,6 +299,11 @@ export default function Inbox() {
   const removeTag = (tag: string) => {
     if (!contact) return
     void run(() => api.delete(`/api/contacts/${contact.id}/tags/${encodeURIComponent(tag)}`))
+  }
+
+  const unsubscribe = (flowId: number) => {
+    if (!contact) return
+    void run(() => api.delete(`/api/contacts/${contact.id}/sequences/${flowId}`))
   }
 
   const preview = (m: LastMessage | null) => {
@@ -462,6 +476,15 @@ export default function Inbox() {
                 )}
                 {contact && (
                   <div className="ibx-tags">
+                    {sequences.map((s) => (
+                      <span key={`seq-${s.id}`} className="ibx-tag ibx-tag--seq" title={`${s.name}\n${t('inbox_sequence_next').replace('{at}', formatDateTime(lang, s.resumeAt))}`}>
+                        <Icon source={CalendarIcon} size="xs" />
+                        <span className="ibx-tag__text">{s.name}</span>
+                        <button type="button" className="ibx-tag__remove" disabled={busy} aria-label={t('inbox_unsubscribe').replace('{name}', s.name)} onClick={() => unsubscribe(s.flowId)}>
+                          <Icon source={CancelSmallIcon} size="xs" />
+                        </button>
+                      </span>
+                    ))}
                     {shownTags.map((tag) => (
                       <span key={tag} className="ibx-tag" title={tag}>
                         <span className="ibx-tag__text">{tag}</span>

@@ -29,6 +29,21 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
     resumed++
   }
 
+  // Sequence enrollments whose next step is due (stepId = the step to run now).
+  const subs = schema.sequenceSubscriptions
+  for (const s of await db.select().from(subs).where(lte(subs.resumeAt, new Date().toISOString())).limit(25)) {
+    const contact = await db.select().from(schema.contacts).where(eq(schema.contacts.id, s.contactId)).get()
+    const row = await db.select().from(schema.flows).where(eq(schema.flows.id, s.flowId)).get()
+    if (!contact || !row || row.status !== 'live' || row.kind !== 'sequence') {
+      await db.delete(subs).where(eq(subs.id, s.id))
+      continue
+    }
+    const adapter = await getAdapter(env, db, contact.channel as Channel)
+    if (!adapter) continue
+    await runFrom({ db, adapter, contact, flow: parseFlow(row), timezone, botFields, sequence: { id: s.id } }, s.stepId)
+    resumed++
+  }
+
   const broadcastSent = await processBroadcasts(env, db)
   // Keep the de-duplication table small.
   const cutoff = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString()
