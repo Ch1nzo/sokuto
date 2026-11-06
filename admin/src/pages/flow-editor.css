@@ -1,32 +1,91 @@
 /* Flow editor (pages/FlowEditor.tsx + pages/flow-editor/*). Unlayered class rules only; see components/README.md. */
 
-/* Full-bleed editor (Channel.io style): beside the app sidebar the canvas fills the whole viewport, and the
-   header (name, status, channel, save/publish/delete), the toolbar and any banners float over it as cards. */
+/* Full-bleed editor (Channel.io style): beside the app sidebar the canvas fills the whole viewport. One top bar
+   (back, name, status, channel | test, save/publish, ⋯) spans the canvas and the banners float under it as cards;
+   the canvas tools (add step, arrange) float centred at the bottom of the canvas (.fe-canvasbar). */
 .main__inner:has(> .fe-page) { max-width: none; padding: 0; }
 .fe-page { position: relative; height: 100vh; height: 100dvh; gap: 8px; padding: 16px; pointer-events: none; }
 .fe-page > :not(.fe-layout):not(.fe-side) {
   pointer-events: auto; position: relative; z-index: 2;
-  width: fit-content; max-width: 100%;
+  max-width: 100%;
   margin: 0; padding: 10px 12px;
   background: var(--bg-white-normal); border: 1px solid var(--bdr-black-light);
   border-radius: var(--radius-12); box-shadow: var(--ev-2);
 }
+.fe-page > :not(.fe-layout):not(.fe-side):not(.fe-topbar) { width: fit-content; }
+/* While the step panel (380px) is open, the floating cards stop before it. */
 .fe-page:has(.fe-layout.has-panel) > :not(.fe-layout):not(.fe-side) { max-width: calc(100% - 380px - 16px); }
-.fe-page > .page-header { gap: 8px 16px; min-height: 0; }
-.fe-page .page-header__text { flex-direction: column; align-items: flex-start; gap: 8px; }
 .fe-side { pointer-events: auto; }
 
-/* ---------- header ---------- */
-.fe-name { width: 100%; max-width: 560px; }
-.fe-name, .fe-name input { font-size: 18px; font-weight: 700; }
-.fe-header-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.fe-channel { display: flex; align-items: center; gap: 8px; }
-.fe-channel__select { width: 160px; }
-.fe-actions { flex-wrap: wrap; }
+/* ---------- top bar ----------
+   One row: [← name] [status · sequence · channel · unsaved] ……… [test, save/publish, ⋯].
+   .is-stacked (set from the bar's measured width in FlowEditor.tsx): the meta row wraps under the title. */
+.fe-page > .fe-topbar { padding: 8px 10px; }
+.fe-topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.fe-topbar__title { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.fe-topbar__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; flex: 0 1 auto; min-width: 0; }
+.fe-topbar__actions { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.fe-topbar__more { flex: none; }
+.fe-topbar.is-stacked .fe-topbar__title { flex: 1 1 0; }
+.fe-topbar.is-stacked .fe-topbar__actions { order: 1; }
+.fe-topbar.is-stacked .fe-topbar__more { order: 1; margin-left: -6px; }
+/* Second row lines up with the name (past the 36px back button + 4px gap). */
+.fe-topbar.is-stacked .fe-topbar__meta { order: 2; flex: 1 1 100%; padding-left: 40px; }
 
-/* ---------- toolbar + canvas + side panel ---------- */
-.fe-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.fe-toolbar__select { width: 200px; }
+/* .is-compact (phone width, or a narrow canvas): row 1 is [← name ⋯] so the name keeps its room; status, channel
+   and the action buttons share the rows below (the buttons wrap under the meta when they do not fit). */
+.fe-topbar.is-compact { gap: 6px 8px; }
+.fe-topbar.is-compact .fe-topbar__title { order: 0; flex: 1 1 calc(100% - 44px); } /* 44 = ⋯ button + gap: forces the meta onto row 2 */
+.fe-topbar.is-compact .fe-topbar__more { order: 1; margin-left: 0; }
+.fe-topbar.is-compact .fe-topbar__meta { order: 2; flex: 1 1 auto; padding-left: 0; }
+.fe-topbar.is-compact .fe-topbar__actions { order: 3; gap: 6px; }
+.fe-topbar.is-compact .fe-channel { flex: 1 1 96px; width: auto; max-width: 200px; }
+.fe-topbar.is-compact .fe-unsaved__text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Inline-editable name: reads as a bold title, gets a field look only on hover / focus.
+   The hidden ::after copy of the value sizes the column to the text, so the field is as wide as the name
+   (up to 480px) and the input ellipsises when the bar is narrower. */
+.fe-title {
+  display: grid; grid-template-columns: minmax(0, max-content);
+  min-width: 0; max-width: 480px;
+}
+.fe-title::after {
+  content: attr(data-value) ' '; grid-area: 1 / 1;
+  height: 0; overflow: hidden; visibility: hidden; white-space: pre;
+  padding: 0 8px; font-family: inherit; font-size: 16px; font-weight: 700;
+}
+.fe-title > .fe-title__field {
+  grid-area: 1 / 1; min-width: 0; height: 36px; padding: 0 8px;
+  background: transparent; box-shadow: none; border-radius: var(--radius-6);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.fe-title__input {
+  flex: 1 1 0; width: 0; min-width: 0;
+  font-family: inherit; font-size: 16px; font-weight: 700; color: var(--txt-black-darkest);
+  text-overflow: ellipsis;
+}
+@media (hover: hover) { .fe-title > .fe-title__field:hover { background: var(--bg-black-lightest); } }
+.fe-title > .fe-title__field:focus-within { background: var(--bg-white-normal); box-shadow: 0 0 0 1px var(--bgtxt-blue-normal), 0 0 0 3px var(--bgtxt-blue-lightest); }
+.fe-title > .fe-title__field:focus-within .fe-title__input { text-overflow: clip; }
+
+.fe-channel { width: 168px; min-width: 0; }
+.fe-unsaved { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--txt-black-dark); white-space: nowrap; }
+.fe-unsaved:empty { display: none; }
+.fe-unsaved__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bgtxt-orange-normal); }
+
+/* ---------- canvas tools (bottom centre of the canvas, between React Flow's controls and minimap) ---------- */
+.fe-canvasbar {
+  white-space: nowrap;
+  position: absolute; z-index: 6; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  max-width: calc(100% - 32px); padding: 6px;
+  background: var(--bg-white-normal); border: 1px solid var(--bdr-black-light);
+  border-radius: var(--radius-12); box-shadow: var(--ev-2);
+}
+/* A narrow canvas (step panel open on a small desktop) has no room for the minimap beside the tools. */
+.fe-canvas { container-type: inline-size; }
+@container (max-width: 640px) { .fe-canvas .react-flow__minimap { display: none; } }
 
 /* The side panel only takes space while a node is selected (Channel.io style): otherwise the canvas gets the full width.
    No z-index on .fe-layout: it would trap the mobile bottom-sheet panel (z-index 800) under the floating cards. */
@@ -34,7 +93,7 @@
 .fe-layout.has-panel { grid-template-columns: minmax(0, 1fr) 380px; }
 .fe-panel:not(.is-open) { display: none; }
 .fe-canvas {
-  min-width: 0; height: 100%; overflow: hidden; isolation: isolate;
+  position: relative; min-width: 0; height: 100%; overflow: hidden; isolation: isolate;
 }
 .fe-panel {
   min-width: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain;
@@ -192,17 +251,15 @@ a.chip { text-decoration: none; }
   }
   .fe-panel.is-open { display: block; }
   .fe-canvas .react-flow__minimap { display: none; }
+  /* The step panel is a bottom sheet over the canvas here: hide the canvas tools while it is open. */
+  .fe-layout.has-panel .fe-canvasbar { display: none; }
+  .fe-canvas .react-flow__controls { margin-bottom: calc(15px + env(safe-area-inset-bottom)); }
   .fe-transcript { max-height: 40vh; }
 }
 
 @media (max-width: 600px) {
+  .fe-page > .fe-topbar { padding: 6px 8px; }
   .fe-grid-2 { grid-template-columns: minmax(0, 1fr); }
-  .fe-name { max-width: none; }
-  .fe-page .page-header__actions { flex: 1 1 100%; }
-  .fe-actions, .fe-actions > * { width: 100%; }
-  .fe-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .fe-channel { flex: 1 1 100%; }
-  .fe-channel__select { flex: 1; width: auto; }
   .fe-rule, .fe-rule--novalue { grid-template-columns: minmax(0, 1fr) auto; }
   .fe-rule__field { grid-column: 1; }
   .fe-rule__op { grid-column: 1; grid-row: 2; }
@@ -212,7 +269,6 @@ a.chip { text-decoration: none; }
   .fe-branch { grid-template-columns: 80px 52px minmax(0, 1fr) auto; }
   .fe-branch__next { grid-column: 1 / 4; grid-row: 2; }
   .fe-delay__input { width: 100%; }
-  .fe-toolbar__select { flex: 1 1 140px; width: auto; }
   .fe-test__sends { display: grid; grid-template-columns: minmax(0, 1fr); }
   .fe-item { padding: 12px; }
 }

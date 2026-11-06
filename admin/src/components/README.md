@@ -115,6 +115,7 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
 | `SokutoMark` | brand SVG, `size?`. |
 | `SubNav` | `items: { id, href, label, icon }[]`, `current`, `onSelect(id, e)` (plain left clicks only), `label` (nav `aria-label`). |
 | `RowMenu` | "…" button + menu for a table row: `label`, `items: { label, icon, onSelect, danger? }[]`, `disabled?`; clicks never reach the row. |
+| `MenuButton` | Button + menu (`role=menu` of ListItems; arrows/Home/End, Esc returns focus, opens upward near the bottom): `label`, `items: { key, label, icon?, onSelect, danger?, disabled? }[]`, `text?`, `icon?`, `iconOnly?`, `align?: 'left' \| 'right'`, Button `size`/`styleVariant`/`colorVariant`/`rightContent`. Flow editor ⋯ menu and "Add step". |
 | `WorkspaceSwitcher` | shell only. `WorkspaceAvatar` (`workspace`, `size?`: initial on a tint chosen by id), `AddWorkspaceModal` (`show`, `onHide`, `onCreated(ws)`). |
 | `formatNumber(lang)(n)`, `formatDateTime(lang, v)`, `formatRelative(lang, v)`, `middleTruncate(s)` | from `components/format.ts`. |
 

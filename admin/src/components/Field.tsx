@@ -119,7 +119,7 @@ export function SelectInput<V extends string>({
   onChange,
   placeholder,
   ...rest
-}: { value: V; options: SelectOption<V>[]; onChange: (value: V) => void; placeholder?: string; 'aria-label'?: string; dropdownPosition?: SelectProps['dropdownPosition']; className?: string }) {
+}: { value: V; options: SelectOption<V>[]; onChange: (value: V) => void; placeholder?: string; 'aria-label'?: string; dropdownPosition?: SelectProps['dropdownPosition']; className?: string; leftContent?: SelectProps['leftContent']; title?: string }) {
   const ref = useRef<SelectRef>(null)
   const current = options.find((o) => o.value === value)
   return (

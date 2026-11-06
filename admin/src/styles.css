@@ -249,9 +249,9 @@
   .subnav [role='menuitem'] > :first-child { display: none; }
 }
 
-/* Row "…" menu (components/RowMenu.tsx). */
-.row-menu { display: inline-flex; }
-.row-menu__list { min-width: 160px; padding: 6px; border-radius: var(--radius-8); background: var(--bg-white-high); box-shadow: var(--ev-3); }
+/* Row "…" menu (components/RowMenu.tsx) and MenuButton (components/MenuButton.tsx). */
+.row-menu, .menu-button { display: inline-flex; }
+.row-menu__list, .menu-button__list { min-width: 160px; padding: 6px; border-radius: var(--radius-8); background: var(--bg-white-high); box-shadow: var(--ev-3); }
 
 /* Contact avatar (components/ContactAvatar.tsx): initials on a tint, channel mark on the corner. */
 .c-avatar { position: relative; flex: none; display: inline-flex; }

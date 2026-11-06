@@ -29,3 +29,4 @@ export { formatNumber, formatDateTime, formatRelative, middleTruncate } from './
 export { WorkspaceAvatar, WorkspaceSwitcher, AddWorkspaceModal } from './Workspace'
 export { SubNav, type SubNavItem } from './SubNav'
 export { RowMenu, type RowMenuItem } from './RowMenu'
+export { MenuButton, type MenuButtonItem } from './MenuButton'

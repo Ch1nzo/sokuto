@@ -45,7 +45,7 @@ type StepNode = Node<{ step: Step; isEntry: boolean; hasError: boolean }, 'step'
 type FlowNode = StartNode | StepNode
 export type CanvasInstance = ReactFlowInstance<FlowNode>
 
-const STEP_ICONS: Record<StepType, BezierIcon> = {
+export const STEP_ICONS: Record<StepType, BezierIcon> = {
   message: ChatBubbleIcon,
   question: ChatQuestionIcon,
   condition: ButtonRouteIcon,
