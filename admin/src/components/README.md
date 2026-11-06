@@ -44,7 +44,9 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
   (sticky on desktop), title 18 bold (the only `<h1>`), `description` inline after the title (badges, counts),
   `actions` right-aligned (at most one primary button; others `secondary` + `monochrome-dark`). The band's margin plus
   the stack gap give 24px to the first section. Full-height pages: band 56 + 8 + gap 16 + bottom padding 24 = 104px
-  (see `.ibx` in `inbox.css`).
+  (`calc(100dvh - var(--shell-top) - 104px)`). The inbox goes further and bleeds to the shell edges under the band
+  (`margin: -24px calc(-1 * var(--page-pad-x)) -24px; height: calc(100dvh - var(--shell-top) - var(--header-height))`,
+  see `.ibx` in `inbox.css`): Channel.io's panes divided by 1px rules, no outer card.
 - **Width caps** only where reading/forms need it: Settings content column 720px; forms inside wide rows 720px
   (`.ch-row__body form`). Lists, tables and stat tiles use the full width.
 - **Sub-navigation** (Settings): 200px column of `NavItem`s with icons (`.st-subnav`), sticky under the header; the
@@ -55,11 +57,20 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
   `aria-expanded`/`aria-controls`; the body expands below a rule, no animation).
 - **Density**: list rows 56px (`.st-ws`), table rows ~44px, nav items 34px, chips 32px with 8px gaps. Spacing scale
   4 · 8 · 12 · 16 · 24. Text: 13 body, 14 emphasized, 12 meta, 16/18 headings; tabular figures for numbers.
-- **Chips** (filters, section switches): Bezier `Button size="xs|s"` / `Tag`, or the `.st-subnav` chip style; not
-  `SegmentedControl` when there are more than 3 options or labels differ in length.
+- **Chips** (filters, section switches): `<div className="filter-chips" role="group" aria-label>` of
+  `<button className="filter-chip" aria-pressed>` (optional `.filter-chip__count`; add `filter-chips--scroll` for one
+  row that scrolls inside itself), or for a filter with many values a chip-styled select:
+  `<SelectInput className={value ? 'filter-select is-set' : 'filter-select'} …/>` (inbox filters, report periods,
+  contacts toolbar). Not `SegmentedControl` when there are more than 3 options or labels differ in length.
 - **Hover** effects only inside `@media (hover: hover)`, 120ms `ease`, `transform`/`opacity`/colors only; never
-  `transition: all`. The only custom motion is the mobile sheet (`.sheet`: 220ms `var(--ease-drawer)`, fade only under
-  `prefers-reduced-motion`). Dropdowns, modals, toasts and button presses are Bezier's own.
+  `transition: all`. The only custom motion is the sheet/drawer slide (`.sheet` and `.drawer`: 220ms
+  `var(--ease-drawer)`, fade only under `prefers-reduced-motion`). Dropdowns, modals, toasts and button presses are
+  Bezier's own.
+- **Drawers** (forms that keep the list visible, e.g. 新しい配信): `<Drawer show onHide title footer? width? sheetOnMobile?>`.
+  It is a Bezier Modal pinned to the right (420px, full width ≤ 860px, or a bottom sheet with `sheetOnMobile`), so
+  Bezier dropdowns and toasts work inside it (a native `<dialog>` puts them behind the top layer); focus goes to the
+  first field, Esc / scrim / × close it, focus returns to the opener. Put a form's submit in `footer` with
+  `form="<form id>"`.
 - Sections are `<Card title? actions? flush?>` (white, 1px rule, `--radius-8`, renders `<h2>`). KPI tiles: `StatCard`
   in `.stat-grid` (fills the row; `value` may be a string such as `99+` or `—`).
 - Loading: `if (!data) return error ? <ErrorBanner …/> : <LoadingState />` (first load). **Never** leave a page stuck on "loading" when the request fails: keep an `error` state and render `<ErrorBanner error={err} onRetry={load} />` (with `<PageHeader>` above it).
@@ -70,7 +81,7 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
 - Lists of rows that are not tabular: `<Card flush><div className="list">{items.map(… <ListItem …/>)}</div></Card>` (see Dashboard). Long user text inside list content: wrap in `<span className="list-text">` (has `overflow-wrap:anywhere`).
 - Names of contacts: always `<ContactName contact={c} />` (displayName → `@username` → channel + middle-truncated id). Plain-text variant: `contactDisplayName(c)`. Truncated names carry a `title`.
 - Dates: `<RelativeTime value={iso} />` for "x 分前"; `formatDateTime(lang, v)` for absolute. Numbers: `formatNumber(lang)(n)`; counts in tables/cards must use tabular figures (`numeric` column, `StatCard`, or `.tabular`). Counts that hit an API cap: `countLabel(n)` → `99+`.
-- Chat UI (Inbox, test panel): `.bubble.in` / `.bubble.out`, failed sends add `.failed` (red tones, keep the error text visible in `.meta`), quick replies `.chips > button.chip`.
+- Chat UI (Inbox, test panel): `.bubble.in` / `.bubble.out`, failed sends add `.failed` (red tones, keep the error text visible in `.meta`), quick replies `.chips > button.chip`. The inbox wraps each bubble in `.ibx-msg--in|bot|human|system` with the time/sender line under it, bot replies are white with a hairline (`.ibx-bubble--bot`), team replies blue, system events centered grey text, and date separators (`.ibx-day`) split the thread by local day.
 - Mobile (≤ 860px): never use fixed widths > 340px, let action rows wrap (`PageHeader` does), two-column layouts collapse to one column at 860px, use `hideOnMobile` only for secondary table columns. Test at 390px with `?data=worst`.
 - Dev data: run `npm run dev:ui` and add `?data=worst|empty|one|huge` (see `lib/devFixtures.ts`; `/api/workspaces` has a 12-workspace worst case whose current name is 60 characters). The toggle at the bottom is dev-only.
 
@@ -91,6 +102,9 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
 | `SelectField` / `SelectInput` | `value`, `options: {value,label}[]`, `onChange(value)`, `placeholder?`. Bezier Select is a button + dropdown of ListItems, not a native `<select>`. `SelectInput` has no label (filters/toolbars; pass `aria-label`). |
 | `CopyBox` | `value`, `label?`. Mono value + Copy button + toast. |
 | `ContactName` | `contact: { id?, channel?, displayName, username?, channelUserId? }`, `typo?`, `bold?`. Truncates to one line: parent needs `min-width: 0`. |
+| `ContactAvatar` | `contact: { id, channel?, displayName, username?, avatarUrl? }`, `size?: 24 \| 36`. Image, else initials on a tint by id; at 36 a `ChannelDot` (LINE / Messenger / Instagram mark, labelled) sits on the corner. |
+| `Drawer` / `ModalCloseButton` | See "Drawers" above. `ModalCloseButton` replaces Bezier's `showCloseIcon` (whose × has no accessible name): last child of `ModalContent`, the header gets `className="modal-head"`. |
+| `useCopy()` | `copy(text)` → clipboard + "コピーしました" toast (CopyBox uses it). |
 | `RelativeTime` | `value`, `maxDays?` (default 7, then absolute date). |
 | `SokutoMark` | brand SVG, `size?`. |
 | `WorkspaceSwitcher` | shell only. `WorkspaceAvatar` (`workspace`, `size?`: initial on a tint chosen by id), `AddWorkspaceModal` (`show`, `onHide`, `onCreated(ws)`). |
@@ -114,7 +128,7 @@ Import from `@channel.io/bezier-react`; icons from `@channel.io/bezier-icons` (`
 - `RadioGroup` + `Radio` — `value`, `onValueChange`, `direction`, `spacing`; `Radio` `value` + children label.
 - `SegmentedControl` + `SegmentedControlItem` — `type="radiogroup"` (or `"tabs"` with `SegmentedControlTabList` / `SegmentedControlTabContent`), `value`, `onValueChange(v)`, `size: 'xs'|'s'|'m'|'l'`, `width`. Items are equal width; give a `width` when labels differ in length. Item `value` must be non-empty.
 - `Tabs` + `TabList` (`size: 'l'|'m'|'s'`) + `TabItems` + `TabItem value` + `TabContent value`; `Tabs` takes `value`/`onValueChange`.
-- `Modal` + `ModalContent` (`width`, `showCloseIcon`) + `ModalHeader` (**`title` required**, `subtitle?`, `description?`) + `ModalBody` + `ModalFooter` (`leftContent`/`rightContent`) + `ModalClose` (wraps a button). Controlled with `show` + `onHide`.
+- `Modal` + `ModalContent` (`width`; not `showCloseIcon`, whose × has no label: use `ModalCloseButton`) + `ModalHeader` (**`title` required**, `subtitle?`, `description?`) + `ModalBody` + `ModalFooter` (`leftContent`/`rightContent`) + `ModalClose` (wraps a button). Controlled with `show` + `onHide`.
 - `ConfirmModal` + `ConfirmModalContent` / `ConfirmModalHeader` (`title`, `description?`) / `ConfirmModalBody` / `ConfirmModalFooter` / `ConfirmModalClose`: same API as Modal, for "本当に削除しますか?".
 - `Tooltip` — `content`, `placement` (e.g. `'top-center'`), child must be a single element. `Help` — `?` icon with tooltip text as children.
 - `Spinner` — `size: 'xl'|'l'|'m'|'s'|'xs'`, `color`. `Icon` — `source` (BezierIcon), `size: 'xl'|'l'|'m'|'s'|'xs'|'xxs'|'xxxs'`, `color`.

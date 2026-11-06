@@ -1,15 +1,26 @@
-/* Flows list page (pages/Flows.tsx). Bezier tokens only; unlayered class rules. */
-.fl-name { display: block; min-width: 140px; overflow-wrap: anywhere; }
-.fl-templates { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+/* Flows list page (pages/Flows.tsx). Bezier tokens only; unlayered class rules. Prefix: fl- */
+.fl-card .data-table th { padding: 10px 12px; }
+/* 44px rows: the 32px publish switch row sets the height. */
+.fl-card .data-table td { padding: 6px 12px; }
+.fl-name { display: flex; align-items: center; gap: 8px; min-width: 160px; max-width: 260px; }
+.fl-name__text { min-width: 0; }
+.fl-name__kind { flex: none; white-space: nowrap; }
+.fl-live { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
+.fl-triggers { display: block; max-width: 220px; }
+.fl-inline { display: inline-flex; max-width: 100%; }
+.fl-menu { display: inline-flex; }
+.fl-menu__list { min-width: 160px; padding: 6px; border-radius: var(--radius-8); background: var(--bg-white-high); box-shadow: var(--ev-3); }
+
+/* Templates modal: cards with name + channel, description, "use" at the bottom. */
+.fl-templates { list-style: none; margin: 0; padding: 0 0 8px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 .fl-template {
   display: flex; flex-direction: column; gap: 8px; min-width: 0;
-  padding: 12px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
+  padding: 14px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
   background: var(--bg-white-normal);
 }
 .fl-template__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .fl-template__name { min-width: 0; overflow-wrap: anywhere; }
 .fl-template__head > :last-child { flex: none; }
 .fl-template__desc { flex: 1; overflow-wrap: anywhere; }
-.fl-inline { display: inline-flex; max-width: 100%; }
-.fl-kind { margin-top: 4px; }
-@media (max-width: 860px) { .fl-name { min-width: 96px; } }
+.fl-template__foot { display: flex; justify-content: flex-end; }
+@media (max-width: 860px) { .fl-name { min-width: 120px; max-width: 220px; } }

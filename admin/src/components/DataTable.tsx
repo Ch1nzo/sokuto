@@ -37,6 +37,8 @@ export function DataTable<T>({ columns, rows, rowKey, onRowClick, caption, empty
   const cellClass = (c: Column<T>) =>
     [c.numeric && 'is-numeric', c.nowrap && 'is-nowrap', c.hideOnMobile && 'hide-mobile'].filter(Boolean).join(' ') || undefined
   const onKey = (row: T) => (e: KeyboardEvent<HTMLTableRowElement>) => {
+    // Only the focused row itself: Enter / Space on a button or switch inside a cell is that control's own.
+    if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       onRowClick?.(row)

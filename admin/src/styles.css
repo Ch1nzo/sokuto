@@ -201,6 +201,94 @@
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .inline-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
+/* Filter chips (inbox filters, report periods): pill toggles; the active one has aria-pressed="true".
+   `--scroll` keeps one row that scrolls sideways inside itself instead of wrapping. */
+.filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.filter-chips--scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.filter-chips--scroll::-webkit-scrollbar { display: none; }
+.filter-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-32); background: var(--bg-white-normal);
+  color: var(--txt-black-darker); font: inherit; font-size: 13px; line-height: 1; white-space: nowrap; cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.filter-chip[aria-pressed='true'] { border-color: transparent; background: var(--bgtxt-blue-lightest); color: var(--bgtxt-blue-normal); }
+.filter-chip:focus-visible { outline: 2px solid var(--bgtxt-blue-normal); outline-offset: 1px; }
+.filter-chip__count { color: var(--txt-black-dark); font-size: 12px; font-variant-numeric: tabular-nums; }
+.filter-chip[aria-pressed='true'] .filter-chip__count { color: inherit; }
+/* A Bezier Select whose trigger looks like a filter chip (contacts: channel / tag / segment). */
+.filter-select { min-width: 0; max-width: 260px; }
+.filter-select > button {
+  height: 32px; padding: 0 10px 0 12px; box-shadow: none;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-32); background: var(--bg-white-normal);
+  transition: background-color 120ms ease;
+}
+.filter-select.is-set > button { border-color: transparent; background: var(--bgtxt-blue-lightest); }
+.filter-select > button:focus-visible { outline: 2px solid var(--bgtxt-blue-normal); outline-offset: 1px; }
+@media (hover: hover) {
+  .filter-chip:not([aria-pressed='true']):hover, .filter-select:not(.is-set) > button:hover { background: var(--bg-black-lighter); }
+}
+
+/* Contact avatar (components/ContactAvatar.tsx): initials on a tint, channel mark on the corner. */
+.c-avatar { position: relative; flex: none; display: inline-flex; }
+.c-avatar--36 { width: 36px; height: 36px; }
+.c-avatar--24 { width: 24px; height: 24px; }
+.c-avatar__face {
+  display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden;
+  border-radius: 42%; font-weight: 700; line-height: 1;
+  background: var(--bg-black-lighter); color: var(--txt-black-darker);
+}
+.c-avatar--36 .c-avatar__face { font-size: 14px; }
+.c-avatar--24 .c-avatar__face { font-size: 11px; }
+.c-avatar__text { white-space: nowrap; }
+.c-avatar__face--0 { background: var(--bgtxt-blue-lightest); color: var(--bgtxt-blue-dark); }
+.c-avatar__face--1 { background: var(--bgtxt-green-lightest); color: var(--bgtxt-green-dark); }
+.c-avatar__face--2 { background: var(--bgtxt-orange-lightest); color: var(--bgtxt-orange-dark); }
+.c-avatar__face--3 { background: var(--bgtxt-purple-lightest); color: var(--bgtxt-purple-dark); }
+.c-avatar__face--4 { background: var(--bgtxt-pink-lightest); color: var(--bgtxt-pink-dark); }
+.c-avatar__face--5 { background: var(--bgtxt-teal-lightest); color: var(--bgtxt-teal-dark); }
+.channel-dot {
+  position: absolute; right: -3px; bottom: -3px;
+  display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  color: var(--bgtxt-absolute-white-dark); box-shadow: 0 0 0 2px var(--c-avatar-ring, var(--bg-white-normal));
+}
+.channel-dot--line { background: var(--bgtxt-green-normal); }
+.channel-dot--messenger { background: var(--bgtxt-blue-normal); }
+.channel-dot--instagram { background: var(--bgtxt-pink-normal); }
+
+/* Labelled close button for Bezier modals (components/Drawer.tsx ModalCloseButton). */
+.modal-head { padding-right: 60px; }
+.modal-close { position: absolute; top: 18px; right: 18px; }
+
+/* Drawer (components/Drawer.tsx): a Bezier Modal pinned to the right edge, full height; a bottom sheet
+   on phones with `--sheet`. Same motion as `.sheet` (220ms --ease-drawer, fade only under reduced motion);
+   it closes instantly like every Bezier modal (the portal unmounts on close). */
+.drawer {
+  justify-self: end; align-self: stretch;
+  display: flex; flex-direction: column;
+  min-width: 0; height: 100dvh; max-height: none;
+  border-radius: var(--radius-12) 0 0 var(--radius-12); box-shadow: var(--ev-3);
+}
+.drawer > section { flex: 1 1 auto; min-height: 0; height: auto; }
+.drawer__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.drawer__footer {
+  flex: none; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--bdr-black-light);
+}
+.drawer[data-state='open'] { animation: drawer-in 220ms var(--ease-drawer); }
+@keyframes drawer-in { from { transform: translateX(100%); } }
+@keyframes drawer-up { from { transform: translateY(100%); } }
+@keyframes drawer-fade { from { opacity: 0; } }
+@media (max-width: 860px) {
+  .drawer { border-radius: 0; }
+  .drawer--sheet { justify-self: stretch; align-self: end; height: auto; max-height: 85dvh; border-radius: var(--radius-12) var(--radius-12) 0 0; }
+  .drawer--sheet[data-state='open'] { animation-name: drawer-up; }
+  .drawer__footer { padding-left: 16px; padding-right: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer[data-state='open'], .drawer--sheet[data-state='open'] { animation: drawer-fade 220ms ease; }
+}
+
 /* Page header band: full-bleed white strip at the top of the page, 56px, bottom rule; sticky on desktop. */
 .page-header {
   position: sticky; top: 0; z-index: 5;

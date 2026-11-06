@@ -70,13 +70,14 @@
   position: relative; width: 260px;
   display: flex; flex-direction: column; gap: 6px;
   padding: 10px 12px 6px;
-  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
   background: var(--bg-white-normal); box-shadow: var(--ev-1);
   color: var(--txt-black-darkest); font-size: 13px; line-height: 1.4;
 }
+/* 2px outline = 1px border + 1px ring, so selecting a node never shifts its content. Errors win over selection. */
 .fe-node.is-selected { border-color: var(--bgtxt-blue-normal); box-shadow: 0 0 0 1px var(--bgtxt-blue-normal), var(--ev-2); }
 .fe-node.is-error { border-color: var(--bgtxt-red-normal); box-shadow: 0 0 0 1px var(--bgtxt-red-normal), var(--ev-2); }
-.fe-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fe-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 22px; }
 .fe-node__head > * { flex: none; white-space: nowrap; }
 .fe-node__type { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fe-node__body {
@@ -84,7 +85,7 @@
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
 }
 .fe-node__outlets { display: flex; flex-direction: column; margin: 0 -12px; padding-top: 4px; border-top: 1px solid var(--bdr-black-lightest); }
-.fe-node__outlet { position: relative; display: flex; justify-content: flex-end; padding: 3px 14px 3px 12px; font-size: 12px; color: var(--txt-black-dark); }
+.fe-node__outlet { position: relative; display: flex; justify-content: flex-end; padding: 3px 14px 3px 12px; font-size: 11px; line-height: 16px; color: var(--txt-black-dark); }
 .fe-node__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fe-node .react-flow__handle { width: 10px; height: 10px; background: var(--bg-white-normal); border: 2px solid var(--txt-black-dark); }
 .fe-node .react-flow__handle-connecting, .fe-node .react-flow__handle:hover { border-color: var(--bgtxt-blue-normal); }

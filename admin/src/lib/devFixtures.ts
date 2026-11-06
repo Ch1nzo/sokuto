@@ -484,6 +484,95 @@ function workspacesFixture(mode: DataMode) {
   return { workspaces: all, current: all.some((w) => w.id === id) ? id : 1 }
 }
 
+/* ---------- flows / reports ---------- */
+
+type FlowRow = {
+  id: number
+  workspaceId: number
+  name: string
+  channel: Channel | 'any'
+  status: 'live' | 'draft'
+  kind: 'flow' | 'sequence'
+  definition: { triggers: Record<string, unknown>[]; entry: string | null; steps: unknown[] }
+  createdAt: string
+  updatedAt: string
+  runs30d: number
+}
+
+function flowRow(id: number, p: Partial<FlowRow>): FlowRow {
+  return {
+    id,
+    workspaceId: 1,
+    name: '営業時間の案内',
+    channel: 'any',
+    status: 'live',
+    kind: 'flow',
+    definition: { triggers: [{ type: 'keyword', keywords: ['営業時間'] }], entry: null, steps: [] },
+    createdAt: ago(60 * DAY),
+    updatedAt: ago(id * 5 * HOUR),
+    runs30d: 0,
+    ...p,
+  }
+}
+
+const KEYWORDS_20 = ['予約', 'よやく', 'reservation', 'Reservierung', 'booking', '席', 'テーブル', '人数', '変更', 'キャンセル', 'cancel', 'Stornierung', '時間', '営業時間', 'open', 'hours', '駐車場', 'parking', 'アレルギー', 'allergy']
+
+// Flow names are unbounded (PUT /api/flows/:id only trims); 120 characters is a pasted campaign title.
+function worstFlows(): FlowRow[] {
+  const crafted: FlowRow[] = [
+    flowRow(1, {
+      name: 'Reservierungsänderung und Stornierungen — Herbstkampagne 2026 (表参道店・渋谷店 共通、LINE と Instagram の両方で受付、担当者に引き継ぎ)'.slice(0, 120),
+      definition: { triggers: [{ type: 'keyword', keywords: KEYWORDS_20 }, { type: 'postback', payload: 'reserve' }, { type: 'ref', ref: 'autumn-2026-omotesando-richmenu' }], entry: 'm1', steps: [] },
+      runs30d: 48213,
+      updatedAt: ago(20 * 1000),
+    }),
+    flowRow(2, { name: 'Onboarding — 7-day welcome series for new LINE friends (Herbstkampagne 2026)', kind: 'sequence', channel: 'line', definition: { triggers: [], entry: 'm1', steps: [] }, runs30d: 1284 }),
+    flowRow(3, { name: 'Jo', status: 'draft', definition: { triggers: [], entry: null, steps: [] }, updatedAt: ago(3 * DAY) }),
+    flowRow(4, { name: 'ปิ่นมณี สาขาสยาม — ตอบกลับอัตโนมัติ', channel: 'instagram', definition: { triggers: [{ type: 'comment', keywords: ['ราคา', 'price'] }, { type: 'story_mention' }], entry: 'm1', steps: [] }, runs30d: 1 }),
+    flowRow(5, { name: 'AI 応答 (営業時間外)', channel: 'messenger', definition: { triggers: [{ type: 'intent', description: 'Fragt nach Öffnungszeiten, Reservierungen oder Allergien und möchte eine schnelle Antwort ohne Wartezeit' }], entry: 'a1', steps: [] }, runs30d: 999_999 }),
+    flowRow(6, { name: '友だち追加', channel: 'line', definition: { triggers: [{ type: 'follow' }], entry: 'm1', steps: [] }, runs30d: 7 }),
+    flowRow(7, { name: 'Fallback', definition: { triggers: [{ type: 'any_message', cooldownHours: 720 }], entry: 'm1', steps: [] }, status: 'draft' }),
+    flowRow(8, { name: 'Re-engagement — 30 Tage inaktiv', kind: 'sequence', status: 'draft', definition: { triggers: [], entry: null, steps: [] } }),
+  ]
+  const rest = Array.from({ length: 30 - crafted.length }, (_, i) =>
+    flowRow(crafted.length + 1 + i, {
+      name: `${POOL_NAMES[i % POOL_NAMES.length]} さん向けフォロー #${i + 1}`,
+      channel: (['any', ...CHANNELS] as const)[i % 4],
+      status: i % 3 === 0 ? 'draft' : 'live',
+      kind: i % 5 === 0 ? 'sequence' : 'flow',
+      definition: { triggers: i % 5 === 0 ? [] : [{ type: 'keyword', keywords: [`キーワード${i + 1}`] }], entry: null, steps: [] },
+      runs30d: (i * 137) % 900,
+    }),
+  )
+  return [...crafted, ...rest]
+}
+
+function reportsFor(flows: FlowRow[], days: number, scale: number) {
+  const perFlow = flows.map((f, i) => {
+    const started = f.runs30d ? Math.round(f.runs30d * scale) : 0
+    return {
+      id: f.id,
+      name: f.name,
+      status: f.status,
+      channel: f.channel,
+      started,
+      messagesSent: started * 3,
+      buttonClicks: Math.round(started * 0.4),
+      inputs: Math.round(started * 0.2),
+      completed: Math.round(started * 0.7),
+      errors: i % 4 === 1 ? Math.round(started * 0.01) + 1 : 0,
+    }
+  })
+  const today = new Date()
+  const series = Array.from({ length: days }, (_, i) => {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - (days - 1 - i)))
+    // A quiet week, one campaign spike, and gaps (days with no row are filled in by the page).
+    const n = i % 9 === 4 ? 0 : Math.round((i === days - 3 ? 40 : 1 + (i % 7)) * 120 * scale)
+    return { day: d.toISOString().slice(0, 10), in: n, out: Math.round(n * 1.6), newContacts: Math.round(n / 40) }
+  }).filter((p) => p.in > 0)
+  return { days, flows: perFlow, series }
+}
+
 /* ---------- empty / one / huge ---------- */
 
 function oneContact(): ContactRow {
@@ -492,6 +581,12 @@ function oneContact(): ContactRow {
 
 function hugeContacts(): ContactRow[] {
   return Array.from({ length: 25_000 }, (_, i) => poolContact(i + 1))
+}
+
+function hugeFlows(): FlowRow[] {
+  return Array.from({ length: 300 }, (_, i) =>
+    flowRow(i + 1, { name: `自動化 ${i + 1}`, status: i % 4 === 0 ? 'draft' : 'live', kind: i % 10 === 0 ? 'sequence' : 'flow', runs30d: 25_000 - i * 50 }),
+  )
 }
 
 function hugeMessages(contactId: number): MessageRow[] {
@@ -522,6 +617,8 @@ type Dataset = {
   segments: () => Segment[]
   snippets: () => Snippet[]
   sequences: (contactId: number) => unknown[]
+  flows: () => FlowRow[]
+  reports: (days: number) => unknown
 }
 
 const genericLast = (c: ContactRow): Omit<MessageRow, 'id'> => ({
@@ -548,6 +645,8 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: worstSegments,
     snippets: worstSnippets,
     sequences: worstSequences,
+    flows: worstFlows,
+    reports: (days) => reportsFor(worstFlows(), days, days / 30),
   },
   empty: {
     contacts: () => [],
@@ -564,6 +663,8 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: () => [],
     snippets: () => [],
     sequences: () => [],
+    flows: () => [],
+    reports: (days) => ({ days, flows: [], series: [] }),
   },
   one: {
     contacts: () => [oneContact()],
@@ -584,6 +685,12 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: () => [{ id: 1, name: 'VIP', rules: [{ field: 'tag', op: 'has_tag', value: 'vip' }], mode: 'all', createdAt: ago(DAY) }],
     snippets: () => [{ id: 1, name: '営業時間', text: '営業時間は 11:00〜22:00 です。', createdAt: ago(DAY) }],
     sequences: () => [],
+    flows: () => [flowRow(1, { runs30d: 1 })],
+    reports: (days) => ({
+      days,
+      flows: [{ id: 1, name: '営業時間の案内', status: 'live', channel: 'any', started: 1, messagesSent: 1, buttonClicks: 1, inputs: 0, completed: 1, errors: 0 }],
+      series: [{ day: new Date().toISOString().slice(0, 10), in: 1, out: 1, newContacts: 1 }],
+    }),
   },
   huge: {
     contacts: hugeContacts,
@@ -625,6 +732,8 @@ const DATASETS: Record<DataMode, Dataset> = {
       })),
     snippets: () => Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `定型文 ${i + 1}`, text: `いつもありがとうございます。定型文 ${i + 1} の本文です。`, createdAt: ago(i * HOUR) })),
     sequences: () => [],
+    flows: hugeFlows,
+    reports: (days) => reportsFor(hugeFlows(), days, (days / 30) * 50),
   },
 }
 
@@ -702,6 +811,8 @@ export function devFixture(path: string): unknown {
   if (p === '/api/tags') return { tags: ds.tags() }
   if (p === '/api/segments') return { segments: ds.segments() }
   if (p === '/api/snippets') return { snippets: ds.snippets() }
+  if (p === '/api/flows') return { flows: ds.flows() }
+  if (p === '/api/reports') return ds.reports(Math.min(90, Math.max(1, Number(q.get('days') ?? '30'))))
 
   return undefined
 }

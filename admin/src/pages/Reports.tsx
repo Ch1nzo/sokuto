@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Badge, SegmentedControl, SegmentedControlItem, Text } from '@channel.io/bezier-react'
+import { Badge, Text } from '@channel.io/bezier-react'
 import { ComboChartIcon, GraphIcon } from '@channel.io/bezier-icons'
 import { useLang, useT, type Key, type Lang } from '../lib/i18n'
 import { api } from '../lib/api'
@@ -100,13 +100,13 @@ export default function Reports() {
   const retry = useCallback(() => setReload((n) => n + 1), [])
 
   const periodControl = (
-    <SegmentedControl type="radiogroup" size="s" width={240} value={period} onValueChange={(v: Period) => setPeriod(v)} aria-label={t('reports_days')}>
+    <div className="filter-chips" role="group" aria-label={t('reports_days')}>
       {(['7', '30', '90'] as const).map((d) => (
-        <SegmentedControlItem key={d} value={d}>
+        <button key={d} type="button" className="filter-chip" aria-pressed={period === d} onClick={() => setPeriod(d)}>
           {t('reports_period_days').replace('{n}', d)}
-        </SegmentedControlItem>
+        </button>
       ))}
-    </SegmentedControl>
+    </div>
   )
 
   const header = <PageHeader title={t('reports_title')} actions={periodControl} />
@@ -187,10 +187,10 @@ export default function Reports() {
       ) : (
         <div className={loading ? 'stack rp-body is-loading' : 'stack rp-body'}>
           <div className="stat-grid">
-            <StatCard label={t('reports_in')} value={sumIn} />
-            <StatCard label={t('reports_out')} value={sumOut} />
-            <StatCard label={t('reports_new')} value={sumNew} />
-            <StatCard label={t('reports_completed')} value={totalRow.completed} />
+            <StatCard label={t('reports_stat_started')} value={totalRow.started} />
+            <StatCard label={t('reports_stat_messages')} value={totalRow.messagesSent} />
+            <StatCard label={t('reports_stat_clicks')} value={totalRow.buttonClicks} />
+            <StatCard label={t('reports_stat_completed')} value={totalRow.completed} />
           </div>
 
           <Card
@@ -199,11 +199,14 @@ export default function Reports() {
               <div className="rp-legend">
                 <span className="rp-legend__item">
                   <span className="rp-swatch rp-swatch--in" aria-hidden="true" />
-                  {t('reports_in')}
+                  {t('reports_in')} <span className="tabular">{fmt(sumIn)}</span>
                 </span>
                 <span className="rp-legend__item">
                   <span className="rp-swatch rp-swatch--out" aria-hidden="true" />
-                  {t('reports_out')}
+                  {t('reports_out')} <span className="tabular">{fmt(sumOut)}</span>
+                </span>
+                <span className="rp-legend__item">
+                  {t('reports_new')} <span className="tabular">{fmt(sumNew)}</span>
                 </span>
               </div>
             }

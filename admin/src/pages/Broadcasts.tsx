@@ -12,7 +12,7 @@ import {
   useToast,
   type BadgeVariant,
 } from '@channel.io/bezier-react'
-import { ErrorTriangleFilledIcon, FunnelIcon, InfoFilledIcon, MegaphoneIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { ErrorTriangleFilledIcon, FunnelIcon, InfoFilledIcon, MegaphoneIcon, PlusIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { BroadcastButton } from '@shared/broadcasts'
 import { MESSAGE_TAGS } from '@shared/channels/types'
 import type { FlowRecord } from '@shared/flows/types'
@@ -22,6 +22,8 @@ import {
   Card,
   ChannelBadge,
   DataTable,
+  ModalCloseButton,
+  Drawer,
   EmptyState,
   ErrorBanner,
   LoadingState,
@@ -108,6 +110,7 @@ export default function Broadcasts() {
   const [busy, setBusy] = useState(false)
   const [pendingCancel, setPendingCancel] = useState<Broadcast | null>(null)
   const [reading, setReading] = useState<Broadcast | null>(null)
+  const [composing, setComposing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -183,6 +186,7 @@ export default function Broadcasts() {
         scheduledAt,
       })
       setForm(emptyForm)
+      setComposing(false)
       toast.addToast(t('bc_created'), { preset: 'success' })
       await load()
     } catch (err) {
@@ -259,7 +263,7 @@ export default function Broadcasts() {
         <div className="bc-audience">
           <ChannelBadge channel={b.channel} />
           {b.tag && (
-            <Badge size="s" variant="blue" className="bc-tag" title={b.tag}>
+            <Badge size="s" variant="default" className="bc-tag" title={b.tag}>
               {b.tag}
             </Badge>
           )}
@@ -283,25 +287,25 @@ export default function Broadcasts() {
       ),
     },
     {
-      key: 'result',
-      header: t('bc_result'),
+      key: 'sent',
+      header: t('bc_col_sent'),
       numeric: true,
       nowrap: true,
-      render: (b) => (
-        <div className="bc-result">
-          <Text typo="13" color="txt-black-darkest">
-            {fmt(b.sent)} / {fmt(b.total)} {t('bc_sent')}
-          </Text>
-          <Text typo="12" color={b.failed > 0 ? 'bgtxt-red-normal' : 'txt-black-dark'}>
-            {fmt(b.failed)} {t('bc_failed')}
-          </Text>
-          {!!b.buttons?.length && (
-            <Text typo="12" color="txt-black-dark">
-              {fmt(b.clicked ?? 0)} {t('bc_clicked')}
-            </Text>
-          )}
-        </div>
-      ),
+      render: (b) => `${fmt(b.sent)} / ${fmt(b.total)}`,
+    },
+    {
+      key: 'failed',
+      header: t('bc_col_failed'),
+      numeric: true,
+      nowrap: true,
+      render: (b) => <span className={b.failed > 0 ? 'bc-failed' : undefined}>{fmt(b.failed)}</span>,
+    },
+    {
+      key: 'clicked',
+      header: t('bc_col_clicked'),
+      numeric: true,
+      nowrap: true,
+      render: (b) => (b.buttons?.length ? fmt(b.clicked ?? 0) : <span className="bc-muted">—</span>),
     },
     {
       key: 'actions',
@@ -314,99 +318,82 @@ export default function Broadcasts() {
     },
   ]
 
+  const formFields = (
+    <VStack as="form" id="bc-form" spacing={16} onSubmit={submit}>
+      <Banner variant="blue" icon={InfoFilledIcon} content={t('bc_note')} />
+      <TextInputField label={t('bc_name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} autoComplete="off" />
+      <SelectField label={t('editor_channel')} value={form.channel} options={channelOptions} onChange={(v) => setForm({ ...form, channel: v })} />
+      <SelectField label={t('bc_segment')} helperText={t('bc_segment_hint')} value={form.segmentId} options={segmentOptions} onChange={(v) => setForm({ ...form, segmentId: v })} />
+      <TextInputField
+        label={t('bc_tag')}
+        value={form.tag}
+        onChange={(e) => setForm({ ...form, tag: e.target.value })}
+        disabled={!!form.segmentId}
+        list="bc-tags"
+        autoComplete="off"
+      />
+      <datalist id="bc-tags">
+        {tags.slice(0, 500).map((x) => (
+          <option key={x.tag} value={x.tag}>
+            {x.tag} ({fmt(x.n)})
+          </option>
+        ))}
+      </datalist>
+      <TextAreaField
+        label={t('bc_text')}
+        value={form.text}
+        onChange={(e) => setForm({ ...form, text: e.target.value })}
+        minRows={6}
+        maxRows={16}
+        required
+        helperText={
+          <span className={tooLong ? 'bc-counter is-over' : 'bc-counter'}>
+            <span className="tabular">{t('bc_chars').replace('{n}', `${fmt(chars)} / ${fmt(TEXT_SOFT_LIMIT)}`)}</span>
+            {tooLong && <span>{t('bc_too_long')}</span>}
+          </span>
+        }
+      />
+      <VStack spacing={8}>
+        <Text typo="13" bold color="txt-black-darker">
+          {t('bc_buttons')} <span className="tabular">({form.buttons.length}/{MAX_BUTTONS})</span>
+        </Text>
+        {form.buttons.map((b, i) => (
+          <div className="bc-button" key={i}>
+            <TextInputField label={t('editor_button_label')} value={b.label} maxLength={MAX_BUTTON_LABEL} onChange={(e) => setButton(i, { ...b, label: e.target.value })} />
+            <TextInputField label={t('editor_button_url')} type="url" value={b.url} placeholder="https://" disabled={!!b.flowId} onChange={(e) => setButton(i, { ...b, url: e.target.value })} />
+            <SelectField label={t('bc_button_flow')} value={b.flowId} options={flowOptions} disabled={!!b.url.trim()} onChange={(v) => setButton(i, { ...b, flowId: v })} />
+            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => setForm({ ...form, buttons: form.buttons.filter((_, j) => j !== i) })} />
+          </div>
+        ))}
+        <Text typo="12" color="txt-black-dark">
+          {t('bc_buttons_hint')}
+        </Text>
+        <div>
+          <AddButton text={t('bc_add_button')} disabled={form.buttons.length >= MAX_BUTTONS} onClick={() => setForm({ ...form, buttons: [...form.buttons, { label: '', url: '', flowId: '' }] })} />
+        </div>
+      </VStack>
+      <TextInputField label={t('bc_image')} type="url" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://" />
+      <TextInputField
+        label={t('bc_schedule')}
+        // Bezier TextField's type union has no datetime-local; the native input accepts it.
+        {...{ type: 'datetime-local' as 'text' }}
+        value={form.scheduledAt}
+        onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+      />
+      <SelectField label={t('bc_message_tag')} value={form.messageTag} options={messageTagOptions} onChange={(v) => setForm({ ...form, messageTag: v })} />
+      {form.messageTag && <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('bc_message_tag_warning')} />}
+      {formError !== null && <ErrorBanner error={formError} />}
+    </VStack>
+  )
+
   return (
     <div className="stack">
-      <PageHeader title={t('bc_title')} />
+      <PageHeader
+        title={t('bc_title')}
+        actions={<Button leftContent={PlusIcon} text={t('bc_new')} aria-haspopup="dialog" onClick={() => setComposing(true)} />}
+      />
 
-      <Card title={t('bc_new')}>
-        <VStack as="form" spacing={16} onSubmit={submit}>
-          <Banner variant="blue" icon={InfoFilledIcon} content={t('bc_note')} />
-          <div className="bc-grid">
-            <TextInputField label={t('bc_name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} />
-            <SelectField label={t('editor_channel')} value={form.channel} options={channelOptions} onChange={(v) => setForm({ ...form, channel: v })} />
-          </div>
-          <div className="bc-grid">
-            <SelectField label={t('bc_segment')} helperText={t('bc_segment_hint')} value={form.segmentId} options={segmentOptions} onChange={(v) => setForm({ ...form, segmentId: v })} />
-            <TextInputField
-              label={t('bc_tag')}
-              value={form.tag}
-              onChange={(e) => setForm({ ...form, tag: e.target.value })}
-              disabled={!!form.segmentId}
-              list="bc-tags"
-              autoComplete="off"
-            />
-          </div>
-          <datalist id="bc-tags">
-            {tags.slice(0, 500).map((x) => (
-              <option key={x.tag} value={x.tag}>
-                {x.tag} ({fmt(x.n)})
-              </option>
-            ))}
-          </datalist>
-          <TextAreaField
-            label={t('bc_text')}
-            value={form.text}
-            onChange={(e) => setForm({ ...form, text: e.target.value })}
-            minRows={6}
-            maxRows={16}
-            required
-            helperText={
-              <span className={tooLong ? 'bc-counter is-over' : 'bc-counter'}>
-                <span className="tabular">
-                  {t('bc_chars').replace('{n}', `${fmt(chars)} / ${fmt(TEXT_SOFT_LIMIT)}`)}
-                </span>
-                {tooLong && <span>{t('bc_too_long')}</span>}
-              </span>
-            }
-          />
-          <VStack spacing={8}>
-            <Text typo="13" bold color="txt-black-darker">
-              {t('bc_buttons')} <span className="tabular">({form.buttons.length}/{MAX_BUTTONS})</span>
-            </Text>
-            {form.buttons.map((b, i) => (
-              <div className="bc-button" key={i}>
-                <TextInputField label={t('editor_button_label')} value={b.label} maxLength={MAX_BUTTON_LABEL} onChange={(e) => setButton(i, { ...b, label: e.target.value })} />
-                <TextInputField label={t('editor_button_url')} type="url" value={b.url} placeholder="https://" disabled={!!b.flowId} onChange={(e) => setButton(i, { ...b, url: e.target.value })} />
-                <SelectField label={t('bc_button_flow')} value={b.flowId} options={flowOptions} disabled={!!b.url.trim()} onChange={(v) => setButton(i, { ...b, flowId: v })} />
-                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => setForm({ ...form, buttons: form.buttons.filter((_, j) => j !== i) })} />
-              </div>
-            ))}
-            <Text typo="12" color="txt-black-dark">
-              {t('bc_buttons_hint')}
-            </Text>
-            <div>
-              <AddButton text={t('bc_add_button')} disabled={form.buttons.length >= MAX_BUTTONS} onClick={() => setForm({ ...form, buttons: [...form.buttons, { label: '', url: '', flowId: '' }] })} />
-            </div>
-          </VStack>
-          <div className="bc-grid">
-            <TextInputField
-              label={t('bc_image')}
-              type="url"
-              value={form.imageUrl}
-              onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-              placeholder="https://"
-            />
-            <TextInputField
-              label={t('bc_schedule')}
-              // Bezier TextField's type union has no datetime-local; the native input accepts it.
-              {...{ type: 'datetime-local' as 'text' }}
-              value={form.scheduledAt}
-              onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
-            />
-          </div>
-          <SelectField label={t('bc_message_tag')} value={form.messageTag} options={messageTagOptions} onChange={(v) => setForm({ ...form, messageTag: v })} />
-          {form.messageTag && <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('bc_message_tag_warning')} />}
-          {formError !== null && <ErrorBanner error={formError} />}
-          <div className="bc-submit">
-            <Text typo="13" color="txt-black-darker" className="bc-reach">
-              {t('bc_reach')}: <span className="tabular">{reachText}</span>
-            </Text>
-            <Button type="submit" text={t('create')} loading={busy} disabled={!form.text.trim()} />
-          </div>
-        </VStack>
-      </Card>
-
-      <Card title={t('bc_list')} flush>
+      <Card flush className="bc-card">
         {broadcasts === null ? (
           loadError !== null ? (
             <div className="bc-pad">
@@ -427,11 +414,34 @@ export default function Broadcasts() {
               rows={broadcasts}
               rowKey={(b) => b.id}
               caption={t('bc_list')}
-              empty={<EmptyState compact icon={MegaphoneIcon} title={t('bc_empty')} description={t('bc_empty_desc')} />}
+              empty={
+                <EmptyState
+                  icon={MegaphoneIcon}
+                  title={t('bc_empty')}
+                  description={t('bc_empty_desc')}
+                  action={<Button styleVariant="secondary" colorVariant="blue" leftContent={PlusIcon} text={t('bc_new')} onClick={() => setComposing(true)} />}
+                />
+              }
             />
           </>
         )}
       </Card>
+
+      <Drawer
+        show={composing}
+        onHide={() => setComposing(false)}
+        title={t('bc_new')}
+        footer={
+          <>
+            <Text typo="13" color="txt-black-darker" className="bc-reach" aria-live="polite">
+              {t('bc_reach')}: <span className="tabular">{reachText}</span>
+            </Text>
+            <Button type="submit" form="bc-form" text={form.scheduledAt ? t('bc_submit_schedule') : t('bc_submit_now')} loading={busy} disabled={!form.text.trim()} />
+          </>
+        }
+      >
+        {formFields}
+      </Drawer>
 
       <ConfirmAction
         show={pendingCancel !== null}
@@ -445,8 +455,8 @@ export default function Broadcasts() {
       />
 
       <Modal show={reading !== null} onHide={() => setReading(null)}>
-        <ModalContent width="min(560px, 100vw)" showCloseIcon>
-          <ModalHeader title={reading?.name ?? ''} description={reading ? formatDateTime(lang, reading.scheduledAt) : undefined} />
+        <ModalContent width="min(560px, 100vw)">
+          <ModalHeader className="modal-head" title={reading?.name ?? ''} description={reading ? formatDateTime(lang, reading.scheduledAt) : undefined} />
           <ModalBody>
             {reading && (
               <div className="bc-fulltext">
@@ -471,6 +481,7 @@ export default function Broadcasts() {
               </div>
             )}
           </ModalBody>
+          <ModalCloseButton />
         </ModalContent>
       </Modal>
     </div>

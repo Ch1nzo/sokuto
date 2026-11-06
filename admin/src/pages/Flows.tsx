@@ -1,30 +1,79 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Badge, Button, Text } from '@channel.io/bezier-react'
-import { CalendarIcon, CancelIcon, FlowIcon, PlusIcon, TemplateIcon } from '@channel.io/bezier-icons'
-import { api } from '../lib/api'
-import { useLang, useT, type Key } from '../lib/i18n'
+import { Badge, Button, ListItem, Modal, ModalBody, ModalContent, ModalHeader, Overlay, Switch, Text, useToast } from '@channel.io/bezier-react'
+import { CalendarIcon, FlowIcon, MoreIcon, PlusIcon, TemplateIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { api, errorMessage } from '../lib/api'
+import { useLang, useT } from '../lib/i18n'
 import {
   Card,
   ChannelBadge,
   DataTable,
+  ModalCloseButton,
   EmptyState,
   ErrorBanner,
   LoadingState,
   PageHeader,
+  RelativeTime,
   formatNumber,
   type Column,
 } from '../components'
+import { ConfirmAction } from '../components/ConfirmAction'
+import { triggerSummary } from './flow-editor/model'
 import type { FlowRecord } from '@shared/flows/types'
 import type { FlowTemplate } from '@shared/flows/templates'
 import './flows.css'
 
 type FlowListItem = FlowRecord & { runs30d: number }
 
+/** "…" button with a small menu (role="menu"); clicks inside never reach the table row. */
+function RowMenu({ label, onDelete }: { label: string; onDelete: () => void }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  const close = () => {
+    setOpen(false)
+    buttonRef.current?.focus()
+  }
+
+  return (
+    <span className="fl-menu" onClick={(e) => e.stopPropagation()}>
+      <Button
+        ref={buttonRef}
+        size="s"
+        styleVariant="tertiary"
+        colorVariant="monochrome-light"
+        leftContent={MoreIcon}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      />
+      <Overlay show={open} target={buttonRef.current} position="bottom-right" marginY={4} onHide={close}>
+        {/* The Overlay mounts this after `show`: focus the first item once it exists. */}
+        <div ref={(el) => { if (open) el?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }} role="menu" aria-label={label} className="fl-menu__list">
+          <ListItem
+            role="menuitem"
+            size="m"
+            variant="red"
+            leftContent={TrashIcon}
+            content={t('delete')}
+            onClick={() => {
+              setOpen(false)
+              onDelete()
+            }}
+          />
+        </div>
+      </Overlay>
+    </span>
+  )
+}
+
 export default function Flows() {
   const t = useT()
   const { lang } = useLang()
   const navigate = useNavigate()
+  const toast = useToast()
   const fmt = formatNumber(lang)
   const [flows, setFlows] = useState<FlowListItem[] | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -34,6 +83,7 @@ export default function Flows() {
   const [createError, setCreateError] = useState<unknown>(null)
   /** 'blank', 'sequence' or a template slug while its POST is in flight. */
   const [creating, setCreating] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<FlowListItem | null>(null)
 
   const loadFlows = useCallback(async () => {
     try {
@@ -69,68 +119,118 @@ export default function Flows() {
     } catch (err) {
       setCreateError(err)
       setCreating(null)
+      setShowTemplates(false)
     }
   }
 
-  const triggerLabel = (type: string) => t(`trigger_${type}` as Key)
+  /** Optimistic publish / unpublish: the switch moves at once and moves back if the server refuses. */
+  const setLive = async (f: FlowListItem, live: boolean) => {
+    const status = live ? 'live' : 'draft'
+    setFlows((fs) => fs?.map((x) => (x.id === f.id ? { ...x, status } : x)) ?? fs)
+    try {
+      await api.post(`/api/flows/${f.id}/${live ? 'publish' : 'unpublish'}`)
+      toast.addToast(live ? t('flows_published') : t('flows_unpublished'), { preset: live ? 'success' : 'default' })
+    } catch (err) {
+      setFlows((fs) => fs?.map((x) => (x.id === f.id ? { ...x, status: f.status } : x)) ?? fs)
+      toast.addToast(`${live ? t('flows_publish_failed') : t('flows_unpublish_failed')}\n${errorMessage(err)}`, { preset: 'error' })
+    }
+  }
+
+  const remove = async (f: FlowListItem) => {
+    try {
+      await api.delete(`/api/flows/${f.id}`)
+      setFlows((fs) => fs?.filter((x) => x.id !== f.id) ?? fs)
+      toast.addToast(t('flows_deleted'), { preset: 'success' })
+    } catch (err) {
+      toast.addToast(errorMessage(err), { preset: 'error' })
+    }
+  }
+
+  const triggers = (f: FlowListItem) =>
+    f.kind === 'sequence' ? t('flows_trigger_sequence') : f.definition.triggers.map((tr) => triggerSummary(tr, t)).join(' / ') || '—'
 
   const columns: Column<FlowListItem>[] = [
     {
       key: 'name',
       header: t('editor_name'),
       render: (f) => (
-        <>
-          <Text typo="14" bold color="txt-black-darkest" className="fl-name">
+        <div className="fl-name">
+          <Text typo="14" bold color="txt-black-darkest" truncated title={f.name} className="fl-name__text">
             {f.name}
           </Text>
           {f.kind === 'sequence' && (
-            <span className="fl-inline fl-kind">
-              <Badge size="s" variant="purple">
-                {t('flows_kind_sequence')}
-              </Badge>
-            </span>
+            <Badge size="xs" variant="purple" icon={CalendarIcon} className="fl-name__kind">
+              {t('flows_kind_sequence')}
+            </Badge>
           )}
-        </>
+        </div>
       ),
     },
-    { key: 'channel', header: t('editor_channel'), nowrap: true, render: (f) => (
-        <span className="fl-inline">
-          <ChannelBadge channel={f.channel} />
-        </span>
-      ),
-    },
-    {
-      key: 'triggers',
-      header: t('editor_triggers'),
-      hideOnMobile: true,
-      render: (f) => (
-        <Text typo="13" color="txt-black-darker">
-          {f.definition.triggers.map((tr) => triggerLabel(tr.type)).join(', ') || '—'}
-        </Text>
-      ),
-    },
-    { key: 'runs', header: t('flows_runs'), numeric: true, nowrap: true, hideOnMobile: true, render: (f) => fmt(f.runs30d) },
     {
       key: 'status',
       header: t('flows_status'),
       nowrap: true,
       render: (f) => (
-        <span className="fl-inline">{f.status === 'live' ? (
-          <Badge size="s" variant="green">
-            {t('status_live')}
-          </Badge>
-        ) : (
-          <Badge size="s" variant="monochrome-light">
-            {t('status_draft')}
-          </Badge>
-        )}</span>
+        // The switch toggles publishing; clicking it must not open the editor.
+        <label className="fl-live" onClick={(e) => e.stopPropagation()}>
+          <Switch size="s" checked={f.status === 'live'} onCheckedChange={(v) => void setLive(f, v)} aria-label={`${t('editor_publish')}: ${f.name}`} />
+          <Text typo="13" color={f.status === 'live' ? 'bgtxt-green-dark' : 'txt-black-dark'}>
+            {f.status === 'live' ? t('status_live') : t('status_draft')}
+          </Text>
+        </label>
       ),
+    },
+    {
+      key: 'triggers',
+      header: t('flows_triggers'),
+      hideOnMobile: true,
+      render: (f) => (
+        <Text typo="13" color="txt-black-darker" truncated title={triggers(f)} className="fl-triggers">
+          {triggers(f)}
+        </Text>
+      ),
+    },
+    {
+      key: 'channel',
+      header: t('editor_channel'),
+      nowrap: true,
+      render: (f) => (
+        <span className="fl-inline">
+          <ChannelBadge channel={f.channel} size="xs" />
+        </span>
+      ),
+    },
+    { key: 'runs', header: t('flows_runs'), numeric: true, nowrap: true, hideOnMobile: true, render: (f) => fmt(f.runs30d) },
+    {
+      key: 'updated',
+      header: t('flows_updated'),
+      nowrap: true,
+      hideOnMobile: true,
+      render: (f) => (
+        <Text typo="13" color="txt-black-darker">
+          <RelativeTime value={f.updatedAt} />
+        </Text>
+      ),
+    },
+    {
+      key: 'menu',
+      header: <span className="visually-hidden">{t('flows_menu')}</span>,
+      width: 48,
+      render: (f) => <RowMenu label={`${t('flows_menu')}: ${f.name}`} onDelete={() => setPendingDelete(f)} />,
     },
   ]
 
   const header = (
     <PageHeader
       title={t('flows_title')}
+      description={
+        flows &&
+        flows.length > 0 && (
+          <Text typo="13" color="txt-black-dark" className="tabular">
+            {t('contacts_total').replace('{n}', fmt(flows.length))}
+          </Text>
+        )
+      }
       actions={
         <>
           <Button
@@ -138,8 +238,8 @@ export default function Flows() {
             colorVariant="monochrome-dark"
             leftContent={TemplateIcon}
             text={t('flows_from_template')}
-            aria-expanded={showTemplates}
-            onClick={() => setShowTemplates((s) => !s)}
+            aria-haspopup="dialog"
+            onClick={() => setShowTemplates(true)}
           />
           <Button
             styleVariant="secondary"
@@ -162,92 +262,88 @@ export default function Flows() {
     />
   )
 
-  const picker = showTemplates && (
-    <Card
-      title={t('flows_templates')}
-      actions={
-        <Button
-          size="s"
-          styleVariant="tertiary"
-          colorVariant="monochrome-dark"
-          leftContent={CancelIcon}
-          aria-label={t('close')}
-          onClick={() => setShowTemplates(false)}
-        />
-      }
-    >
-      {templates ? (
-        <div className="fl-templates">
-          {templates.map((tp) => (
-            <div className="fl-template" key={tp.slug}>
-              <div className="fl-template__head">
-                <Text as="h3" typo="14" bold color="txt-black-darkest" className="fl-template__name">
-                  {tp.name[lang]}
-                </Text>
-                <span className="fl-inline">
-                  <ChannelBadge channel={tp.channel} />
-                </span>
-              </div>
-              <Text as="p" typo="13" color="txt-black-darker" className="fl-template__desc">
-                {tp.description[lang]}
-              </Text>
-              <div>
-                <Button
-                  size="s"
-                  text={t('create')}
-                  loading={creating === tp.slug}
-                  disabled={creating !== null && creating !== tp.slug}
-                  onClick={() => void create(tp.slug, { template: tp.slug })}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : templatesError !== null ? (
-        <ErrorBanner error={templatesError} onRetry={() => void loadTemplates()} />
-      ) : (
-        <LoadingState compact />
-      )}
-    </Card>
+  const templatesModal = (
+    <Modal show={showTemplates} onHide={() => setShowTemplates(false)}>
+      <ModalContent width="min(880px, 100vw)">
+        <ModalHeader className="modal-head" title={t('flows_templates')} description={t('flows_templates_desc')} />
+        <ModalBody>
+          {templates ? (
+            <ul className="fl-templates">
+              {templates.map((tp) => (
+                <li className="fl-template" key={tp.slug}>
+                  <div className="fl-template__head">
+                    <Text as="h3" typo="14" bold color="txt-black-darkest" className="fl-template__name">
+                      {tp.name[lang]}
+                    </Text>
+                    <span className="fl-inline">
+                      <ChannelBadge channel={tp.channel} size="xs" />
+                    </span>
+                  </div>
+                  <Text as="p" typo="13" color="txt-black-darker" className="fl-template__desc">
+                    {tp.description[lang]}
+                  </Text>
+                  <div className="fl-template__foot">
+                    <Button
+                      size="s"
+                      styleVariant="secondary"
+                      colorVariant="blue"
+                      text={t('flows_use_template')}
+                      aria-label={`${t('flows_use_template')}: ${tp.name[lang]}`}
+                      loading={creating === tp.slug}
+                      disabled={creating !== null && creating !== tp.slug}
+                      onClick={() => void create(tp.slug, { template: tp.slug })}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : templatesError !== null ? (
+            <ErrorBanner error={templatesError} onRetry={() => void loadTemplates()} />
+          ) : (
+            <LoadingState compact />
+          )}
+        </ModalBody>
+        <ModalCloseButton />
+      </ModalContent>
+    </Modal>
   )
-
-  if (!flows) {
-    return (
-      <div className="stack">
-        {header}
-        {createError !== null && <ErrorBanner error={createError} />}
-        {picker}
-        {loadError !== null ? <ErrorBanner error={loadError} onRetry={() => void loadFlows()} /> : <LoadingState />}
-      </div>
-    )
-  }
 
   return (
     <div className="stack">
       {header}
       {createError !== null && <ErrorBanner error={createError} />}
       {loadError !== null && <ErrorBanner error={loadError} onRetry={() => void loadFlows()} />}
-      {picker}
-      <Card flush>
-        <DataTable
-          columns={columns}
-          rows={flows}
-          rowKey={(f) => f.id}
-          onRowClick={(f) => navigate(`/flows/${f.id}`)}
-          caption={t('flows_title')}
-          empty={
-            <EmptyState
-              icon={FlowIcon}
-              title={t('flows_empty')}
-              action={
-                !showTemplates && (
-                  <Button leftContent={TemplateIcon} text={t('flows_from_template')} onClick={() => setShowTemplates(true)} />
-                )
-              }
-            />
-          }
-        />
-      </Card>
+      {flows ? (
+        <Card flush className="fl-card">
+          <DataTable
+            columns={columns}
+            rows={flows}
+            rowKey={(f) => f.id}
+            onRowClick={(f) => navigate(`/flows/${f.id}`)}
+            caption={t('flows_title')}
+            empty={
+              <EmptyState
+                icon={FlowIcon}
+                title={t('flows_empty')}
+                action={<Button styleVariant="secondary" colorVariant="blue" leftContent={TemplateIcon} text={t('flows_from_template')} onClick={() => setShowTemplates(true)} />}
+              />
+            }
+          />
+        </Card>
+      ) : (
+        loadError === null && <LoadingState />
+      )}
+      {templatesModal}
+      <ConfirmAction
+        show={pendingDelete !== null}
+        onHide={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) void remove(pendingDelete)
+        }}
+        title={t('flows_delete_title')}
+        description={pendingDelete ? t('flows_delete_desc').replace('{name}', pendingDelete.name) : undefined}
+        confirmText={t('delete')}
+      />
     </div>
   )
 }

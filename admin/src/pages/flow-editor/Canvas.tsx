@@ -38,7 +38,7 @@ import type { FlowDefinition, Step, Trigger } from '@shared/flows/types'
 import { useT, type Key } from '../../lib/i18n'
 import { useTheme } from '../../lib/theme'
 import { START, autoLayout, edgesOf, outlets, setPointer } from './graph'
-import type { StepType, TFn } from './model'
+import { triggerSummary, type StepType, type TFn } from './model'
 
 type StartNode = Node<{ triggers: Trigger[]; isSequence: boolean }, 'start'>
 type StepNode = Node<{ step: Step; isEntry: boolean; hasError: boolean }, 'step'>
@@ -73,11 +73,6 @@ function summary(step: Step, t: TFn): string {
     case 'request': return `${step.method} ${step.url}`
     case 'ai': return step.instructions
   }
-}
-
-function triggerSummary(tr: Trigger, t: TFn): string {
-  const detail = tr.type === 'keyword' || tr.type === 'comment' ? tr.keywords?.join(', ') : tr.type === 'ref' ? tr.ref : tr.type === 'postback' ? tr.payload : tr.type === 'intent' ? tr.description : ''
-  return [t(`trigger_${tr.type}` as Key), detail].filter(Boolean).join(': ')
 }
 
 const nodeClass = (selected: boolean, error = false) => ['fe-node', selected ? 'is-selected' : '', error ? 'is-error' : ''].filter(Boolean).join(' ')

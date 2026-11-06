@@ -1,4 +1,4 @@
-import type { useT } from '../../lib/i18n'
+import type { Key, useT } from '../../lib/i18n'
 import type { Action, AttachmentDef, ConditionRule, FlowRecord, Step, Trigger } from '@shared/flows/types'
 import type { Channel, OutboundMessage } from '@shared/channels/types'
 import { outlets, setPointer } from './graph'
@@ -118,4 +118,10 @@ export function clearRefs(s: Step, removedId: string): Step {
 export function stepSummary(s: Step): string {
   const text = 'text' in s ? s.text : 'url' in s ? s.url : 'instructions' in s ? s.instructions : ''
   return text.length > 20 ? `${text.slice(0, 20)}…` : text
+}
+
+/** "キーワードを含むメッセージ: 予約, 営業時間" — trigger label plus its main detail (canvas start node, flows list). */
+export function triggerSummary(tr: Trigger, t: TFn): string {
+  const detail = tr.type === 'keyword' || tr.type === 'comment' ? tr.keywords?.join(', ') : tr.type === 'ref' ? tr.ref : tr.type === 'postback' ? tr.payload : tr.type === 'intent' ? tr.description : ''
+  return [t(`trigger_${tr.type}` as Key), detail].filter(Boolean).join(': ')
 }

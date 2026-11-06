@@ -1,4 +1,4 @@
-import { Badge, type BadgeSize, type BadgeVariant } from '@channel.io/bezier-react'
+import { Badge, Icon, type BadgeSize, type BadgeVariant } from '@channel.io/bezier-react'
 import { ChatBubbleFilledIcon, InstagramIcon, LineIcon, type BezierIcon } from '@channel.io/bezier-icons'
 import { useT, type Key } from '../lib/i18n'
 
@@ -24,4 +24,16 @@ export function ChannelBadge({ channel, size = 's' }: { channel: string; size?: 
 export function useChannelLabel() {
   const t = useT()
   return (channel: string) => (CHANNELS[channel] ? t(CHANNELS[channel].key) : channel)
+}
+
+/** Round channel mark for the corner of an avatar; labelled for screen readers. Nothing for unknown channels. */
+export function ChannelDot({ channel }: { channel: string }) {
+  const t = useT()
+  const c = CHANNELS[channel]
+  if (!c) return null
+  return (
+    <span className={`channel-dot channel-dot--${channel}`} role="img" aria-label={t(c.key)} title={t(c.key)}>
+      <Icon source={c.icon} size="xxs" />
+    </span>
+  )
 }
