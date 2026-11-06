@@ -33,7 +33,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 
 | テーブル | 内容 |
 | --- | --- |
-| `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み)、`profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID) |
+| `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み)、`profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID)、`ai` (AI プロバイダー・モデル・Base URL と API キー (暗号化済み)) |
 | `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数 |
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
@@ -139,6 +139,16 @@ payload に自動化とステップの情報が入っているので、**セッ�
 
 Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:meta`) を共有し、ページにリンクされた Instagram アカウントがあれば Instagram も有効になります。
 
+## AI プロバイダー (`src/ai.ts`)
+
+設定行 `ai` (管理画面の「設定」→「AI 応答 (LLM)」) で選んだプロバイダーを `complete(cfg, req, env.AI)` で呼びます。
+
+- `anthropic`: `POST https://api.anthropic.com/v1/messages` (既定モデル `claude-sonnet-5-5`)。
+- `openai`: `POST {Base URL}/chat/completions` (Base URL の既定は `https://api.openai.com/v1`。OpenAI 互換 API ならどれでも可。モデルは必須)。
+- `workers_ai`: Worker の `AI` バインディング (`wrangler.jsonc` の `"ai": { "binding": "AI" }`、既定モデル `@cf/meta/llama-3.3-70b-instruct-fp8-fast`)。バインディングがない古いデプロイでは `workers_ai_binding_missing`、`wrangler dev --local` (`npm run dev`) では「Binding AI needs to be run remotely」のエラーになります。
+
+`lazyAi(env, db)` は初回の呼び出しで設定を読み、未設定なら `ai_not_configured` で失敗します。`parseAiReply` (`{"reply","done"}`)、`intentPrompt` / `parseIntent` / `classifyIntent` (意図の分類) は純粋関数で、JSON の前後の文章やコードフェンスを許容します。管理用 API: `PUT` / `DELETE /api/settings/ai`、`POST /api/settings/ai/test` (API キーは返しません)。
+
 ## 定期処理 (`src/scheduler.ts`)
 
 Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/run` で手動実行も可能)。
@@ -156,7 +166,7 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 ## セキュリティモデル
 
 - **デプロイ時に秘密情報は不要**: セッション署名鍵、暗号化鍵、Meta 検証トークンは、初回に必要になった時点でランダムに生成され、あなたの KV に保存されます (`src/settings.ts` の `getOrCreateSecret`)。`.dev.vars` も通常は不要です。
-- **チャネルのトークンは暗号化して D1 に保存**: LINE のチャネルシークレット・アクセストークン、Meta の app secret・ページアクセストークンは、KV にある鍵を使った **AES-GCM** で暗号化して `settings` テーブルに保存します。D1 のデータだけが漏れてもトークンは読めません。
+- **チャネルのトークンは暗号化して D1 に保存**: LINE のチャネルシークレット・アクセストークン、Meta の app secret・ページアクセストークン、AI プロバイダーの API キーは、KV にある鍵を使った **AES-GCM** で暗号化して `settings` テーブルに保存します。D1 のデータだけが漏れてもトークンは読めません。
 - **管理者パスワード**: **PBKDF2-SHA256 (100,000 回、ランダムなソルト)** でハッシュ化して KV に保存します。8 文字以上が必要です。
 - **初回セットアップ**: 管理者パスワードが未設定のとき、最初にアクセスした人がパスワードを設定できます。デプロイ後すぐに設定してください。
 - **セッション**: ログインすると、HMAC-SHA256 で署名された有効期限 30 日のトークンが Cookie (`sokuto_session`、HttpOnly、SameSite=Lax、HTTPS では Secure) に入ります。サーバー側にセッションの一覧は持ちません。ログアウトは Cookie を消すだけなので、すべてのセッションを無効にしたいときは KV の `secret:session_secret` を削除します (次のアクセスで新しい鍵が作られます)。
@@ -171,9 +181,10 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
-- **Data**: D1 tables `settings` (incl. `profile:meta` and `richmenu:line`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
+- **Data**: D1 tables `settings` (incl. `profile:meta`, `richmenu:line` and `ai`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
 - **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 9 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
+- **AI providers** (`src/ai.ts`): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db)` loads the `ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped), and prunes dedupe records. Delay resumes do not check the 24 h window.
-- **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.
+- **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

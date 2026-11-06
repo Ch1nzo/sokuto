@@ -8,14 +8,17 @@ import {
   configuredChannels,
   deleteChannelConfig,
   deleteSetting,
+  getAiConfig,
   getChannelConfig,
   getGeneral,
   getOrCreateSecret,
   getSetting,
   lineRichMenuSchema,
   metaProfileSchema,
+  putAiConfig,
   putChannelConfig,
   putSetting,
+  type AiConfig,
   type GeneralSettings,
   type LineRichMenu,
   type MetaProfile,
@@ -42,6 +45,7 @@ import { simulateFlow, type SimulatedInput } from '../flows/simulate'
 import { broadcastReach, runScheduledTasks } from '../scheduler'
 import { loadSegment, matchesSegment, parseSegment, tagsByContact } from '../segments'
 import { randomToken, sha256Hex } from '../crypto'
+import { complete } from '../ai'
 
 export const apiRoutes = new Hono<AppEnv>()
 
@@ -657,10 +661,15 @@ apiRoutes.get('/reports', async (c) => {
 })
 
 /* ---------- Settings ---------- */
+/** AI settings without the API key. */
+const aiInfo = (cfg: AiConfig | null) => (cfg ? { configured: true, provider: cfg.provider, model: cfg.model, baseUrl: cfg.baseUrl } : { configured: false })
+
 apiRoutes.get('/settings', async (c) => {
-  const general = await getGeneral(db(c.env))
+  const d = db(c.env)
+  const general = await getGeneral(d)
   const mcpConfigured = (await c.env.KV.get('mcp:token_hash')) !== null
-  return c.json({ general, mcp: { configured: mcpConfigured, url: `${baseUrl(c.req.url)}/mcp` } })
+  const ai = aiInfo(await getSetting<AiConfig>(d, 'ai'))
+  return c.json({ general, mcp: { configured: mcpConfigured, url: `${baseUrl(c.req.url)}/mcp` }, ai })
 })
 
 apiRoutes.put('/settings', async (c) => {
@@ -695,6 +704,42 @@ apiRoutes.delete('/settings/mcp', async (c) => {
   if (c.get('auth') !== 'session') return c.json({ error: 'session_required' }, 403)
   await c.env.KV.delete('mcp:token_hash')
   return c.json({ ok: true })
+})
+
+apiRoutes.put('/settings/ai', async (c) => {
+  const d = db(c.env)
+  const body = await c.req.json<Partial<Record<keyof AiConfig, unknown>>>()
+  const provider = body.provider
+  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'workers_ai') return c.json({ error: 'invalid_provider' }, 400)
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+  const model = str(body.model)
+  const baseUrl = provider === 'openai' ? str(body.baseUrl) : ''
+  const current = await getAiConfig(d, c.env.KV)
+  // Keep the saved key only for the same endpoint, so changing the Base URL cannot send it elsewhere.
+  const sameEndpoint = current?.provider === provider && (current.baseUrl ?? '') === baseUrl
+  const apiKey = provider === 'workers_ai' ? '' : str(body.apiKey) || (sameEndpoint ? (current?.apiKey ?? '') : '')
+  if (provider !== 'workers_ai' && !apiKey) return c.json({ error: 'missing_api_key' }, 400)
+  if (provider === 'openai' && !model) return c.json({ error: 'missing_model' }, 400)
+  const cfg: AiConfig = { provider, ...(apiKey && { apiKey }), ...(model && { model }), ...(baseUrl && { baseUrl }) }
+  await putAiConfig(d, c.env.KV, cfg)
+  return c.json({ ai: aiInfo(cfg) })
+})
+
+apiRoutes.delete('/settings/ai', async (c) => {
+  await deleteSetting(db(c.env), 'ai')
+  return c.json({ ok: true })
+})
+
+apiRoutes.post('/settings/ai/test', async (c) => {
+  const cfg = await getAiConfig(db(c.env), c.env.KV)
+  if (!cfg) return c.json({ ok: false, error: 'ai_not_configured' })
+  try {
+    // Default max_tokens: Claude models may think first, and a tiny cap could leave no text.
+    const reply = await complete(cfg, { system: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }] }, c.env.AI)
+    return c.json({ ok: true, reply })
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+  }
 })
 
 /* ---------- Maintenance ---------- */

@@ -30,7 +30,18 @@ type General = {
   botFields: Record<string, string>
 }
 
-type SettingsResponse = { general: General; mcp: { configured: boolean; url: string } }
+type AiProvider = 'anthropic' | 'openai' | 'workers_ai'
+type AiInfo = { configured: boolean; provider?: AiProvider; model?: string; baseUrl?: string }
+
+type SettingsResponse = { general: General; mcp: { configured: boolean; url: string }; ai: AiInfo }
+
+type AiForm = { provider: AiProvider; apiKey: string; model: string; baseUrl: string }
+
+const AI_PROVIDERS: AiProvider[] = ['anthropic', 'openai', 'workers_ai']
+/** Mirrors DEFAULT_MODEL in src/ai.ts. */
+const AI_DEFAULT_MODEL: Record<AiProvider, string> = { anthropic: 'claude-sonnet-5-5', openai: '', workers_ai: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' }
+
+const toAiForm = (ai: AiInfo): AiForm => ({ provider: ai.provider ?? 'anthropic', apiKey: '', model: ai.model ?? '', baseUrl: ai.baseUrl ?? '' })
 
 type Form = { botName: string; language: Lang; timezone: string; paused: boolean; keywords: string; handoffReply: string }
 
@@ -120,6 +131,10 @@ export default function Settings() {
   const [pw, setPw] = useState({ current: '', password: '' })
   const [pwBusy, setPwBusy] = useState(false)
   const [pwError, setPwError] = useState<string | null>(null)
+  const [aiForm, setAiForm] = useState<AiForm>(toAiForm({ configured: false }))
+  const [aiBusy, setAiBusy] = useState<'save' | 'test' | 'remove' | null>(null)
+  const [aiError, setAiError] = useState<unknown>(null)
+  const [aiConfirm, setAiConfirm] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +142,7 @@ export default function Settings() {
       setData(r)
       setForm(toForm(r.general))
       setBotRows(Object.entries(r.general.botFields ?? {}))
+      setAiForm(toAiForm(r.ai))
       setLoadError(null)
     } catch (err) {
       setLoadError(err)
@@ -230,6 +246,51 @@ export default function Settings() {
     setMcpConfirm(kind)
   }
 
+  const saveAi = async (e: FormEvent) => {
+    e.preventDefault()
+    setAiBusy('save')
+    setAiError(null)
+    try {
+      const r = await api.put<{ ai: AiInfo }>('/api/settings/ai', aiForm)
+      setData({ ...data, ai: r.ai })
+      setAiForm(toAiForm(r.ai))
+      toast.addToast(t('saved'), { preset: 'success' })
+    } catch (err) {
+      setAiError(err)
+    } finally {
+      setAiBusy(null)
+    }
+  }
+
+  const testAi = async () => {
+    setAiBusy('test')
+    setAiError(null)
+    try {
+      const r = await api.post<{ ok: boolean; reply?: string; error?: string }>('/api/settings/ai/test')
+      if (r.ok) toast.addToast(t('settings_ai_test_ok').replace('{n}', r.reply ?? ''), { preset: 'success' })
+      else setAiError(r.error ?? 'error')
+    } catch (err) {
+      setAiError(err)
+    } finally {
+      setAiBusy(null)
+    }
+  }
+
+  const removeAi = async () => {
+    setAiBusy('remove')
+    setAiError(null)
+    try {
+      await api.delete('/api/settings/ai')
+      setData({ ...data, ai: { configured: false } })
+      setAiForm(toAiForm({ configured: false }))
+      toast.addToast(t('settings_ai_not_configured'), { preset: 'success' })
+    } catch (err) {
+      setAiError(err)
+    } finally {
+      setAiBusy(null)
+    }
+  }
+
   const changePassword = async (e: FormEvent) => {
     e.preventDefault()
     setPwBusy(true)
@@ -253,6 +314,9 @@ export default function Settings() {
     : ''
   const cliSnippet = token ? `claude mcp add --transport http sokuto ${mcpUrl} --header "Authorization: Bearer ${token.token}"` : ''
   const pwTooShort = pw.password.length > 0 && pw.password.length < 8
+  // The server keeps the saved key only for the same provider and Base URL.
+  const aiKeySaved = data.ai.configured && data.ai.provider === aiForm.provider && (data.ai.baseUrl ?? '') === aiForm.baseUrl.trim()
+  const aiDefaultModel = AI_DEFAULT_MODEL[aiForm.provider]
 
   return (
     <div className="stack">
@@ -408,6 +472,90 @@ export default function Settings() {
         </VStack>
       </Card>
 
+      <Card
+        title={t('settings_ai')}
+        actions={
+          data.ai.configured ? (
+            <Badge size="m" variant="green" icon={CheckCircleFilledIcon}>
+              {t('settings_ai_configured')}
+            </Badge>
+          ) : (
+            <Badge size="m" variant="monochrome-light">
+              {t('settings_ai_not_configured')}
+            </Badge>
+          )
+        }
+      >
+        <VStack as="form" spacing={16} onSubmit={saveAi}>
+          <Text as="p" typo="14" color="txt-black-darker">
+            {t('settings_ai_lead')}
+          </Text>
+          <div className="st-form-row">
+            <SelectField<AiProvider>
+              label={t('settings_ai_provider')}
+              value={aiForm.provider}
+              options={AI_PROVIDERS.map((p) => ({ value: p, label: t(`ai_provider_${p}` as const) }))}
+              onChange={(v) => setAiForm({ ...aiForm, provider: v })}
+            />
+            <TextInputField
+              label={t('settings_ai_model')}
+              helperText={aiDefaultModel || undefined}
+              required={aiForm.provider === 'openai'}
+              value={aiForm.model}
+              onChange={(e) => setAiForm({ ...aiForm, model: e.target.value })}
+            />
+          </div>
+          {aiForm.provider !== 'workers_ai' && (
+            <div className="st-form-row">
+              <TextInputField
+                label={t('settings_ai_key')}
+                type="password"
+                autoComplete="off"
+                placeholder={aiKeySaved ? t('settings_ai_key_saved') : undefined}
+                required={!aiKeySaved}
+                value={aiForm.apiKey}
+                onChange={(e) => setAiForm({ ...aiForm, apiKey: e.target.value })}
+              />
+              {aiForm.provider === 'openai' && (
+                <TextInputField
+                  label={t('settings_ai_base_url')}
+                  type="url"
+                  placeholder="https://api.openai.com/v1"
+                  value={aiForm.baseUrl}
+                  onChange={(e) => setAiForm({ ...aiForm, baseUrl: e.target.value })}
+                />
+              )}
+            </div>
+          )}
+          <Banner className="st-wrap" variant="blue" icon={InfoFilledIcon} content={t('settings_ai_cost')} />
+          {aiError !== null && <ErrorBanner error={aiError} />}
+          <div className="st-actions">
+            <Button type="submit" text={t('save')} loading={aiBusy === 'save'} disabled={aiBusy !== null && aiBusy !== 'save'} />
+            {data.ai.configured && (
+              <>
+                <Button
+                  styleVariant="secondary"
+                  colorVariant="monochrome-dark"
+                  text={t('settings_ai_test')}
+                  loading={aiBusy === 'test'}
+                  disabled={aiBusy !== null && aiBusy !== 'test'}
+                  onClick={() => void testAi()}
+                />
+                <Button
+                  leftContent={TrashIcon}
+                  styleVariant="secondary"
+                  colorVariant="red"
+                  text={t('settings_ai_remove')}
+                  loading={aiBusy === 'remove'}
+                  disabled={aiBusy !== null && aiBusy !== 'remove'}
+                  onClick={() => setAiConfirm(true)}
+                />
+              </>
+            )}
+          </div>
+        </VStack>
+      </Card>
+
       <Card title={t('settings_password')}>
         <VStack as="form" spacing={16} onSubmit={changePassword}>
           {/* Hidden username helps password managers associate the credentials. */}
@@ -448,6 +596,13 @@ export default function Settings() {
         confirmText={mcpConfirmKind === 'rotate' ? t('settings_mcp_regenerate') : t('settings_mcp_revoke')}
         destructive={mcpConfirmKind === 'revoke'}
         onConfirm={() => void (mcpConfirmKind === 'rotate' ? rotate() : revoke())}
+      />
+      <ConfirmAction
+        show={aiConfirm}
+        onHide={() => setAiConfirm(false)}
+        title={`${t('settings_ai_remove')}?`}
+        confirmText={t('settings_ai_remove')}
+        onConfirm={() => void removeAi()}
       />
     </div>
   )

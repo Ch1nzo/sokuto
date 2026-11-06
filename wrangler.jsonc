@@ -23,6 +23,7 @@
   "kv_namespaces": [
     { "binding": "KV", "id": "00000000000000000000000000000000" }
   ],
+  "ai": { "binding": "AI" },
   "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "META_GRAPH_VERSION": "v25.0"

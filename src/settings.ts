@@ -98,7 +98,10 @@ export const lineRichMenuSchema = z
   .refine((m) => m.cells.length === m.layout, { message: 'cells must match the layout', path: ['cells'] })
 export type LineRichMenu = z.infer<typeof lineRichMenuSchema>
 
-const SECRET_FIELDS = new Set(['channelSecret', 'channelAccessToken', 'appSecret', 'pageAccessToken'])
+/** AI provider for the AI reply step and intent triggers (`settings` row `ai`, `apiKey` encrypted). */
+export type AiConfig = { provider: 'anthropic' | 'openai' | 'workers_ai'; apiKey?: string; model?: string; baseUrl?: string }
+
+const SECRET_FIELDS = new Set(['channelSecret', 'channelAccessToken', 'appSecret', 'pageAccessToken', 'apiKey'])
 
 export async function getSetting<T>(db: Db, key: string): Promise<T | null> {
   const row = await db.select().from(schema.settings).where(eq(schema.settings.key, key)).get()
@@ -135,18 +138,29 @@ async function transform(obj: Record<string, unknown>, fn: (v: string) => Promis
   return out
 }
 
-export async function getChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, name: K): Promise<ChannelConfigs[K] | null> {
-  const stored = await getSetting<Record<string, unknown>>(db, `channel:${name}`)
+/** Settings row whose SECRET_FIELDS are AES-GCM encrypted with the KV `enc_key`. */
+export async function getSecretSetting<T>(db: Db, kv: KVNamespace, key: string): Promise<T | null> {
+  const stored = await getSetting<Record<string, unknown>>(db, key)
   if (!stored) return null
-  const key = await getOrCreateSecret(kv, 'enc_key')
-  return (await transform(stored, (v) => decryptString(key, v))) as ChannelConfigs[K]
+  const enc = await getOrCreateSecret(kv, 'enc_key')
+  return (await transform(stored, (v) => decryptString(enc, v))) as T
+}
+
+export async function putSecretSetting(db: Db, kv: KVNamespace, key: string, value: object) {
+  const enc = await getOrCreateSecret(kv, 'enc_key')
+  await putSetting(db, key, await transform(value as Record<string, unknown>, (v) => encryptString(enc, v)))
+}
+
+export async function getChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, name: K): Promise<ChannelConfigs[K] | null> {
+  return getSecretSetting<ChannelConfigs[K]>(db, kv, `channel:${name}`)
 }
 
 export async function putChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, name: K, value: NonNullable<ChannelConfigs[K]>) {
-  const key = await getOrCreateSecret(kv, 'enc_key')
-  const encrypted = await transform(value as Record<string, unknown>, (v) => encryptString(key, v))
-  await putSetting(db, `channel:${name}`, encrypted)
+  await putSecretSetting(db, kv, `channel:${name}`, value)
 }
+
+export const getAiConfig = (db: Db, kv: KVNamespace) => getSecretSetting<AiConfig>(db, kv, 'ai')
+export const putAiConfig = (db: Db, kv: KVNamespace, cfg: AiConfig) => putSecretSetting(db, kv, 'ai', cfg)
 
 export async function deleteChannelConfig(db: Db, name: keyof ChannelConfigs) {
   await db.delete(schema.settings).where(eq(schema.settings.key, `channel:${name}`))
