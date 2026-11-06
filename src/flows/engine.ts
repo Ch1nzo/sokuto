@@ -25,6 +25,8 @@ export type RunContext = {
   dryRunSession?: SessionRow | null
   dryRunTags?: Set<string>
   dryRunNotifications?: string[]
+  /** Dry runs record what they skipped (external requests) here. */
+  dryRunNotes?: string[]
   /** Bot variables from Settings, rendered as {{bot.<key>}}. */
   botFields?: Record<string, string>
   /** IANA time zone of the bot (Settings), used by time-based conditions. */
@@ -245,6 +247,47 @@ function questionQuickReplies(step: Step & { type: 'question' }): OutboundMessag
   return qr.length > 0 ? qr : undefined
 }
 
+/** Value at a dotted path ("data.price", "items.0.name"; "" = everything): missing → '', objects → JSON. */
+export function pickPath(value: unknown, path: string): string {
+  let v = value
+  for (const k of path.split('.').filter(Boolean)) v = v !== null && typeof v === 'object' && Object.hasOwn(v, k) ? (v as Record<string, unknown>)[k] : undefined
+  if (v === undefined || v === null) return ''
+  return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
+
+// ponytail: no host allowlist; single-admin tool and Workers cannot reach private networks
+/** Calls the step's API and saves values from the response; failures are logged and the flow goes on. */
+async function performRequest(ctx: RunContext, step: Step & { type: 'request' }) {
+  const url = render(ctx, step.url, encodeURIComponent)
+  if (ctx.dryRun) {
+    (ctx.dryRunNotes ??= []).push(`request ${step.id}: skipped ${step.method} ${url}`)
+    return
+  }
+  try {
+    if (!url.startsWith('https://')) throw new Error('url must start with https://')
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(step.headers ?? {})) headers[k] = render(ctx, v)
+    let body: string | undefined
+    if (step.method === 'POST') {
+      const ct = Object.keys(headers).find((k) => k.toLowerCase() === 'content-type') ?? 'Content-Type'
+      headers[ct] ??= 'application/json'
+      body = render(ctx, step.body ?? '', /json/i.test(headers[ct]) ? (v) => JSON.stringify(v).slice(1, -1) : undefined)
+    }
+    const res = await fetch(url, { method: step.method, headers, body, signal: AbortSignal.timeout(Math.min(step.timeoutMs ?? 8000, 15000)) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    let data: unknown = text
+    try {
+      data = JSON.parse(text)
+    } catch {
+      // not JSON: paths read the plain text ("" = whole body)
+    }
+    for (const s of step.save ?? []) ctx.contact = await setField(ctx.db, ctx.contact, s.field, pickPath(data, s.path).slice(0, 2000))
+  } catch (e) {
+    await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { url, error: String(e) } })
+  }
+}
+
 export async function performActions(ctx: RunContext, actions: Array<{ type: string } & Record<string, unknown>>) {
   for (const a of actions) {
     if (ctx.dryRun) {
@@ -398,6 +441,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         current = step.next ?? null
         break
       }
+      case 'request':
+        await performRequest(ctx, step)
+        current = step.next ?? null
+        break
     }
   }
   await endSession(ctx)

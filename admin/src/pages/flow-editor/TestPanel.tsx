@@ -297,6 +297,24 @@ export function TestPanel({ flowId, definition, kind, defaultChannel, onClose, t
                 </ul>
               )}
             </VStack>
+
+            {result.notes.length > 0 && (
+              <VStack spacing={4}>
+                <Text typo="12" bold color="txt-black-darker">
+                  {t('test_result_notes')}
+                </Text>
+                <ul className="fe-notes">
+                  {result.notes.map((n, i) => (
+                    <li key={i}>
+                      <Icon source={ArrowRightUpSmallIcon} size="xs" color="txt-black-dark" />
+                      <Text typo="13" color="txt-black-darkest" className="fe-wrap">
+                        {n}
+                      </Text>
+                    </li>
+                  ))}
+                </ul>
+              </VStack>
+            )}
           </VStack>
         </>
       )}

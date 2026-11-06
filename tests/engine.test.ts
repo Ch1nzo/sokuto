@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buttonPayload, flattenButtons, flowPayload, matchTrigger, parseButtonPayload, parseFlowPayload, renderText, startFlow } from '../src/flows/engine'
+import { buttonPayload, flattenButtons, flowPayload, matchTrigger, parseButtonPayload, parseFlowPayload, pickPath, renderText, startFlow } from '../src/flows/engine'
 import { RecordingAdapter } from '../src/channels/adapter'
 import type { Db } from '../src/db'
 import type { FlowRecord, Trigger } from '../src/flows/types'
@@ -196,6 +196,35 @@ describe('renderText', () => {
     const p = contact({ fields: JSON.stringify({ phone: '090' }) })
     expect(renderText('{{bot.hours}} / {bot.hours} / {{bot.none}} / {{phone}}', p, undefined, { hours: '10-19' })).toBe('10-19 / 10-19 / {{bot.none}} / 090')
     expect(renderText('{{bot.open-days}}', p, undefined, { 'open-days': 'Mon-Fri' })).toBe('Mon-Fri')
+  })
+
+  it('escapes substituted values with encode, leaving the template alone', () => {
+    const p = contact({ fields: JSON.stringify({ q: 'a b&c/d', quote: 'say "hi"\n' }) })
+    expect(renderText('https://x.test/?q={{q}}&n={{name}}', p, undefined, undefined, encodeURIComponent)).toBe('https://x.test/?q=a%20b%26c%2Fd&n=Taro%20Yamada')
+    const body = renderText('{"v": "{{quote}}", "u": "{{unknown}}"}', p, undefined, undefined, (v) => JSON.stringify(v).slice(1, -1))
+    expect(JSON.parse(body)).toEqual({ v: 'say "hi"\n', u: '{{unknown}}' })
+  })
+})
+
+describe('pickPath', () => {
+  const data = { data: { price: 1200, ok: true, tags: ['a'], none: null }, items: [{ name: 'Tea' }] }
+
+  it('reads dotted paths and array indexes', () => {
+    expect(pickPath(data, 'data.price')).toBe('1200')
+    expect(pickPath(data, 'data.ok')).toBe('true')
+    expect(pickPath(data, 'items.0.name')).toBe('Tea')
+  })
+
+  it('returns JSON for objects and the whole value for an empty path', () => {
+    expect(pickPath(data, 'data.tags')).toBe('["a"]')
+    expect(pickPath({ a: 1 }, '')).toBe('{"a":1}')
+    expect(pickPath('plain text', '')).toBe('plain text')
+  })
+
+  it('returns an empty string for missing values', () => {
+    for (const path of ['data.missing', 'data.none', 'items.5.name', 'data.price.x', 'constructor', 'data.tags.map']) expect(pickPath(data, path)).toBe('')
+    expect(pickPath('plain text', 'a')).toBe('')
+    expect(pickPath(null, 'a')).toBe('')
   })
 })
 

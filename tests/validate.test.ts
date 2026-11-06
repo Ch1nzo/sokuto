@@ -167,6 +167,24 @@ describe('validateFlow', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'f', validate: 'zip' }] }).length).toBeGreaterThan(0)
   })
 
+  it('accepts a request step and rejects http URLs, bad fields and more than 10 headers', () => {
+    const def = (over: object) => ({
+      triggers: [{ type: 'keyword', keywords: ['price'] }],
+      entry: 'rq1',
+      steps: [{ id: 'rq1', type: 'request', method: 'GET', url: 'https://api.example.com/x?q={{last_input}}', save: [{ field: 'price', path: 'data.price' }], next: 'm1', ...over }, { id: 'm1', type: 'message', text: '{{price}}' }],
+    })
+    const ok = validateFlow(def({}))
+    expect(ok.ok && ok.warnings).toEqual([])
+    expect(validateFlow(def({ method: 'POST', body: '{"phone": "{{phone}}"}', headers: { Authorization: 'Bearer x' }, save: [{ field: 'all', path: '' }], timeoutMs: 15000 })).ok).toBe(true)
+    expect(errorsOf(def({ url: 'http://api.example.com/x' })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ method: 'PUT' })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ save: [{ field: 'bad field!', path: 'a' }] })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ timeoutMs: 999 })).length).toBeGreaterThan(0)
+    const headers = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`X-H${i}`, 'v']))
+    expect(errorsOf(def({ headers })).some((e) => e.includes('at most 10 headers'))).toBe(true)
+    expect(errorsOf(def({ next: 'zz' }))).toContain('step rq1.next points to unknown step "zz"')
+  })
+
   it('rejects invalid step shapes and non-objects', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'bad field!' }] }).length).toBeGreaterThan(0)
     expect(errorsOf({ triggers: [], entry: 'd', steps: [{ id: 'd', type: 'delay', seconds: 0 }] }).length).toBeGreaterThan(0)

@@ -11,7 +11,7 @@ export type SimulatedInput = { type: 'start' | 'message' | 'comment' | 'follow' 
 
 export type SimulationStep = { input: SimulatedInput; triggered: boolean; outputs: OutboundMessage[]; commentReplies: string[]; waiting: string | null; stepId: string | null }
 
-export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; completed: boolean }
+export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; notes: string[]; completed: boolean }
 
 export type SimulateOptions = { botFields?: Record<string, string>; timezone?: string; now?: () => Date }
 
@@ -37,7 +37,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     updatedAt: new Date().toISOString(),
   }
   const liveFlow: FlowRecord = { ...flow, status: 'live' }
-  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now }
+  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], dryRunNotes: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now }
   const steps: SimulationStep[] = []
   let first = isNewContact
   for (const input of inputs) {
@@ -83,5 +83,5 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     first = false
     steps.push({ input, triggered, outputs: adapter.sent.slice(before), commentReplies: adapter.commentReplies.slice(beforeReplies), waiting: ctx.dryRunSession?.waiting ?? null, stepId: ctx.dryRunSession?.stepId ?? null })
   }
-  return { steps, fields: JSON.parse(ctx.contact.fields) as Record<string, string>, tags: [...(ctx.dryRunTags ?? [])], notifications: ctx.dryRunNotifications ?? [], completed: ctx.dryRunSession === null }
+  return { steps, fields: JSON.parse(ctx.contact.fields) as Record<string, string>, tags: [...(ctx.dryRunTags ?? [])], notifications: ctx.dryRunNotifications ?? [], notes: ctx.dryRunNotes ?? [], completed: ctx.dryRunSession === null }
 }
