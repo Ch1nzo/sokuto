@@ -37,6 +37,9 @@ export async function deleteWorkspace(db: Db, kv: KVNamespace, id: number): Prom
     db.delete(s.snippets).where(eq(s.snippets.workspaceId, id)),
     db.delete(s.events).where(eq(s.events.workspaceId, id)),
     db.delete(s.notifications).where(eq(s.notifications.workspaceId, id)),
+    db.delete(s.faqs).where(eq(s.faqs.workspaceId, id)),
+    db.delete(s.documents).where(eq(s.documents.workspaceId, id)),
+    db.delete(s.products).where(eq(s.products.workspaceId, id)),
     db.delete(s.settings).where(like(s.settings.key, wsKey(id, '%'))),
     db.delete(s.workspaces).where(eq(s.workspaces.id, id)),
   ])

@@ -61,7 +61,7 @@ export function lazyAi(env: Env, db: Db, ws: number): AiCaller {
 }
 
 /** The outermost `{…}` in a model reply (tolerates ```json fences and surrounding prose). */
-function jsonObject(raw: string): Record<string, unknown> | null {
+export function jsonObject(raw: string): Record<string, unknown> | null {
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start < 0 || end < start) return null

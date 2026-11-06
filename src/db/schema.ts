@@ -141,7 +141,7 @@ export const events = sqliteTable(
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     workspaceId: workspaceId(),
-    type: text('type').notNull(), // trigger_fired | step_sent | button_clicked | input_saved | flow_completed | comment_replied | error
+    type: text('type').notNull(), // trigger_fired | step_sent | button_clicked | input_saved | flow_completed | comment_replied | error | bot_reply | bot_handoff | bot_resolved
     channel: text('channel'),
     flowId: integer('flow_id'),
     stepId: text('step_id'),
@@ -199,3 +199,60 @@ export const snippets = sqliteTable('snippets', {
   text: text('text').notNull(),
   createdAt: text('created_at').notNull().$defaultFn(now),
 })
+
+/** Knowledge of the reply bot (src/bot.ts). `suggested` rows wait for approval and are not used in replies. */
+export const faqs = sqliteTable(
+  'faqs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    status: text('status').notNull().default('approved'), // approved | suggested
+    source: text('source').notNull().default('manual'), // manual | conversation | document
+    documentId: integer('document_id'),
+    contactId: integer('contact_id'),
+    uses: integer('uses').notNull().default(0),
+    createdAt: text('created_at').notNull().$defaultFn(now),
+    updatedAt: text('updated_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('faqs_workspace_status').on(t.workspaceId, t.status)],
+)
+
+/** Web pages or pasted text the reply bot answers from (`content` is plain text, ≤ 200,000 chars). */
+export const documents = sqliteTable(
+  'documents',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    name: text('name').notNull(),
+    url: text('url'),
+    content: text('content').notNull().default(''),
+    status: text('status').notNull().default('ready'), // ready | failed
+    error: text('error'),
+    fetchedAt: text('fetched_at'),
+    createdAt: text('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('documents_workspace').on(t.workspaceId)],
+)
+
+/** Product catalog the reply bot recommends from (sent as cards). */
+export const products = sqliteTable(
+  'products',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    price: integer('price'),
+    currency: text('currency').notNull().default('JPY'),
+    url: text('url'),
+    imageUrl: text('image_url'),
+    tags: text('tags').notNull().default('[]'), // JSON string[]
+    sku: text('sku'),
+    inStock: integer('in_stock').notNull().default(1),
+    createdAt: text('created_at').notNull().$defaultFn(now),
+    updatedAt: text('updated_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('products_workspace').on(t.workspaceId)],
+)

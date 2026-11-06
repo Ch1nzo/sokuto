@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db'
 import { schema } from './db'
@@ -97,6 +97,72 @@ export const lineRichMenuSchema = z
   })
   .refine((m) => m.cells.length === m.layout, { message: 'cells must match the layout', path: ['cells'] })
 export type LineRichMenu = z.infer<typeof lineRichMenuSchema>
+
+/** One line of a bot rule list: blank lines (an empty row in the editor) are dropped. */
+const ruleLines = z.array(z.string().trim().max(200)).max(20).transform((a) => a.filter(Boolean))
+
+/**
+ * Reply bot (`settings` row `ws:<id>:bot`, logic in src/bot.ts). No defaults in the schema (zod 4 would apply them
+ * inside `.partial()`); DEFAULT_BOT fills missing keys before validation.
+ */
+export const botConfigSchema = z.object({
+  enabled: z.boolean(),
+  name: z.string().trim().min(1).max(30),
+  channels: z.array(z.enum(['line', 'messenger', 'instagram'])).max(3),
+  persona: z.string().trim().max(2000),
+  guidelines: ruleLines,
+  guardrails: ruleLines,
+  handoffMessage: z.string().trim().max(500),
+  unknownAction: z.enum(['handoff', 'fallback']),
+  fallbackMessage: z.string().trim().max(500),
+  autoClose: z.boolean(),
+  resolveMessage: z.string().trim().max(500),
+  maxTurns: z.number().int().min(1).max(50),
+  recommendProducts: z.boolean(),
+  segmentId: z.number().int().positive().nullable(),
+  suggestFaqs: z.boolean(),
+  language: z.enum(['auto', 'ja', 'en']),
+})
+export type BotConfig = z.infer<typeof botConfigSchema>
+
+export const DEFAULT_BOT: BotConfig = {
+  enabled: false,
+  name: 'Soku',
+  channels: ['line', 'messenger', 'instagram'],
+  persona: '',
+  guidelines: [],
+  guardrails: [],
+  handoffMessage: '担当者におつなぎします。少々お待ちください。',
+  unknownAction: 'handoff',
+  fallbackMessage: '申し訳ありません、その内容にはお答えできません。担当者が必要な場合は「担当者」と送ってください。',
+  autoClose: true,
+  resolveMessage: '',
+  maxTurns: 10,
+  recommendProducts: true,
+  segmentId: null,
+  suggestFaqs: false,
+  language: 'auto',
+}
+
+/** Keys whose value is undefined are left out, so they cannot overwrite a stored value when merged. */
+export const defined = <T extends object>(o: T): Partial<T> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>
+
+/** The saved bot settings over the defaults (a row that no longer validates falls back to the defaults). */
+export async function getBotConfig(db: Db, ws: number): Promise<BotConfig> {
+  const parsed = botConfigSchema.safeParse({ ...DEFAULT_BOT, ...(await getSetting<Partial<BotConfig>>(db, ws, 'bot')) })
+  return parsed.success ? parsed.data : DEFAULT_BOT
+}
+
+/** Merges `patch` (Partial<BotConfig>) into the saved settings, validates and saves. */
+export async function putBotConfig(db: Db, ws: number, patch: object): Promise<{ config: BotConfig } | { errors: string[] }> {
+  const parsed = botConfigSchema.safeParse({ ...(await getBotConfig(db, ws)), ...defined(patch) })
+  if (!parsed.success) return { errors: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`) }
+  const seg = schema.segments
+  const segmentId = (patch as Partial<BotConfig>).segmentId
+  if (segmentId && !(await db.select({ id: seg.id }).from(seg).where(and(eq(seg.id, segmentId), eq(seg.workspaceId, ws))).get())) return { errors: ['segmentId: segment not found'] }
+  await putSetting(db, ws, 'bot', parsed.data)
+  return { config: parsed.data }
+}
 
 /** AI provider for the AI reply step and intent triggers (`settings` row `ws:<id>:ai`, `apiKey` encrypted). */
 export type AiConfig = { provider: 'anthropic' | 'openai' | 'workers_ai'; apiKey?: string; model?: string; baseUrl?: string }

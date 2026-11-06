@@ -1,5 +1,5 @@
-import { Hono } from 'hono'
-import type { ZodError } from 'zod'
+import { Hono, type Context } from 'hono'
+import { z, type ZodError } from 'zod'
 import { and, desc, eq, gte, like, or, sql, type SQL } from 'drizzle-orm'
 import { mcpTokenHash, requestedWorkspace, setMcpToken, type AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
@@ -9,6 +9,7 @@ import {
   deleteChannelConfig,
   deleteSetting,
   getAiConfig,
+  getBotConfig,
   getChannelConfig,
   getGeneral,
   getOrCreateSecret,
@@ -16,6 +17,7 @@ import {
   lineRichMenuSchema,
   metaProfileSchema,
   putAiConfig,
+  putBotConfig,
   putChannelConfig,
   putSetting,
   type AiConfig,
@@ -48,6 +50,29 @@ import { parseBroadcastButtons } from '../broadcasts'
 import { randomToken } from '../crypto'
 import { complete, lazyAi } from '../ai'
 import { createWorkspace, deleteWorkspace, listWorkspaces, parseWorkspaceId, renameWorkspace } from '../workspaces'
+import {
+  addDocument,
+  botDraft,
+  botLang,
+  botOverview,
+  botPlayground,
+  deleteDocument,
+  deleteFaq,
+  deleteProduct,
+  generateDocumentFaqs,
+  importProducts,
+  knowledgeCounts,
+  listDocuments,
+  listFaqs,
+  listProducts,
+  loadProducts,
+  productCards,
+  productText,
+  refreshDocument,
+  saveFaq,
+  saveProduct,
+  suggestFaqs,
+} from '../bot'
 
 /** Everything here works on the workspace `c.get('ws')` (see resolveWorkspace). */
 export const apiRoutes = new Hono<AppEnv>()
@@ -56,6 +81,13 @@ const db = (env: Env) => createDb(env.DB)
 const baseUrl = (url: string) => new URL(url).origin
 /** Each workspace has its own webhook URLs (workspace 1 also keeps the old ones without the id). */
 const webhookUrl = (url: string, channel: 'line' | 'meta', ws: number) => `${baseUrl(url)}/webhooks/${channel}/${ws}`
+/** Whether the workspace saved an AI provider (the settings row exists; the key stays encrypted). */
+const isAiConfigured = async (d: Db, ws: number) => (await getSetting<AiConfig>(d, ws, 'ai')) !== null
+/** AI call failures: 400 when no provider is saved, else 502 with the provider's error. */
+const aiFail = (c: Context<AppEnv>, err: unknown) => {
+  const detail = err instanceof Error ? err.message : String(err)
+  return detail === 'ai_not_configured' ? c.json({ error: 'ai_not_configured' }, 400) : c.json({ error: 'ai_error', detail }, 502)
+}
 
 /* ---------- Overview ---------- */
 apiRoutes.get('/overview', async (c) => {
@@ -460,6 +492,10 @@ apiRoutes.patch('/contacts/:id', async (c) => {
   if (notes !== undefined) patch.notes = notes || null
   await d.update(schema.contacts).set(patch).where(eq(schema.contacts.id, contact.id))
   if (body.botPaused !== undefined) await setBotPaused(d, contact.id, Boolean(body.botPaused))
+  // Closing a conversation may turn it into FAQ suggestions (Soku → learning), after the response.
+  if (body.status === 'closed' && contact.status !== 'closed' && (await getBotConfig(d, c.get('ws'))).suggestFaqs && (await isAiConfigured(d, c.get('ws')))) {
+    c.executionCtx.waitUntil(suggestFaqs(d, c.get('ws'), lazyAi(c.env, d, c.get('ws')), contact.id).catch(() => 0))
+  }
   return c.json({ ok: true })
 })
 
@@ -587,6 +623,44 @@ apiRoutes.post('/inbox/:id/bot', async (c) => {
   const body = await c.req.json<{ paused?: boolean }>()
   await setBotPaused(d, contact.id, Boolean(body.paused))
   return c.json({ ok: true })
+})
+
+/** A reply draft from Soku for the staff member (nothing is sent). */
+apiRoutes.post('/inbox/:id/draft', async (c) => {
+  const d = db(c.env)
+  const ws = c.get('ws')
+  const contact = await loadContact(d, ws, c.req.param('id'))
+  if (!contact) return c.json({ error: 'not_found' }, 404)
+  try {
+    const draft = await botDraft(d, ws, lazyAi(c.env, d, ws), await getGeneral(d, ws), contact)
+    return draft === null ? c.json({ error: 'no_messages' }, 400) : c.json({ draft })
+  } catch (err) {
+    return aiFail(c, err)
+  }
+})
+
+/** Sends product cards as a human reply (products without a URL are listed as text). */
+apiRoutes.post('/inbox/:id/products', async (c) => {
+  const d = db(c.env)
+  const ws = c.get('ws')
+  const contact = await loadContact(d, ws, c.req.param('id'))
+  if (!contact) return c.json({ error: 'not_found' }, 404)
+  const body = await jsonBody(c)
+  const ids = Array.isArray(body.productIds) ? body.productIds : []
+  if (!ids.length || ids.length > 10 || !ids.every((x) => Number.isInteger(x) && x > 0)) return c.json({ error: 'invalid_product_ids' }, 400)
+  const products = await loadProducts(d, ws, ids as number[])
+  if (!products.length) return c.json({ error: 'invalid_product_ids' }, 400)
+  const adapter = await getAdapter(c.env, d, ws, contact.channel as Channel)
+  if (!adapter) return c.json({ error: 'channel_not_configured' }, 400)
+  const cards = productCards(products, botLang(await getBotConfig(d, ws), await getGeneral(d, ws)))
+  const text = productText(products.filter((p) => !p.url))
+  const res = await adapter.send(contact.channelUserId, { text: text || undefined, cards: cards.length ? cards : undefined })
+  await logMessage(d, { contactId: contact.id, direction: 'out', source: 'human', kind: 'cards', text: productText(products), payload: { productIds: products.map((p) => p.id), cards }, error: res.ok ? undefined : res.error })
+  if (body.pauseBot !== false) {
+    await setBotPaused(d, contact.id, true)
+    await d.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
+  }
+  return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502)
 })
 
 /* ---------- Broadcasts ---------- */
@@ -834,6 +908,118 @@ apiRoutes.get('/dashboard', async (c) => {
     broadcasts: broadcasts ?? { count: 0, total: 0, sent: 0, failed: 0, clicked: 0 },
     handoffs: handoffs?.n ?? 0,
   })
+})
+
+/* ---------- Soku (reply bot, src/bot.ts) ---------- */
+/** A JSON object body ({} when missing, invalid or not an object). */
+async function jsonBody(c: Context<AppEnv>): Promise<Record<string, unknown>> {
+  const b: unknown = await c.req.json().catch(() => null)
+  return b && typeof b === 'object' && !Array.isArray(b) ? (b as Record<string, unknown>) : {}
+}
+/** A row id from the path; 0 (no row has it) when it is not a positive integer, so lookups answer not_found. */
+const idOf = (raw: string) => (/^[1-9]\d{0,15}$/.test(raw) ? Number(raw) : 0)
+const botFail = (c: Context<AppEnv>, r: { error: string; errors?: string[] }) => c.json(r, r.error === 'not_found' ? 404 : 400)
+const deleted = (c: Context<AppEnv>, ok: boolean) => (ok ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404))
+
+apiRoutes.get('/bot', async (c) => {
+  const d = db(c.env)
+  const ws = c.get('ws')
+  const [config, aiConfigured, counts] = await Promise.all([getBotConfig(d, ws), isAiConfigured(d, ws), knowledgeCounts(d, ws)])
+  return c.json({ config, aiConfigured, counts })
+})
+
+apiRoutes.put('/bot', async (c) => {
+  const r = await putBotConfig(db(c.env), c.get('ws'), await jsonBody(c))
+  return 'errors' in r ? c.json({ error: 'invalid_bot_config', errors: r.errors }, 400) : c.json(r)
+})
+
+apiRoutes.get('/bot/overview', async (c) => {
+  const d = db(c.env)
+  const days = Math.min(90, Math.max(1, Math.trunc(Number(c.req.query('days'))) || 30))
+  return c.json(await botOverview(d, c.get('ws'), days, await isAiConfigured(d, c.get('ws'))))
+})
+
+apiRoutes.get('/bot/faqs', async (c) => c.json({ faqs: await listFaqs(db(c.env), c.get('ws'), c.req.query('status')) }))
+
+apiRoutes.post('/bot/faqs', async (c) => {
+  const r = await saveFaq(db(c.env), c.get('ws'), null, await jsonBody(c))
+  return 'faq' in r ? c.json(r, 201) : botFail(c, r)
+})
+
+apiRoutes.put('/bot/faqs/:id', async (c) => {
+  const r = await saveFaq(db(c.env), c.get('ws'), idOf(c.req.param('id')), await jsonBody(c))
+  return 'faq' in r ? c.json(r) : botFail(c, r)
+})
+
+apiRoutes.delete('/bot/faqs/:id', async (c) => deleted(c, await deleteFaq(db(c.env), c.get('ws'), idOf(c.req.param('id')))))
+
+apiRoutes.get('/bot/documents', async (c) => c.json({ documents: await listDocuments(db(c.env), c.get('ws')) }))
+
+apiRoutes.post('/bot/documents', async (c) => {
+  const r = await addDocument(db(c.env), c.get('ws'), await jsonBody(c))
+  return 'document' in r ? c.json(r, 201) : botFail(c, r)
+})
+
+apiRoutes.post('/bot/documents/:id/refresh', async (c) => {
+  const r = await refreshDocument(db(c.env), c.get('ws'), idOf(c.req.param('id')))
+  return 'document' in r ? c.json(r) : botFail(c, r)
+})
+
+apiRoutes.post('/bot/documents/:id/faqs', async (c) => {
+  const d = db(c.env)
+  const ws = c.get('ws')
+  if (!(await isAiConfigured(d, ws))) return c.json({ error: 'ai_not_configured' }, 400)
+  try {
+    const created = await generateDocumentFaqs(d, ws, lazyAi(c.env, d, ws), idOf(c.req.param('id')))
+    return created === null ? c.json({ error: 'not_found' }, 404) : c.json({ created })
+  } catch (err) {
+    return aiFail(c, err)
+  }
+})
+
+apiRoutes.delete('/bot/documents/:id', async (c) => deleted(c, await deleteDocument(db(c.env), c.get('ws'), idOf(c.req.param('id')))))
+
+apiRoutes.get('/bot/products', async (c) => c.json({ products: await listProducts(db(c.env), c.get('ws'), c.req.query('q')) }))
+
+apiRoutes.post('/bot/products', async (c) => {
+  const r = await saveProduct(db(c.env), c.get('ws'), null, await jsonBody(c))
+  return 'product' in r ? c.json(r, 201) : botFail(c, r)
+})
+
+apiRoutes.put('/bot/products/:id', async (c) => {
+  const r = await saveProduct(db(c.env), c.get('ws'), idOf(c.req.param('id')), await jsonBody(c))
+  return 'product' in r ? c.json(r) : botFail(c, r)
+})
+
+apiRoutes.delete('/bot/products/:id', async (c) => deleted(c, await deleteProduct(db(c.env), c.get('ws'), idOf(c.req.param('id')))))
+
+apiRoutes.post('/bot/products/import', async (c) => {
+  const { csv } = await jsonBody(c)
+  if (typeof csv !== 'string' || !csv.trim()) return c.json({ error: 'missing_csv' }, 400)
+  if (csv.length > 2_000_000) return c.json({ error: 'csv_too_large' }, 400)
+  return c.json(await importProducts(db(c.env), c.get('ws'), csv))
+})
+
+const playgroundSchema = z.object({
+  messages: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().trim().min(1).max(4000) }))
+    .min(1)
+    .max(50)
+    .refine((m) => m.at(-1)?.role === 'user', 'the last message must be from the user'),
+  channel: z.enum(['line', 'messenger', 'instagram']).optional(),
+})
+
+/** What Soku would answer to this conversation. Calls the AI provider (billed); nothing is sent or logged. */
+apiRoutes.post('/bot/playground', async (c) => {
+  const v = playgroundSchema.safeParse(await jsonBody(c))
+  if (!v.success) return c.json({ error: 'invalid_messages', errors: issues(v.error) }, 400)
+  const d = db(c.env)
+  const ws = c.get('ws')
+  try {
+    return c.json(await botPlayground(d, ws, lazyAi(c.env, d, ws), await getGeneral(d, ws), v.data.messages, v.data.channel))
+  } catch (err) {
+    return aiFail(c, err)
+  }
 })
 
 /* ---------- Settings ---------- */

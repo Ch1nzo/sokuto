@@ -3,11 +3,12 @@ import type { Db } from './db'
 import { schema } from './db'
 import type { ChannelAdapter } from './channels/adapter'
 import type { InboundEvent } from './channels/types'
-import { isBotPaused, setBotPaused, upsertContact, type ContactRow } from './contacts'
+import { isBotPaused, upsertContact, type ContactRow } from './contacts'
 import { getGeneral } from './settings'
 import { logEvent, logMessage, matchIntent, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
 import type { AiCaller } from './ai'
 import { parseBroadcastButtons, parseBroadcastPayload } from './broadcasts'
+import { handoffToHuman, runBot } from './bot'
 
 /** Remembers platform event ids so retried webhooks are not processed twice. */
 export async function markProcessed(db: Db, id: string): Promise<boolean> {
@@ -44,14 +45,7 @@ export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter,
 
   // Hand-over keywords pause the bot for this contact and notify the team.
   if (event.type === 'message' && event.text && general.handoffKeywords.some((k) => k && event.text!.toLowerCase().includes(k.toLowerCase()))) {
-    await setBotPaused(db, contact.id, true)
-    await db.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
-    await db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
-    await db.insert(schema.notifications).values({ workspaceId: ws, contactId: contact.id, text: `${contact.displayName ?? contact.channelUserId} が担当者を希望しています` })
-    if (general.handoffReply) {
-      const res = await adapter.send(contact.channelUserId, { text: general.handoffReply }, { replyToken })
-      await logMessage(db, { contactId: contact.id, direction: 'out', source: 'bot', kind: 'text', text: general.handoffReply, error: res.ok ? undefined : res.error })
-    }
+    await handoffToHuman(db, ws, adapter, contact, replyToken, general.handoffReply)
     return
   }
 
@@ -120,7 +114,11 @@ export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter,
   }
   // 3b. Intent triggers: without a session, one AI call may pick a flow for a message no specific trigger matched.
   if (!session) chosen = (await matchIntent(ai, flows, event, chosen?.trigger ?? null)) ?? chosen
-  if (!chosen) return
+  // 4. No live automation took it: Soku (the reply bot) may answer a text message.
+  if (!chosen) {
+    if (!session && event.type === 'message' && event.text?.trim()) await runBot({ ...base, contact, general }, event.text)
+    return
+  }
   // any_message with a cooldown starts at most once per contact within that window.
   if (chosen.trigger.type === 'any_message' && chosen.trigger.cooldownHours) {
     const since = new Date(Date.now() - chosen.trigger.cooldownHours * 3_600_000).toISOString()

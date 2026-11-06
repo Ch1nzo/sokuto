@@ -6,7 +6,7 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { checkBearer, type AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
-import { configuredChannels, getGeneral, getSetting, type AiConfig } from '../settings'
+import { botConfigSchema, configuredChannels, getBotConfig, getGeneral, getSetting, putBotConfig, type AiConfig } from '../settings'
 import { lazyAi } from '../ai'
 import { addTag, getContact, getTags, inboxWhere, ofWorkspace, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
@@ -18,6 +18,7 @@ import type { Channel } from '../channels/types'
 import { broadcastReach } from '../scheduler'
 import { loadSegment, parseSegment } from '../segments'
 import { getWorkspace } from '../workspaces'
+import { addDocument, botOverview, deleteDocument, deleteFaq, deleteProduct, listFaqs, listProducts, productInputSchema, saveFaq, saveProduct } from '../bot'
 
 export const mcpRoutes = new Hono<AppEnv>()
 
@@ -34,7 +35,7 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
   const d = createDb(env.DB)
   const server = new McpServer({ name: 'sokuto', version: '0.1.0' })
 
-  server.registerTool('get_overview', { title: 'Overview', description: 'Workspace, bot name, configured channels, AI provider (needed by ai steps and intent triggers), live flows and key numbers for the last 7 days.' }, async () => {
+  server.registerTool('get_overview', { title: 'Overview', description: 'Workspace, bot name, configured channels, AI provider (needed by ai steps, intent triggers and Soku), Soku (the reply bot) on/off, live flows and key numbers for the last 7 days.' }, async () => {
     const since7 = new Date(Date.now() - 7 * 86400_000).toISOString()
     const inWs = eq(schema.contacts.workspaceId, ws)
     const msgInWs = ofWorkspace(schema.messages.contactId, ws)
@@ -48,7 +49,8 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
     ])
     // The settings row as stored: provider only, the API key stays encrypted.
     const aiCfg = await getSetting<AiConfig>(d, ws, 'ai')
-    return json({ workspace: { id: ws, name: workspace?.name }, general: await getGeneral(d, ws), channels: await configuredChannels(d, ws), ai: aiCfg ? { configured: true, provider: aiCfg.provider } : { configured: false }, contacts: contacts?.n ?? 0, newContacts7d: new7?.n ?? 0, messagesIn7d: msgIn?.n ?? 0, messagesOut7d: msgOut?.n ?? 0, flowsLive: flowsLive?.n ?? 0 })
+    const bot = await getBotConfig(d, ws)
+    return json({ workspace: { id: ws, name: workspace?.name }, general: await getGeneral(d, ws), channels: await configuredChannels(d, ws), ai: aiCfg ? { configured: true, provider: aiCfg.provider } : { configured: false }, bot: { enabled: bot.enabled, name: bot.name }, contacts: contacts?.n ?? 0, newContacts7d: new7?.n ?? 0, messagesIn7d: msgIn?.n ?? 0, messagesOut7d: msgOut?.n ?? 0, flowsLive: flowsLive?.n ?? 0 })
   })
 
   server.registerTool('get_flow_schema', { title: 'Flow JSON schema', description: 'Read this before creating or editing a flow. Explains triggers, steps, placeholders and best practices.' }, async () => ({ content: [{ type: 'text', text: FLOW_SCHEMA_DOC }] }))
@@ -296,6 +298,75 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
       const r = await d.update(schema.contacts).set(patch).where(and(eq(schema.contacts.id, id), eq(schema.contacts.workspaceId, ws))).returning().get()
       return r ? json({ id: r.id, name: r.displayName, status: r.status, notes: r.notes }) : fail('not_found')
     },
+  )
+
+  server.registerTool(
+    'get_bot',
+    {
+      title: 'Get Soku (reply bot)',
+      description:
+        'Settings of Soku, the AI reply bot that answers text messages no live automation matched, using only the approved FAQs, ready documents and in-stock products, and hands the conversation to a person when it cannot answer. Also its last 30 days: conversations handled, replies, hand-overs (with reasons), resolution rate, top FAQs and products, knowledge counts.',
+    },
+    async () => json({ config: await getBotConfig(d, ws), overview: await botOverview(d, ws, 30, (await getSetting<AiConfig>(d, ws, 'ai')) !== null) }),
+  )
+
+  server.registerTool(
+    'update_bot',
+    {
+      title: 'Update Soku',
+      description:
+        'Changes only the given settings. enabled: true makes Soku answer real customers (needs an AI provider; each reply is billed by the provider). persona: who Soku is and what the business sells. guidelines / guardrails: up to 20 short rules each (tone; things never to do). unknownAction: "handoff" (pass to a person with handoffMessage) or "fallback" (send fallbackMessage) when the knowledge has no answer. maxTurns: replies per contact in 24 hours before a person takes over. autoClose: close the conversation when the customer is done (resolveMessage is sent then, if set). segmentId: only contacts in this segment (null = everyone). suggestFaqs: propose FAQs from finished conversations. language: auto | ja | en.',
+      inputSchema: botConfigSchema.partial().shape,
+    },
+    async (patch) => {
+      const r = await putBotConfig(d, ws, patch)
+      return 'errors' in r ? fail('invalid_bot_config', r.errors) : json(r)
+    },
+  )
+
+  server.registerTool('list_faqs', { title: 'List FAQs', description: 'FAQs Soku answers from (approved) and suggestions waiting for review (suggested; made from conversations or documents, not used until approved).', inputSchema: { status: z.enum(['approved', 'suggested', 'all']).default('all') } }, async ({ status }) =>
+    json(await listFaqs(d, ws, status)),
+  )
+
+  server.registerTool(
+    'upsert_faq',
+    { title: 'Create / update FAQ', description: 'Creates a FAQ, or updates one with id. Set status "approved" to approve a suggestion. question ≤ 500, answer ≤ 4000 characters.', inputSchema: { id: z.number().int().optional(), question: z.string(), answer: z.string(), status: z.enum(['approved', 'suggested']).optional() } },
+    async ({ id, ...body }) => {
+      const r = await saveFaq(d, ws, id ?? null, body)
+      return 'faq' in r ? json(r.faq) : fail(r.error, r.errors)
+    },
+  )
+
+  server.registerTool('delete_faq', { title: 'Delete FAQ', description: 'Deletes a FAQ (also how a suggestion is rejected).', inputSchema: { id: z.number().int() } }, async ({ id }) => ((await deleteFaq(d, ws, id)) ? json({ ok: true }) : fail('not_found')))
+
+  server.registerTool('list_products', { title: 'List products', description: 'Products Soku can recommend as cards (in-stock ones only), searched by name, sku or tag.', inputSchema: { q: z.string().optional() } }, async ({ q }) => json(await listProducts(d, ws, q)))
+
+  server.registerTool(
+    'upsert_product',
+    {
+      title: 'Create / update product',
+      description: 'Creates a product (name required), or updates the given fields of the one with id. price is an integer in the currency (JPY by default), url / imageUrl http(s) (a product needs url to be sent as a card), tags ≤ 20.',
+      inputSchema: { id: z.number().int().optional(), ...productInputSchema.partial().shape },
+    },
+    async ({ id, ...body }) => {
+      const r = await saveProduct(d, ws, id ?? null, body)
+      return 'product' in r ? json(r.product) : fail(r.error, r.errors)
+    },
+  )
+
+  server.registerTool('delete_product', { title: 'Delete product', description: 'Deletes a product.', inputSchema: { id: z.number().int() } }, async ({ id }) => ((await deleteProduct(d, ws, id)) ? json({ ok: true }) : fail('not_found')))
+
+  server.registerTool(
+    'add_document',
+    { title: 'Add document', description: 'Adds knowledge for Soku: an https page (url; HTML or plain text, not PDF; fetched now, a failure is saved with status "failed") or pasted text (≤ 200,000 characters).', inputSchema: { name: z.string().optional(), url: z.string().optional(), text: z.string().optional() } },
+    async (body) => {
+      const r = await addDocument(d, ws, body)
+      return 'document' in r ? json(r.document) : fail(r.error, r.errors)
+    },
+  )
+
+  server.registerTool('delete_document', { title: 'Delete document', description: 'Deletes a document and the FAQ suggestions made from it (approved FAQs stay).', inputSchema: { id: z.number().int() } }, async ({ id }) =>
+    (await deleteDocument(d, ws, id)) ? json({ ok: true }) : fail('not_found'),
   )
 
   server.registerTool('list_notifications', { title: 'Notifications', description: 'Recent notifications created by "notify" actions and hand-over requests.', inputSchema: { unreadOnly: z.boolean().default(true) } }, async ({ unreadOnly }) => {
