@@ -28,8 +28,9 @@
 .fe-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fe-toolbar__select { width: 200px; }
 
-/* The side panel only takes space while a node is selected (Channel.io style): otherwise the canvas gets the full width. */
-.fe-layout { position: absolute; inset: 0; z-index: 1; pointer-events: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+/* The side panel only takes space while a node is selected (Channel.io style): otherwise the canvas gets the full width.
+   No z-index on .fe-layout: it would trap the mobile bottom-sheet panel (z-index 800) under the floating cards. */
+.fe-layout { position: absolute; inset: 0; pointer-events: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .fe-layout.has-panel { grid-template-columns: minmax(0, 1fr) 380px; }
 .fe-panel:not(.is-open) { display: none; }
 .fe-canvas {

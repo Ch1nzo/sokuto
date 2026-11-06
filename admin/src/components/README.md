@@ -105,7 +105,7 @@ primary action per screen**. Radii: surfaces `--radius-8`, chips `--radius-6` (p
 | `StatCard` | `label`, `value: number \| string`, `hint?`. Put in `<div className="stat-grid">`. |
 | `DataTable` | see above. Generic: `DataTable<Row>`. |
 | `TextInputField` / `TextAreaField` | `label`, `helperText?`, `error?`, `help?`, `required?`, `disabled?` + all TextField/TextArea props (`value`, `onChange(e)`, `type`, `placeholder`, `size`…). |
-| `SelectField` / `SelectInput` | `value`, `options: {value,label}[]`, `onChange(value)`, `placeholder?`. Bezier Select is a button + dropdown of ListItems, not a native `<select>`. `SelectInput` has no label (filters/toolbars; pass `aria-label`). |
+| `SelectField` / `SelectInput` | `value`, `options: {value,label}[]`, `onChange(value)`, `placeholder?`. Bezier Select is a button + dropdown of ListItems, not a native `<select>`. `SelectInput` has no label (filters/toolbars; pass `aria-label`). A raw Bezier `Select` must spread `useSelectDropdown(optionCount)`: the dropdown then renders in the body (or the open modal) and opens upward near the bottom; inline, a card's z-index or an ancestor's overflow hides it. |
 | `CopyBox` | `value`, `label?`. Mono value + Copy button + toast. |
 | `ContactName` | `contact: { id?, channel?, displayName, username?, channelUserId? }`, `typo?`, `bold?`. Truncates to one line: parent needs `min-width: 0`. |
 | `ContactAvatar` | `contact: { id, channel?, displayName, username?, avatarUrl? }`, `size?: 24 \| 36`. Image, else initials on a tint by id; at 36 a `ChannelDot` (LINE / Messenger / Instagram mark, labelled) sits on the corner. |

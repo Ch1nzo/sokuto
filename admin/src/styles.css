@@ -342,17 +342,21 @@
 /* ListItem lists inside a flush card */
 .list { display: flex; flex-direction: column; padding: 6px; }
 .list > * { width: 100%; text-align: left; height: auto; min-height: 40px; padding-top: 8px; padding-bottom: 8px; }
+/* In a padded card (Settings snippets) pull the list out so item text lines up with the card's title and fields. */
+.card:not(.card--flush) .list { margin-inline: -12px; }
 .list-text { display: block; overflow-wrap: anywhere; color: var(--txt-black-darkest); font-size: 14px; line-height: 20px; }
 
 .stat-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 @media (max-width: 480px) { .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Each tile spans three shared row tracks (label, value, hint), so the values of a row line up even when one label wraps. */
 .stat-card {
-  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; min-width: 0;
   padding: 16px;
   background: var(--bg-white-normal);
   border: 1px solid var(--bdr-black-light);
   border-radius: var(--radius-8);
 }
+.stat-card > * + * { margin-top: 4px; }
 .stat-card__value { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .stat-card { padding: 12px; } }
 
