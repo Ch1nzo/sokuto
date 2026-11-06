@@ -86,9 +86,11 @@ Meta から Sokuto にメッセージを届けるための設定です。
 
 1. Meta のアプリ画面で **「Messenger」 › 「Messenger API の設定」** を開き、**「Webhook を設定」** (「コールバック URL」の欄) を探します。
 2. 次を入力します。値は Sokuto の「チャネル接続」画面からコピーします。
-   - **コールバック URL**: `https://<あなたの Worker の URL>/webhooks/meta`
+   - **コールバック URL**: `https://<あなたの Worker の URL>/webhooks/meta/<ワークスペース ID>` (末尾の数字は、つなげたいワークスペースの ID です。そのワークスペースの「チャネル接続」画面からコピーしてください。ワークスペース機能より前に設定した `…/webhooks/meta` (ID なし) は、最初のワークスペース (ID 1) の URL としてそのまま使えます)
    - **検証トークン**: Sokuto に表示されている **検証トークン (Verify Token)**
 3. **「確認して保存」** を押します。エラーが出なければ成功です。
+
+> **ワークスペースを複数使う場合**: Meta アプリの Webhook のコールバック URL は 1 つだけなので、1 つの Meta アプリのイベントはすべて 1 つのワークスペースに届きます。Facebook ページ (と Instagram) をワークスペースごとに分けるときは、**ワークスペースごとに別の Meta アプリ**を作ってください。
 4. ページの Webhook の購読項目 (「Webhook フィールド」「購読を編集」) で、次をオンにします。
    - `messages`
    - `messaging_postbacks`
@@ -158,7 +160,7 @@ Meta から Sokuto にメッセージを届けるための設定です。
 
 ### Webhook の「確認して保存」でエラーになる (verification failed)
 
-- コールバック URL が `https://<Worker の URL>/webhooks/meta` になっているか確認してください (末尾に余計な `/` や空白がないか)。
+- コールバック URL が、そのワークスペースの「チャネル接続」画面に表示されている `https://<Worker の URL>/webhooks/meta/<ワークスペース ID>` と同じか確認してください (末尾に余計な `/` や空白がないか)。
 - 検証トークンを Sokuto の「チャネル接続」画面からコピーし直してください。
 - Worker の URL をブラウザで開いて、Sokuto の画面が表示されるか確認してください。Cloudflare の無料枠を超えている場合も失敗します。
 
@@ -202,7 +204,7 @@ This is the hardest part of Sokuto: you must create your own Meta developer app,
 2. **App settings › Basic**: copy the App ID and App secret; set the privacy policy URL `https://<worker>/privacy`, the data deletion URL `https://<worker>/data-deletion` (both pages ship with Sokuto) and a category.
 3. Add the **Messenger** product; in Messenger API settings connect your Page (grant Instagram access too if needed) and **generate a Page access token**.
 4. In Sokuto **Channels**, paste App ID, App secret and Page token and click **Connect**. Sokuto reads the Page and its linked Instagram business account and subscribes the Page to the app (`messages, messaging_postbacks, messaging_referrals, messaging_optins, feed`). To replace the token, disconnect and connect again.
-5. **Webhooks**: callback URL `https://<worker>/webhooks/meta` and the verify token shown in Sokuto; subscribe Page fields `messages, messaging_postbacks, messaging_referrals, messaging_optins, feed`, and for the Instagram object `messages, comments`.
+5. **Webhooks**: callback URL `https://<worker>/webhooks/meta/<workspace id>` (copy it from that workspace's Channels page; the old `/webhooks/meta` without an id keeps working for workspace 1; a Meta app has one callback URL, so use one Meta app per workspace) and the verify token shown in Sokuto; subscribe Page fields `messages, messaging_postbacks, messaging_referrals, messaging_optins, feed`, and for the Instagram object `messages, comments`.
 6. Instagram: professional account linked to the Page, "Allow access to messages" turned on in the Instagram app.
 7. Test with an account that has a role on the app (Development mode only answers app admins/developers/testers).
 8. Go Live and request Advanced Access (typically `pages_messaging`, `pages_manage_metadata`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`; Meta changes these names, follow the review screen). Expect a screencast and possibly Business Verification.

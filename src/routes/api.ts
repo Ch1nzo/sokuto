@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { ZodError } from 'zod'
-import { and, desc, eq, gte, like, or, sql } from 'drizzle-orm'
-import type { AppEnv } from '../auth'
+import { and, desc, eq, gte, like, or, sql, type SQL } from 'drizzle-orm'
+import { mcpTokenHash, requestedWorkspace, setMcpToken, type AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
 import {
@@ -37,7 +37,7 @@ import {
 import { IG_PROFILE_FIELDS, PROFILE_FIELDS, buildMessengerProfile, metaDeleteProfile, metaInspectPageToken, metaSetProfile, metaSubscribePage } from '../channels/meta'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
-import { addTag, getTags, inboxWhere, parseFields, removeTag, setBotPaused } from '../contacts'
+import { addTag, getContact, getTags, inboxWhere, ofWorkspace, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
 import { broadcastButtonsSchema, flowChannelSchema, flowKindSchema, messageTagSchema, segmentInputSchema, validateFlow } from '../flows/validate'
@@ -45,61 +45,69 @@ import { simulateFlow, type SimulatedInput } from '../flows/simulate'
 import { broadcastReach, runScheduledTasks } from '../scheduler'
 import { loadSegment, matchesSegment, parseSegment, tagsByContact } from '../segments'
 import { parseBroadcastButtons } from '../broadcasts'
-import { randomToken, sha256Hex } from '../crypto'
+import { randomToken } from '../crypto'
 import { complete, lazyAi } from '../ai'
+import { createWorkspace, deleteWorkspace, listWorkspaces, parseWorkspaceId, renameWorkspace } from '../workspaces'
 
+/** Everything here works on the workspace `c.get('ws')` (see resolveWorkspace). */
 export const apiRoutes = new Hono<AppEnv>()
 
 const db = (env: Env) => createDb(env.DB)
 const baseUrl = (url: string) => new URL(url).origin
+/** Each workspace has its own webhook URLs (workspace 1 also keeps the old ones without the id). */
+const webhookUrl = (url: string, channel: 'line' | 'meta', ws: number) => `${baseUrl(url)}/webhooks/${channel}/${ws}`
 
 /* ---------- Overview ---------- */
 apiRoutes.get('/overview', async (c) => {
   const d = db(c.env)
+  const ws = c.get('ws')
   const since7 = new Date(Date.now() - 7 * 86400_000).toISOString()
   const since30 = new Date(Date.now() - 30 * 86400_000).toISOString()
+  const inWs = eq(schema.contacts.workspaceId, ws)
+  const msgInWs = ofWorkspace(schema.messages.contactId, ws)
   const [contacts, new7, msgIn7, msgOut7, flowsLive, notifications, events30] = await Promise.all([
-    d.select({ n: sql<number>`count(*)` }).from(schema.contacts).get(),
-    d.select({ n: sql<number>`count(*)` }).from(schema.contacts).where(gte(schema.contacts.createdAt, since7)).get(),
-    d.select({ n: sql<number>`count(*)` }).from(schema.messages).where(and(eq(schema.messages.direction, 'in'), gte(schema.messages.createdAt, since7))).get(),
-    d.select({ n: sql<number>`count(*)` }).from(schema.messages).where(and(eq(schema.messages.direction, 'out'), gte(schema.messages.createdAt, since7))).get(),
-    d.select({ n: sql<number>`count(*)` }).from(schema.flows).where(eq(schema.flows.status, 'live')).get(),
-    d.select().from(schema.notifications).where(eq(schema.notifications.read, 0)).orderBy(desc(schema.notifications.createdAt)).limit(10),
-    d.select({ type: schema.events.type, n: sql<number>`count(*)` }).from(schema.events).where(gte(schema.events.createdAt, since30)).groupBy(schema.events.type),
+    d.select({ n: sql<number>`count(*)` }).from(schema.contacts).where(inWs).get(),
+    d.select({ n: sql<number>`count(*)` }).from(schema.contacts).where(and(inWs, gte(schema.contacts.createdAt, since7))).get(),
+    d.select({ n: sql<number>`count(*)` }).from(schema.messages).where(and(msgInWs, eq(schema.messages.direction, 'in'), gte(schema.messages.createdAt, since7))).get(),
+    d.select({ n: sql<number>`count(*)` }).from(schema.messages).where(and(msgInWs, eq(schema.messages.direction, 'out'), gte(schema.messages.createdAt, since7))).get(),
+    d.select({ n: sql<number>`count(*)` }).from(schema.flows).where(and(eq(schema.flows.workspaceId, ws), eq(schema.flows.status, 'live'))).get(),
+    d.select().from(schema.notifications).where(and(eq(schema.notifications.workspaceId, ws), eq(schema.notifications.read, 0))).orderBy(desc(schema.notifications.createdAt)).limit(10),
+    d.select({ type: schema.events.type, n: sql<number>`count(*)` }).from(schema.events).where(and(eq(schema.events.workspaceId, ws), gte(schema.events.createdAt, since30))).groupBy(schema.events.type),
   ])
-  const general = await getGeneral(d)
+  const general = await getGeneral(d, ws)
   return c.json({
     general,
-    channels: await configuredChannels(d),
+    channels: await configuredChannels(d, ws),
     stats: { contacts: contacts?.n ?? 0, newContacts7d: new7?.n ?? 0, messagesIn7d: msgIn7?.n ?? 0, messagesOut7d: msgOut7?.n ?? 0, flowsLive: flowsLive?.n ?? 0, events30d: Object.fromEntries(events30.map((e) => [e.type, e.n])) },
     notifications,
   })
 })
 
 apiRoutes.get('/notifications', async (c) => {
-  const rows = await db(c.env).select().from(schema.notifications).orderBy(desc(schema.notifications.createdAt)).limit(50)
+  const rows = await db(c.env).select().from(schema.notifications).where(eq(schema.notifications.workspaceId, c.get('ws'))).orderBy(desc(schema.notifications.createdAt)).limit(50)
   return c.json({ notifications: rows })
 })
 apiRoutes.post('/notifications/read', async (c) => {
-  await db(c.env).update(schema.notifications).set({ read: 1 }).where(eq(schema.notifications.read, 0))
+  await db(c.env).update(schema.notifications).set({ read: 1 }).where(and(eq(schema.notifications.workspaceId, c.get('ws')), eq(schema.notifications.read, 0)))
   return c.json({ ok: true })
 })
 
 /* ---------- Channels ---------- */
 apiRoutes.get('/channels', async (c) => {
   const d = db(c.env)
+  const ws = c.get('ws')
   const origin = baseUrl(c.req.url)
-  const line = await getChannelConfig(d, c.env.KV, 'line')
-  const meta = await getChannelConfig(d, c.env.KV, 'meta')
+  const line = await getChannelConfig(d, c.env.KV, ws, 'line')
+  const meta = await getChannelConfig(d, c.env.KV, ws, 'meta')
   return c.json({
     line: line ? { configured: true, displayName: line.displayName, botBasicId: line.botBasicId } : { configured: false },
     meta: meta ? { configured: true, appId: meta.appId, pageId: meta.pageId, pageName: meta.pageName, instagramAccountId: meta.instagramAccountId, instagramUsername: meta.instagramUsername } : { configured: false },
-    webhooks: { line: `${origin}/webhooks/line`, meta: `${origin}/webhooks/meta` },
+    webhooks: { line: webhookUrl(c.req.url, 'line', ws), meta: webhookUrl(c.req.url, 'meta', ws) },
     metaVerifyToken: await getOrCreateSecret(c.env.KV, 'meta_verify_token'),
     privacyUrl: `${origin}/privacy`,
     dataDeletionUrl: `${origin}/data-deletion`,
-    profile: await getSetting<MetaProfile>(d, 'profile:meta'),
-    richmenu: await getSetting<StoredRichMenu>(d, 'richmenu:line'),
+    profile: await getSetting<MetaProfile>(d, ws, 'profile:meta'),
+    richmenu: await getSetting<StoredRichMenu>(d, ws, 'richmenu:line'),
   })
 })
 
@@ -111,21 +119,21 @@ apiRoutes.post('/channels/line', async (c) => {
   if (!channelSecret || !channelAccessToken) return c.json({ error: 'missing_fields' }, 400)
   const info = await lineBotInfo(channelAccessToken)
   if (!info.ok) return c.json({ error: 'invalid_token', detail: info.error }, 400)
-  await putChannelConfig(d, c.env.KV, 'line', { channelSecret, channelAccessToken, botBasicId: info.basicId, displayName: info.displayName })
-  const webhook = await lineSetWebhook(channelAccessToken, `${baseUrl(c.req.url)}/webhooks/line`)
+  await putChannelConfig(d, c.env.KV, c.get('ws'), 'line', { channelSecret, channelAccessToken, botBasicId: info.basicId, displayName: info.displayName })
+  const webhook = await lineSetWebhook(channelAccessToken, webhookUrl(c.req.url, 'line', c.get('ws')))
   return c.json({ ok: true, displayName: info.displayName, basicId: info.basicId, webhookSet: webhook.ok, webhookError: webhook.error })
 })
 
 apiRoutes.post('/channels/line/test', async (c) => {
-  const cfg = await getChannelConfig(db(c.env), c.env.KV, 'line')
+  const cfg = await getChannelConfig(db(c.env), c.env.KV, c.get('ws'), 'line')
   if (!cfg) return c.json({ error: 'line_not_configured' }, 404)
-  const set = await lineSetWebhook(cfg.channelAccessToken, `${baseUrl(c.req.url)}/webhooks/line`)
+  const set = await lineSetWebhook(cfg.channelAccessToken, webhookUrl(c.req.url, 'line', c.get('ws')))
   const test = await lineTestWebhook(cfg.channelAccessToken)
   return c.json({ webhookSet: set.ok, webhookError: set.error, ...test })
 })
 
 apiRoutes.delete('/channels/line', async (c) => {
-  await deleteChannelConfig(db(c.env), 'line')
+  await deleteChannelConfig(db(c.env), c.get('ws'), 'line')
   return c.json({ ok: true })
 })
 
@@ -139,13 +147,13 @@ apiRoutes.post('/channels/meta', async (c) => {
   const version = c.env.META_GRAPH_VERSION || undefined
   const info = await metaInspectPageToken(pageAccessToken, version)
   if (!info.ok) return c.json({ error: 'invalid_token', detail: info.error }, 400)
-  await putChannelConfig(d, c.env.KV, 'meta', { appId, appSecret, pageAccessToken, pageId: info.pageId, pageName: info.pageName, instagramAccountId: info.instagramAccountId, instagramUsername: info.instagramUsername })
+  await putChannelConfig(d, c.env.KV, c.get('ws'), 'meta', { appId, appSecret, pageAccessToken, pageId: info.pageId, pageName: info.pageName, instagramAccountId: info.instagramAccountId, instagramUsername: info.instagramUsername })
   const sub = await metaSubscribePage(pageAccessToken, info.pageId, version)
   return c.json({ ok: true, pageName: info.pageName, pageId: info.pageId, instagramUsername: info.instagramUsername, subscribed: sub.ok, subscribeError: sub.ok ? undefined : sub.error })
 })
 
 apiRoutes.post('/channels/meta/test', async (c) => {
-  const cfg = await getChannelConfig(db(c.env), c.env.KV, 'meta')
+  const cfg = await getChannelConfig(db(c.env), c.env.KV, c.get('ws'), 'meta')
   if (!cfg || !cfg.pageId) return c.json({ error: 'meta_not_configured' }, 404)
   const version = c.env.META_GRAPH_VERSION || undefined
   const info = await metaInspectPageToken(cfg.pageAccessToken, version)
@@ -154,7 +162,7 @@ apiRoutes.post('/channels/meta/test', async (c) => {
 })
 
 apiRoutes.delete('/channels/meta', async (c) => {
-  await deleteChannelConfig(db(c.env), 'meta')
+  await deleteChannelConfig(db(c.env), c.get('ws'), 'meta')
   return c.json({ ok: true })
 })
 
@@ -171,7 +179,7 @@ async function applyMetaProfile(token: string, version: string | undefined, p: {
 
 apiRoutes.put('/channels/meta/profile', async (c) => {
   const d = db(c.env)
-  const cfg = await getChannelConfig(d, c.env.KV, 'meta')
+  const cfg = await getChannelConfig(d, c.env.KV, c.get('ws'), 'meta')
   if (!cfg) return c.json({ error: 'meta_not_configured' }, 404)
   const parsed = metaProfileSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: 'invalid_profile', errors: zodErrors(parsed.error) }, 400)
@@ -181,24 +189,24 @@ apiRoutes.put('/channels/meta/profile', async (c) => {
   const { set, remove } = buildMessengerProfile(profile)
   const messenger = await applyMetaProfile(cfg.pageAccessToken, version, { set, remove })
   // Instagram only when opted in, or to clear what an earlier save applied there.
-  const prev = await getSetting<MetaProfile>(d, 'profile:meta')
+  const prev = await getSetting<MetaProfile>(d, c.get('ws'), 'profile:meta')
   const ig = profile.applyToInstagram
     ? { set: Object.fromEntries(Object.entries(set).filter(([k]) => IG_PROFILE_FIELDS.includes(k))), remove: remove.filter((f) => IG_PROFILE_FIELDS.includes(f)) }
     : { set: {}, remove: IG_PROFILE_FIELDS }
   const instagram = cfg.instagramAccountId && (profile.applyToInstagram || prev?.applyToInstagram) ? await applyMetaProfile(cfg.pageAccessToken, version, ig, 'instagram') : undefined
-  await putSetting(d, 'profile:meta', profile)
+  await putSetting(d, c.get('ws'), 'profile:meta', profile)
   return c.json({ ok: messenger.ok && (instagram?.ok ?? true), results: { messenger, instagram }, profile })
 })
 
 apiRoutes.delete('/channels/meta/profile', async (c) => {
   const d = db(c.env)
-  const cfg = await getChannelConfig(d, c.env.KV, 'meta')
+  const cfg = await getChannelConfig(d, c.env.KV, c.get('ws'), 'meta')
   if (!cfg) return c.json({ error: 'meta_not_configured' }, 404)
   const version = c.env.META_GRAPH_VERSION || undefined
-  const prev = await getSetting<MetaProfile>(d, 'profile:meta')
+  const prev = await getSetting<MetaProfile>(d, c.get('ws'), 'profile:meta')
   const messenger = await metaDeleteProfile(cfg.pageAccessToken, version, PROFILE_FIELDS)
   const instagram = cfg.instagramAccountId && prev?.applyToInstagram ? await metaDeleteProfile(cfg.pageAccessToken, version, IG_PROFILE_FIELDS, 'instagram') : undefined
-  await deleteSetting(d, 'profile:meta')
+  await deleteSetting(d, c.get('ws'), 'profile:meta')
   return c.json({ ok: messenger.ok && (instagram?.ok ?? true), results: { messenger, instagram } })
 })
 
@@ -206,7 +214,7 @@ const MAX_RICHMENU_IMAGE = 1024 * 1024
 
 apiRoutes.put('/channels/line/richmenu', async (c) => {
   const d = db(c.env)
-  const cfg = await getChannelConfig(d, c.env.KV, 'line')
+  const cfg = await getChannelConfig(d, c.env.KV, c.get('ws'), 'line')
   if (!cfg) return c.json({ error: 'line_not_configured' }, 404)
   const parsed = lineRichMenuSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: 'invalid_richmenu', errors: zodErrors(parsed.error) }, 400)
@@ -228,23 +236,23 @@ apiRoutes.put('/channels/line/richmenu', async (c) => {
       return c.json({ error: 'line_error', detail: r.error }, 502)
     }
   }
-  const prev = await getSetting<StoredRichMenu>(d, 'richmenu:line')
+  const prev = await getSetting<StoredRichMenu>(d, c.get('ws'), 'richmenu:line')
   if (prev?.richMenuId) await lineDeleteRichMenu(token, prev.richMenuId)
-  await putSetting(d, 'richmenu:line', { ...menu, richMenuId: id } satisfies StoredRichMenu)
+  await putSetting(d, c.get('ws'), 'richmenu:line', { ...menu, richMenuId: id } satisfies StoredRichMenu)
   return c.json({ ok: true, richMenuId: id })
 })
 
 apiRoutes.delete('/channels/line/richmenu', async (c) => {
   const d = db(c.env)
-  const cfg = await getChannelConfig(d, c.env.KV, 'line')
+  const cfg = await getChannelConfig(d, c.env.KV, c.get('ws'), 'line')
   if (!cfg) return c.json({ error: 'line_not_configured' }, 404)
-  const prev = await getSetting<StoredRichMenu>(d, 'richmenu:line')
+  const prev = await getSetting<StoredRichMenu>(d, c.get('ws'), 'richmenu:line')
   // Best effort: a menu already removed in LINE Official Account Manager must not block deleting the setting.
   if (prev?.richMenuId) {
     await lineClearDefaultRichMenu(cfg.channelAccessToken)
     await lineDeleteRichMenu(cfg.channelAccessToken, prev.richMenuId)
   }
-  await deleteSetting(d, 'richmenu:line')
+  await deleteSetting(d, c.get('ws'), 'richmenu:line')
   return c.json({ ok: true })
 })
 
@@ -253,9 +261,14 @@ apiRoutes.get('/templates', (c) => c.json({ templates: TEMPLATES }))
 
 apiRoutes.get('/flows', async (c) => {
   const d = db(c.env)
-  const rows = await d.select().from(schema.flows).orderBy(desc(schema.flows.updatedAt))
+  const ws = c.get('ws')
+  const rows = await d.select().from(schema.flows).where(eq(schema.flows.workspaceId, ws)).orderBy(desc(schema.flows.updatedAt))
   const since30 = new Date(Date.now() - 30 * 86400_000).toISOString()
-  const runs = await d.select({ flowId: schema.events.flowId, n: sql<number>`count(*)` }).from(schema.events).where(and(eq(schema.events.type, 'trigger_fired'), gte(schema.events.createdAt, since30))).groupBy(schema.events.flowId)
+  const runs = await d
+    .select({ flowId: schema.events.flowId, n: sql<number>`count(*)` })
+    .from(schema.events)
+    .where(and(eq(schema.events.workspaceId, ws), eq(schema.events.type, 'trigger_fired'), gte(schema.events.createdAt, since30)))
+    .groupBy(schema.events.flowId)
   const runMap = new Map(runs.map((r) => [r.flowId, r.n]))
   return c.json({ flows: rows.map(parseFlow).map((f) => ({ ...f, runs30d: runMap.get(f.id) ?? 0 })) })
 })
@@ -273,27 +286,27 @@ apiRoutes.post('/flows', async (c) => {
   const definitionInput = body.definition ?? template?.definition ?? { triggers: [], entry: null, steps: [] }
   const v = validateFlow(definitionInput, kind)
   if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
-  const general = await getGeneral(d)
+  const general = await getGeneral(d, c.get('ws'))
   const name = body.name?.trim() || template?.name[general.language] || (kind === 'sequence' ? '新しいシーケンス' : '新しい自動化')
-  const row = await d.insert(schema.flows).values({ name, channel: channelParsed.data, kind, definition: JSON.stringify(v.definition) }).returning().get()
+  const row = await d.insert(schema.flows).values({ workspaceId: c.get('ws'), name, channel: channelParsed.data, kind, definition: JSON.stringify(v.definition) }).returning().get()
   return c.json({ flow: parseFlow(row!), warnings: v.warnings }, 201)
 })
 
-async function loadFlow(d: Db, id: string) {
+async function loadFlow(d: Db, ws: number, id: string) {
   const n = Number(id)
   if (!Number.isInteger(n)) return null
-  const row = await d.select().from(schema.flows).where(eq(schema.flows.id, n)).get()
+  const row = await d.select().from(schema.flows).where(and(eq(schema.flows.id, n), eq(schema.flows.workspaceId, ws))).get()
   return row ? parseFlow(row) : null
 }
 
 apiRoutes.get('/flows/:id', async (c) => {
-  const flow = await loadFlow(db(c.env), c.req.param('id'))
+  const flow = await loadFlow(db(c.env), c.get('ws'), c.req.param('id'))
   return flow ? c.json({ flow }) : c.json({ error: 'not_found' }, 404)
 })
 
 apiRoutes.put('/flows/:id', async (c) => {
   const d = db(c.env)
-  const flow = await loadFlow(d, c.req.param('id'))
+  const flow = await loadFlow(d, c.get('ws'), c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ name?: string; channel?: string; definition?: unknown; status?: string }>()
   const patch: Partial<typeof schema.flows.$inferInsert> = { updatedAt: new Date().toISOString() }
@@ -319,7 +332,7 @@ apiRoutes.put('/flows/:id', async (c) => {
 
 apiRoutes.post('/flows/:id/publish', async (c) => {
   const d = db(c.env)
-  const flow = await loadFlow(d, c.req.param('id'))
+  const flow = await loadFlow(d, c.get('ws'), c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   const v = validateFlow(flow.definition, flow.kind)
   if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
@@ -329,7 +342,7 @@ apiRoutes.post('/flows/:id/publish', async (c) => {
 
 apiRoutes.post('/flows/:id/unpublish', async (c) => {
   const d = db(c.env)
-  const flow = await loadFlow(d, c.req.param('id'))
+  const flow = await loadFlow(d, c.get('ws'), c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   await d.update(schema.flows).set({ status: 'draft', updatedAt: new Date().toISOString() }).where(eq(schema.flows.id, flow.id))
   await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, flow.id))
@@ -338,7 +351,7 @@ apiRoutes.post('/flows/:id/unpublish', async (c) => {
 
 apiRoutes.delete('/flows/:id', async (c) => {
   const d = db(c.env)
-  const flow = await loadFlow(d, c.req.param('id'))
+  const flow = await loadFlow(d, c.get('ws'), c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   await d.delete(schema.flows).where(eq(schema.flows.id, flow.id))
   await d.delete(schema.sessions).where(eq(schema.sessions.flowId, flow.id))
@@ -348,7 +361,7 @@ apiRoutes.delete('/flows/:id', async (c) => {
 
 apiRoutes.post('/flows/:id/test', async (c) => {
   const d = db(c.env)
-  const flow = await loadFlow(d, c.req.param('id'))
+  const flow = await loadFlow(d, c.get('ws'), c.req.param('id'))
   if (!flow) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ inputs?: SimulatedInput[]; channel?: Channel; newContact?: boolean; definition?: unknown }>()
   let target = flow
@@ -357,14 +370,19 @@ apiRoutes.post('/flows/:id/test', async (c) => {
     if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
     target = { ...flow, definition: v.definition }
   }
-  const { botFields, timezone } = await getGeneral(d)
-  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true, { botFields, timezone, ai: lazyAi(c.env, d) })
+  const { botFields, timezone } = await getGeneral(d, c.get('ws'))
+  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true, { botFields, timezone, ai: lazyAi(c.env, d, c.get('ws')) })
   return c.json(result)
 })
 
 /* ---------- Contacts ---------- */
 apiRoutes.get('/tags', async (c) => {
-  const rows = await db(c.env).select({ tag: schema.contactTags.tag, n: sql<number>`count(*)` }).from(schema.contactTags).groupBy(schema.contactTags.tag).orderBy(desc(sql`count(*)`))
+  const rows = await db(c.env)
+    .select({ tag: schema.contactTags.tag, n: sql<number>`count(*)` })
+    .from(schema.contactTags)
+    .where(ofWorkspace(schema.contactTags.contactId, c.get('ws')))
+    .groupBy(schema.contactTags.tag)
+    .orderBy(desc(sql`count(*)`))
   return c.json({ tags: rows })
 })
 
@@ -376,13 +394,13 @@ apiRoutes.get('/contacts', async (c) => {
   const segment = c.req.query('segment')?.trim()
   const page = Math.max(1, Number(c.req.query('page') ?? '1'))
   const size = 50
-  const conds = []
+  const conds: (SQL | undefined)[] = [eq(schema.contacts.workspaceId, c.get('ws'))]
   if (q) conds.push(or(like(schema.contacts.displayName, `%${q}%`), like(schema.contacts.username, `%${q}%`), like(schema.contacts.fields, `%${q}%`)))
   if (channel) conds.push(eq(schema.contacts.channel, channel))
   if (tag) conds.push(sql`${schema.contacts.id} in (select contact_id from contact_tags where tag = ${tag})`)
-  const where = conds.length ? and(...conds) : undefined
+  const where = and(...conds)
   if (segment) {
-    const seg = await loadSegment(d, Number(segment))
+    const seg = await loadSegment(d, c.get('ws'), Number(segment))
     if (!seg) return c.json({ error: 'not_found' }, 404)
     const tagMap = await tagsByContact(d)
     // ponytail: O(n) in-memory scan over all contacts (rules are not SQL, and D1 caps bound parameters at 100); move to SQL if contacts outgrow Worker memory
@@ -398,8 +416,8 @@ apiRoutes.get('/contacts', async (c) => {
 
 apiRoutes.get('/contacts/export.csv', async (c) => {
   const d = db(c.env)
-  const rows = await d.select().from(schema.contacts).orderBy(schema.contacts.id)
-  const tags = await d.select().from(schema.contactTags)
+  const rows = await d.select().from(schema.contacts).where(eq(schema.contacts.workspaceId, c.get('ws'))).orderBy(schema.contacts.id)
+  const tags = await d.select().from(schema.contactTags).where(ofWorkspace(schema.contactTags.contactId, c.get('ws')))
   const fieldNames = new Set<string>()
   const parsed = rows.map((r) => ({ r, f: parseFields(r) }))
   for (const { f } of parsed) for (const k of Object.keys(f)) fieldNames.add(k)
@@ -413,15 +431,14 @@ apiRoutes.get('/contacts/export.csv', async (c) => {
   return c.body('﻿' + lines.join('\r\n'), 200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="contacts.csv"' })
 })
 
-async function loadContact(d: Db, id: string) {
+async function loadContact(d: Db, ws: number, id: string) {
   const n = Number(id)
-  if (!Number.isInteger(n)) return null
-  return (await d.select().from(schema.contacts).where(eq(schema.contacts.id, n)).get()) ?? null
+  return Number.isInteger(n) ? ((await getContact(d, ws, n)) ?? null) : null
 }
 
 apiRoutes.get('/contacts/:id', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const tags = await getTags(d, contact.id)
   const session = await d.select().from(schema.sessions).where(eq(schema.sessions.contactId, contact.id)).get()
@@ -430,7 +447,7 @@ apiRoutes.get('/contacts/:id', async (c) => {
 
 apiRoutes.patch('/contacts/:id', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ displayName?: string; fields?: Record<string, string>; botPaused?: boolean; status?: string; notes?: string | null }>()
   if (body.status !== undefined && body.status !== 'open' && body.status !== 'closed') return c.json({ error: 'invalid_status' }, 400)
@@ -448,7 +465,7 @@ apiRoutes.patch('/contacts/:id', async (c) => {
 
 apiRoutes.post('/contacts/:id/tags', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ tag?: string }>()
   if (!body.tag?.trim()) return c.json({ error: 'missing_tag' }, 400)
@@ -458,7 +475,7 @@ apiRoutes.post('/contacts/:id/tags', async (c) => {
 
 apiRoutes.delete('/contacts/:id/tags/:tag', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   await removeTag(d, contact.id, c.req.param('tag'))
   return c.json({ tags: await getTags(d, contact.id) })
@@ -466,7 +483,7 @@ apiRoutes.delete('/contacts/:id/tags/:tag', async (c) => {
 
 apiRoutes.post('/contacts/:id/sequences', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ flowId?: number }>()
   if (!Number.isInteger(body.flowId)) return c.json({ error: 'missing_flow_id' }, 400)
@@ -477,7 +494,7 @@ apiRoutes.post('/contacts/:id/sequences', async (c) => {
 
 apiRoutes.delete('/contacts/:id/sequences/:flowId', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   await unsubscribeSequence(d, contact.id, Number(c.req.param('flowId')))
   return c.json({ sequences: await contactSequences(d, contact.id) })
@@ -485,7 +502,7 @@ apiRoutes.delete('/contacts/:id/sequences/:flowId', async (c) => {
 
 apiRoutes.delete('/contacts/:id', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   await d.delete(schema.messages).where(eq(schema.messages.contactId, contact.id))
   await d.delete(schema.contactTags).where(eq(schema.contactTags.contactId, contact.id))
@@ -501,7 +518,7 @@ apiRoutes.get('/inbox', async (c) => {
   const rows = await d
     .select()
     .from(schema.contacts)
-    .where(inboxWhere(c.req.query('filter') ?? 'all'))
+    .where(and(eq(schema.contacts.workspaceId, c.get('ws')), inboxWhere(c.req.query('filter') ?? 'all')))
     .orderBy(desc(sql`coalesce(${schema.contacts.lastInboundAt}, ${schema.contacts.lastOutboundAt}, ${schema.contacts.createdAt})`))
     .limit(100)
   const ids = rows.map((r) => r.id)
@@ -516,7 +533,7 @@ apiRoutes.get('/inbox', async (c) => {
 })
 
 /* ---------- Snippets (canned inbox replies) ---------- */
-apiRoutes.get('/snippets', async (c) => c.json({ snippets: await db(c.env).select().from(schema.snippets).orderBy(schema.snippets.id) }))
+apiRoutes.get('/snippets', async (c) => c.json({ snippets: await db(c.env).select().from(schema.snippets).where(eq(schema.snippets.workspaceId, c.get('ws'))).orderBy(schema.snippets.id) }))
 
 apiRoutes.post('/snippets', async (c) => {
   const body = await c.req.json<{ name?: string; text?: string }>()
@@ -524,17 +541,21 @@ apiRoutes.post('/snippets', async (c) => {
   const text = String(body.text ?? '').trim()
   if (!name || !text) return c.json({ error: 'missing_fields' }, 400)
   if (name.length > 60 || text.length > 2000) return c.json({ error: 'too_long' }, 400)
-  return c.json({ snippet: await db(c.env).insert(schema.snippets).values({ name, text }).returning().get() }, 201)
+  return c.json({ snippet: await db(c.env).insert(schema.snippets).values({ workspaceId: c.get('ws'), name, text }).returning().get() }, 201)
 })
 
 apiRoutes.delete('/snippets/:id', async (c) => {
-  const row = await db(c.env).delete(schema.snippets).where(eq(schema.snippets.id, Number(c.req.param('id')))).returning().get()
+  const row = await db(c.env)
+    .delete(schema.snippets)
+    .where(and(eq(schema.snippets.id, Number(c.req.param('id'))), eq(schema.snippets.workspaceId, c.get('ws'))))
+    .returning()
+    .get()
   return row ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404)
 })
 
 apiRoutes.get('/inbox/:id/messages', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const rows = await d.select().from(schema.messages).where(eq(schema.messages.contactId, contact.id)).orderBy(desc(schema.messages.id)).limit(200)
   await d.update(schema.contacts).set({ unread: 0 }).where(eq(schema.contacts.id, contact.id))
@@ -543,12 +564,12 @@ apiRoutes.get('/inbox/:id/messages', async (c) => {
 
 apiRoutes.post('/inbox/:id/send', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ text?: string; imageUrl?: string; pauseBot?: boolean }>()
   const text = body.text?.trim() ?? ''
   if (!text && !body.imageUrl) return c.json({ error: 'empty' }, 400)
-  const adapter = await getAdapter(c.env, d, contact.channel as Channel)
+  const adapter = await getAdapter(c.env, d, c.get('ws'), contact.channel as Channel)
   if (!adapter) return c.json({ error: 'channel_not_configured' }, 400)
   const res = await adapter.send(contact.channelUserId, { text: text || undefined, imageUrl: body.imageUrl })
   await logMessage(d, { contactId: contact.id, direction: 'out', source: 'human', kind: text ? 'text' : 'image', text, payload: body.imageUrl ? { imageUrl: body.imageUrl } : undefined, error: res.ok ? undefined : res.error })
@@ -561,7 +582,7 @@ apiRoutes.post('/inbox/:id/send', async (c) => {
 
 apiRoutes.post('/inbox/:id/bot', async (c) => {
   const d = db(c.env)
-  const contact = await loadContact(d, c.req.param('id'))
+  const contact = await loadContact(d, c.get('ws'), c.req.param('id'))
   if (!contact) return c.json({ error: 'not_found' }, 404)
   const body = await c.req.json<{ paused?: boolean }>()
   await setBotPaused(d, contact.id, Boolean(body.paused))
@@ -570,7 +591,7 @@ apiRoutes.post('/inbox/:id/bot', async (c) => {
 
 /* ---------- Broadcasts ---------- */
 apiRoutes.get('/broadcasts', async (c) => {
-  const rows = await db(c.env).select().from(schema.broadcasts).orderBy(desc(schema.broadcasts.id)).limit(100)
+  const rows = await db(c.env).select().from(schema.broadcasts).where(eq(schema.broadcasts.workspaceId, c.get('ws'))).orderBy(desc(schema.broadcasts.id)).limit(100)
   return c.json({ broadcasts: rows.map((r) => ({ ...r, buttons: parseBroadcastButtons(r.buttons) })) })
 })
 
@@ -578,9 +599,9 @@ apiRoutes.get('/broadcasts/reach', async (c) => {
   const d = db(c.env)
   const channel = (c.req.query('channel') || 'any') as Channel | 'any'
   const tag = c.req.query('tag')?.trim() || null
-  const segmentId = await segmentIdOf(d, c.req.query('segmentId'))
+  const segmentId = await segmentIdOf(d, c.get('ws'), c.req.query('segmentId'))
   if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
-  return c.json(await broadcastReach(d, channel, tag, segmentId, Boolean(c.req.query('messageTag'))))
+  return c.json(await broadcastReach(d, c.get('ws'), channel, tag, segmentId, Boolean(c.req.query('messageTag'))))
 })
 
 apiRoutes.post('/broadcasts', async (c) => {
@@ -592,7 +613,7 @@ apiRoutes.post('/broadcasts', async (c) => {
   if (!ch.success) return c.json({ error: 'invalid_channel' }, 400)
   const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : new Date()
   if (Number.isNaN(scheduledAt.getTime())) return c.json({ error: 'invalid_date' }, 400)
-  const segmentId = await segmentIdOf(d, body.segmentId)
+  const segmentId = await segmentIdOf(d, c.get('ws'), body.segmentId)
   if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
   const buttons = broadcastButtonsSchema.safeParse(body.buttons ?? [])
   if (!buttons.success) return c.json({ error: 'invalid_buttons', errors: zodErrors(buttons.error) }, 400)
@@ -601,6 +622,7 @@ apiRoutes.post('/broadcasts', async (c) => {
   const row = await d
     .insert(schema.broadcasts)
     .values({
+      workspaceId: c.get('ws'),
       name: body.name?.trim() || text.slice(0, 30),
       channel: ch.data,
       tag: segmentId ? null : body.tag?.trim() || null,
@@ -619,36 +641,37 @@ apiRoutes.post('/broadcasts', async (c) => {
 apiRoutes.post('/broadcasts/:id/cancel', async (c) => {
   const d = db(c.env)
   const id = Number(c.req.param('id'))
-  await d.update(schema.broadcasts).set({ status: 'canceled' }).where(and(eq(schema.broadcasts.id, id), or(eq(schema.broadcasts.status, 'scheduled'), eq(schema.broadcasts.status, 'running'))))
-  await d.update(schema.broadcastJobs).set({ status: 'skipped', error: 'canceled' }).where(and(eq(schema.broadcastJobs.broadcastId, id), eq(schema.broadcastJobs.status, 'pending')))
+  const b = schema.broadcasts
+  const canceled = await d.update(b).set({ status: 'canceled' }).where(and(eq(b.id, id), eq(b.workspaceId, c.get('ws')), or(eq(b.status, 'scheduled'), eq(b.status, 'running')))).returning().get()
+  if (canceled) await d.update(schema.broadcastJobs).set({ status: 'skipped', error: 'canceled' }).where(and(eq(schema.broadcastJobs.broadcastId, id), eq(schema.broadcastJobs.status, 'pending')))
   return c.json({ ok: true })
 })
 
 /* ---------- Segments ---------- */
 /** An optional segment id from a query or body: null when absent, false when it names no segment. */
-async function segmentIdOf(d: Db, raw: unknown): Promise<number | null | false> {
+async function segmentIdOf(d: Db, ws: number, raw: unknown): Promise<number | null | false> {
   if (raw === undefined || raw === null || raw === '') return null
-  const seg = await loadSegment(d, Number(raw))
+  const seg = await loadSegment(d, ws, Number(raw))
   return seg ? seg.id : false
 }
 
 const issues = (e: ZodError) => e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
 
 apiRoutes.get('/segments', async (c) => {
-  const rows = await db(c.env).select().from(schema.segments).orderBy(desc(schema.segments.id))
+  const rows = await db(c.env).select().from(schema.segments).where(eq(schema.segments.workspaceId, c.get('ws'))).orderBy(desc(schema.segments.id))
   return c.json({ segments: rows.map(parseSegment) })
 })
 
 apiRoutes.post('/segments', async (c) => {
   const v = segmentInputSchema.safeParse(await c.req.json())
   if (!v.success) return c.json({ error: 'invalid_segment', errors: issues(v.error) }, 400)
-  const row = await db(c.env).insert(schema.segments).values({ name: v.data.name, rules: JSON.stringify(v.data.rules), mode: v.data.mode }).returning().get()
+  const row = await db(c.env).insert(schema.segments).values({ workspaceId: c.get('ws'), name: v.data.name, rules: JSON.stringify(v.data.rules), mode: v.data.mode }).returning().get()
   return c.json({ segment: parseSegment(row!) }, 201)
 })
 
 apiRoutes.put('/segments/:id', async (c) => {
   const d = db(c.env)
-  const seg = await loadSegment(d, Number(c.req.param('id')))
+  const seg = await loadSegment(d, c.get('ws'), Number(c.req.param('id')))
   if (!seg) return c.json({ error: 'not_found' }, 404)
   const v = segmentInputSchema.safeParse(await c.req.json())
   if (!v.success) return c.json({ error: 'invalid_segment', errors: issues(v.error) }, 400)
@@ -658,7 +681,7 @@ apiRoutes.put('/segments/:id', async (c) => {
 
 apiRoutes.delete('/segments/:id', async (c) => {
   const d = db(c.env)
-  const seg = await loadSegment(d, Number(c.req.param('id')))
+  const seg = await loadSegment(d, c.get('ws'), Number(c.req.param('id')))
   if (!seg) return c.json({ error: 'not_found' }, 404)
   await d.delete(schema.segments).where(eq(schema.segments.id, seg.id))
   return c.json({ ok: true })
@@ -667,24 +690,25 @@ apiRoutes.delete('/segments/:id', async (c) => {
 /* ---------- Reports ---------- */
 apiRoutes.get('/reports', async (c) => {
   const d = db(c.env)
+  const ws = c.get('ws')
   const days = Math.min(90, Math.max(1, Number(c.req.query('days') ?? '30')))
   const since = new Date(Date.now() - days * 86400_000).toISOString()
   const byFlow = await d
     .select({ flowId: schema.events.flowId, type: schema.events.type, n: sql<number>`count(*)` })
     .from(schema.events)
-    .where(gte(schema.events.createdAt, since))
+    .where(and(eq(schema.events.workspaceId, ws), gte(schema.events.createdAt, since)))
     .groupBy(schema.events.flowId, schema.events.type)
   const daily = await d
     .select({ day: sql<string>`substr(${schema.messages.createdAt}, 1, 10)`, direction: schema.messages.direction, n: sql<number>`count(*)` })
     .from(schema.messages)
-    .where(gte(schema.messages.createdAt, since))
+    .where(and(ofWorkspace(schema.messages.contactId, ws), gte(schema.messages.createdAt, since)))
     .groupBy(sql`substr(${schema.messages.createdAt}, 1, 10)`, schema.messages.direction)
   const newContacts = await d
     .select({ day: sql<string>`substr(${schema.contacts.createdAt}, 1, 10)`, n: sql<number>`count(*)` })
     .from(schema.contacts)
-    .where(gte(schema.contacts.createdAt, since))
+    .where(and(eq(schema.contacts.workspaceId, ws), gte(schema.contacts.createdAt, since)))
     .groupBy(sql`substr(${schema.contacts.createdAt}, 1, 10)`)
-  const flows = (await d.select().from(schema.flows)).map(parseFlow)
+  const flows = (await d.select().from(schema.flows).where(eq(schema.flows.workspaceId, ws))).map(parseFlow)
   const perFlow = flows.map((f) => {
     const counts: Record<string, number> = {}
     for (const r of byFlow) if (r.flowId === f.id) counts[r.type] = r.n
@@ -705,16 +729,16 @@ const aiInfo = (cfg: AiConfig | null) => (cfg ? { configured: true, provider: cf
 
 apiRoutes.get('/settings', async (c) => {
   const d = db(c.env)
-  const general = await getGeneral(d)
-  const mcpConfigured = (await c.env.KV.get('mcp:token_hash')) !== null
-  const ai = aiInfo(await getSetting<AiConfig>(d, 'ai'))
+  const general = await getGeneral(d, c.get('ws'))
+  const mcpConfigured = (await mcpTokenHash(c.env.KV, c.get('ws'))) !== null
+  const ai = aiInfo(await getSetting<AiConfig>(d, c.get('ws'), 'ai'))
   return c.json({ general, mcp: { configured: mcpConfigured, url: `${baseUrl(c.req.url)}/mcp` }, ai })
 })
 
 apiRoutes.put('/settings', async (c) => {
   const d = db(c.env)
   const body = await c.req.json<Partial<GeneralSettings>>()
-  const current = await getGeneral(d)
+  const current = await getGeneral(d, c.get('ws'))
   const bf = body.botFields
   if (bf !== undefined && !(bf && typeof bf === 'object' && !Array.isArray(bf) && Object.keys(bf).length <= 50 && Object.entries(bf).every(([k, v]) => /^[\w-]{1,40}$/.test(k) && typeof v === 'string' && v.length <= 2000))) {
     return c.json({ error: 'invalid_bot_fields' }, 400)
@@ -728,20 +752,20 @@ apiRoutes.put('/settings', async (c) => {
     handoffReply: typeof body.handoffReply === 'string' ? body.handoffReply : current.handoffReply,
     botFields: bf ?? current.botFields,
   }
-  await putSetting(d, 'general', next)
+  await putSetting(d, c.get('ws'), 'general', next)
   return c.json({ general: next })
 })
 
 apiRoutes.post('/settings/mcp/rotate', async (c) => {
   if (c.get('auth') !== 'session') return c.json({ error: 'session_required' }, 403)
   const token = `sk_${randomToken(32)}`
-  await c.env.KV.put('mcp:token_hash', await sha256Hex(token))
+  await setMcpToken(c.env.KV, c.get('ws'), token)
   return c.json({ token, url: `${baseUrl(c.req.url)}/mcp` })
 })
 
 apiRoutes.delete('/settings/mcp', async (c) => {
   if (c.get('auth') !== 'session') return c.json({ error: 'session_required' }, 403)
-  await c.env.KV.delete('mcp:token_hash')
+  await setMcpToken(c.env.KV, c.get('ws'), null)
   return c.json({ ok: true })
 })
 
@@ -754,24 +778,24 @@ apiRoutes.put('/settings/ai', async (c) => {
   const model = str(body.model)
   const baseUrl = provider === 'openai' ? str(body.baseUrl) : ''
   if (baseUrl && (!/^https:\/\//i.test(baseUrl) || !URL.canParse(baseUrl))) return c.json({ error: 'invalid_base_url' }, 400)
-  const current = await getAiConfig(d, c.env.KV)
+  const current = await getAiConfig(d, c.env.KV, c.get('ws'))
   // Keep the saved key only for the same endpoint, so changing the Base URL cannot send it elsewhere.
   const sameEndpoint = current?.provider === provider && (current.baseUrl ?? '') === baseUrl
   const apiKey = provider === 'workers_ai' ? '' : str(body.apiKey) || (sameEndpoint ? (current?.apiKey ?? '') : '')
   if (provider !== 'workers_ai' && !apiKey) return c.json({ error: 'missing_api_key' }, 400)
   if (provider === 'openai' && !model) return c.json({ error: 'missing_model' }, 400)
   const cfg: AiConfig = { provider, ...(apiKey && { apiKey }), ...(model && { model }), ...(baseUrl && { baseUrl }) }
-  await putAiConfig(d, c.env.KV, cfg)
+  await putAiConfig(d, c.env.KV, c.get('ws'), cfg)
   return c.json({ ai: aiInfo(cfg) })
 })
 
 apiRoutes.delete('/settings/ai', async (c) => {
-  await deleteSetting(db(c.env), 'ai')
+  await deleteSetting(db(c.env), c.get('ws'), 'ai')
   return c.json({ ok: true })
 })
 
 apiRoutes.post('/settings/ai/test', async (c) => {
-  const cfg = await getAiConfig(db(c.env), c.env.KV)
+  const cfg = await getAiConfig(db(c.env), c.env.KV, c.get('ws'))
   if (!cfg) return c.json({ ok: false, error: 'ai_not_configured' })
   try {
     // Default max_tokens: Claude models may think first, and a tiny cap could leave no text.
@@ -784,3 +808,40 @@ apiRoutes.post('/settings/ai/test', async (c) => {
 
 /* ---------- Maintenance ---------- */
 apiRoutes.post('/scheduler/run', async (c) => c.json(await runScheduledTasks(c.env, db(c.env))))
+
+/* ---------- Workspaces (session only; mounted before resolveWorkspace, so not scoped to one) ---------- */
+export const workspaceRoutes = new Hono<AppEnv>()
+
+workspaceRoutes.use(async (c, next) => (c.get('auth') === 'session' ? next() : c.json({ error: 'session_required' }, 403)))
+
+const workspaceName = (raw: unknown) => {
+  const name = typeof raw === 'string' ? raw.trim() : ''
+  return name && name.length <= 60 ? name : null
+}
+
+workspaceRoutes.get('/', async (c) => {
+  const workspaces = await listWorkspaces(db(c.env))
+  const requested = parseWorkspaceId(requestedWorkspace(c))
+  return c.json({ workspaces, current: workspaces.some((w) => w.id === requested) ? requested : 1 })
+})
+
+workspaceRoutes.post('/', async (c) => {
+  const name = workspaceName((await c.req.json<{ name?: unknown }>().catch(() => ({}) as { name?: unknown })).name)
+  if (!name) return c.json({ error: 'invalid_name' }, 400)
+  return c.json({ workspace: await createWorkspace(db(c.env), name) }, 201)
+})
+
+workspaceRoutes.put('/:id', async (c) => {
+  const id = parseWorkspaceId(c.req.param('id'))
+  const name = workspaceName((await c.req.json<{ name?: unknown }>().catch(() => ({}) as { name?: unknown })).name)
+  if (!name) return c.json({ error: 'invalid_name' }, 400)
+  const row = id === null ? undefined : await renameWorkspace(db(c.env), id, name)
+  return row ? c.json({ workspace: row }) : c.json({ error: 'workspace_not_found' }, 404)
+})
+
+workspaceRoutes.delete('/:id', async (c) => {
+  const id = parseWorkspaceId(c.req.param('id'))
+  const res = id === null ? 'not_found' : await deleteWorkspace(db(c.env), c.env.KV, id)
+  if (res === 'cannot_delete_default') return c.json({ error: res }, 400)
+  return res === 'ok' ? c.json({ ok: true }) : c.json({ error: 'workspace_not_found' }, 404)
+})

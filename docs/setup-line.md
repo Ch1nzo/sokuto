@@ -64,7 +64,9 @@ LINE Developers コンソール (https://developers.line.biz/console/) で、対
 このとき Sokuto は次のことを自動で行います。
 
 - トークンが正しいかを LINE に問い合わせ、公式アカウントの名前と ID を表示します。
-- LINE に **Webhook URL** (`https://<あなたの Worker の URL>/webhooks/line`) を登録します。自分で入力する必要はありません。
+- LINE に **Webhook URL** (`https://<あなたの Worker の URL>/webhooks/line/<ワークスペース ID>`) を登録します。自分で入力する必要はありません。
+
+> Webhook URL の末尾の数字は、いま開いているワークスペースの ID です (ワークスペースごとに別の LINE 公式アカウントをつなげます)。手で設定するときは、必ず接続したいワークスペースの「チャネル接続」画面に表示されている URL をコピーしてください。ワークスペース機能より前に設定した `…/webhooks/line` (ID なし) は、最初のワークスペース (ID 1) の URL としてそのまま使えます。
 
 「Webhook NG」と表示された場合は、LINE Developers コンソールの「Messaging API 設定」タブで、**Webhook URL** に管理画面に表示されている URL を手で貼り付け、「更新」を押してください。
 
@@ -128,7 +130,7 @@ LINE からの Webhook は「チャネルシークレット」で署名されて
 
 1. LINE Official Account Manager の応答設定で **Webhook がオン**、**応答メッセージがオフ** になっているか。
 2. Sokuto の「受信箱」にメッセージが表示されているか。
-   - **表示されていない**: LINE から届いていません。「接続を確認」を押し、Webhook URL が `https://<Worker の URL>/webhooks/line` になっているか確認します。
+   - **表示されていない**: LINE から届いていません。「接続を確認」を押し、Webhook URL が「チャネル接続」画面に表示されている URL (`https://<Worker の URL>/webhooks/line/<ワークスペース ID>`) と同じか確認します。別のワークスペースの URL になっていると、メッセージはそちらに届きます。
    - **表示されている**: 届いていますが、自動化が動いていません。次を確認します。
 3. 自動化が **「公開中」** になっているか (下書きのままでは動きません)。
 4. 自動化の **チャネル** が「すべて」または「LINE」になっているか。
@@ -150,7 +152,7 @@ LINE からの Webhook は「チャネルシークレット」で署名されて
 
 1. Create a LINE Official Account at manager.line.biz, then **Settings → Messaging API → Use Messaging API** and choose a provider (since 2024 this is the standard way to create a Messaging API channel; existing channels can still be opened from developers.line.biz/console).
 2. In the LINE Developers console copy the **Channel secret** (Basic settings tab) and issue a **long-lived channel access token** (bottom of the Messaging API tab).
-3. In Sokuto open **Channels**, paste both into the LINE card and click **Connect**. Sokuto validates the token and registers the webhook URL `https://<worker>/webhooks/line` automatically.
+3. In Sokuto open **Channels**, paste both into the LINE card and click **Connect**. Sokuto validates the token and registers the webhook URL `https://<worker>/webhooks/line/<workspace id>` automatically (each workspace has its own URL; copy it from that workspace's Channels page if you set it by hand; the old `/webhooks/line` without an id keeps working for workspace 1).
 4. In LINE Official Account Manager → Settings → Response settings: **Auto-reply messages off**, **Webhooks on** (and turn off the greeting message if you use the follow trigger).
 5. Click **Test connection** (runs LINE's webhook test), add the bot as a friend via the QR code and publish the welcome template.
 6. Optional: set the default **rich menu** in the LINE card (public JPEG/PNG URL ≤1 MB, 2500×1686 or 2500×843, 1/2/3/4/6 areas, each starting a flow, opening a link or sending text). Sokuto downloads the image, creates the menu, uploads the image and sets it as default for all friends. You can also build menus in LINE Official Account Manager (text action + keyword trigger).

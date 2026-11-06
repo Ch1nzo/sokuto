@@ -50,11 +50,11 @@ export async function complete(cfg: AiConfig, req: AiRequest, ai?: Ai): Promise<
   return r.choices?.[0]?.message?.content ?? ''
 }
 
-/** AiCaller that loads the settings on first use; throws `ai_not_configured` when none are saved. */
-export function lazyAi(env: Env, db: Db): AiCaller {
+/** AiCaller that loads the workspace's settings on first use; throws `ai_not_configured` when none are saved. */
+export function lazyAi(env: Env, db: Db, ws: number): AiCaller {
   let cfg: Promise<AiConfig | null> | undefined
   return async (req) => {
-    const c = await (cfg ??= getAiConfig(db, env.KV))
+    const c = await (cfg ??= getAiConfig(db, env.KV, ws))
     if (!c) throw new Error('ai_not_configured')
     return complete(c, req, env.AI)
   }

@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { matchesSegment, parseSegment, type Segment } from '../src/segments'
 import type { ContactRow } from '../src/contacts'
 
-const row = (over: Partial<{ rules: string; mode: string }> = {}) => ({ id: 1, name: 'VIP', rules: '[]', mode: 'all', createdAt: '2025-01-01T00:00:00.000Z', ...over })
+const row = (over: Partial<{ rules: string; mode: string }> = {}) => ({ id: 1, workspaceId: 1, name: 'VIP', rules: '[]', mode: 'all', createdAt: '2025-01-01T00:00:00.000Z', ...over })
 
 function contact(over: Partial<ContactRow> = {}): ContactRow {
   return {
     id: 1,
+    workspaceId: 1,
     channel: 'line',
     channelUserId: 'u1',
     displayName: 'Taro',

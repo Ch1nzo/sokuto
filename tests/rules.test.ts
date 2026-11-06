@@ -6,6 +6,7 @@ import type { ContactRow } from '../src/contacts'
 function contact(over: Partial<ContactRow> = {}): ContactRow {
   return {
     id: 1,
+    workspaceId: 1,
     channel: 'line',
     channelUserId: 'u1',
     displayName: 'Taro Yamada',

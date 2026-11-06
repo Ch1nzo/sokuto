@@ -22,6 +22,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
   const adapter = new RecordingAdapter(channel)
   const contact: ContactRow = {
     id: -1,
+    workspaceId: flow.workspaceId,
     channel,
     channelUserId: 'test-user',
     displayName: 'テスト 太郎',
@@ -39,7 +40,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     updatedAt: new Date().toISOString(),
   }
   const liveFlow: FlowRecord = { ...flow, status: 'live' }
-  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], dryRunNotes: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now, ai: opts.ai }
+  const ctx: RunContext = { db, ws: flow.workspaceId, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], dryRunNotes: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now, ai: opts.ai }
   const steps: SimulationStep[] = []
   let first = isNewContact
   for (const input of inputs) {

@@ -7,7 +7,7 @@ import type { InboundEvent } from '../src/channels/types'
 import type { ContactRow } from '../src/contacts'
 
 function flow(triggers: Trigger[], over: Partial<FlowRecord> = {}): FlowRecord {
-  return { id: 1, name: 'f', channel: 'any', status: 'live', kind: 'flow', definition: { triggers, entry: null, steps: [] }, createdAt: '', updatedAt: '', ...over }
+  return { id: 1, workspaceId: 1, name: 'f', channel: 'any', status: 'live', kind: 'flow', definition: { triggers, entry: null, steps: [] }, createdAt: '', updatedAt: '', ...over }
 }
 
 function ev(over: Partial<InboundEvent>): InboundEvent {
@@ -17,6 +17,7 @@ function ev(over: Partial<InboundEvent>): InboundEvent {
 function contact(over: Partial<ContactRow> = {}): ContactRow {
   return {
     id: 1,
+    workspaceId: 1,
     channel: 'line',
     channelUserId: 'U1',
     displayName: 'Taro Yamada',
@@ -161,7 +162,7 @@ describe('matchTrigger: other trigger types', () => {
 describe('startFlow', () => {
   const run = async (trigger: Trigger) => {
     const adapter = new RecordingAdapter('messenger')
-    await startFlow({ db: {} as unknown as Db, adapter, contact: contact(), flow: flow([trigger]), commentId: 'c1', dryRun: true }, trigger)
+    await startFlow({ db: {} as unknown as Db, ws: 1, adapter, contact: contact(), flow: flow([trigger]), commentId: 'c1', dryRun: true }, trigger)
     return adapter.likedComments
   }
 

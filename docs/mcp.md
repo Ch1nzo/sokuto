@@ -15,6 +15,8 @@
 3. 表示された **MCP URL** と **トークン** (`sk_` で始まる文字列) をコピーします。
    - **トークンは一度しか表示されません。** なくした場合は「トークンを再発行」を押してください (古いトークンは使えなくなります)。
 
+> **トークンはワークスペースごとです。** 発行したときに開いていたワークスペースのデータ (自動化・連絡先・配信・設定など) だけを操作でき、ほかのワークスペースは見えません。どのワークスペースにつながっているかは `get_overview` の `workspace` で確認できます。複数のワークスペースを AI から操作したいときは、ワークスペースを切り替えてそれぞれトークンを発行し、AI アシスタントには別の名前 (例: `sokuto-shop-a`, `sokuto-shop-b`) で登録してください。ワークスペースの作成・削除は管理画面からだけ行えます。
+
 ## 2. AI アシスタントに登録する
 
 以下の例では、`https://sokuto.example.workers.dev/mcp` を自分の MCP URL に、`sk_xxxxxxxx` を自分のトークンに置き換えてください。
@@ -100,7 +102,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 
 | ツール | 内容 |
 | --- | --- |
-| `get_overview` | ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、AI プロバイダーの設定状況 (`ai: { configured, provider }`。AI 応答ステップと意図トリガーに必要)、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
+| `get_overview` | 接続先のワークスペース (`workspace: { id, name }`)、ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、AI プロバイダーの設定状況 (`ai: { configured, provider }`。AI 応答ステップと意図トリガーに必要)、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
 | `get_flow_schema` | 自動化 (フロー) の JSON の書き方 (トリガー・ステップ・変数・コツ)。作成や編集の前に読みます |
 | `list_templates` | 用意されているテンプレート 7 種類の定義 |
 | `list_flows` | すべての自動化とシーケンスの一覧 (種類 `flow` / `sequence`、状態、チャネル、トリガー、ステップ数) |
@@ -154,21 +156,21 @@ AI に「公開する前に確認して」と伝えておくと、勝手に公�
 
 ## 5. セキュリティについて
 
-- **トークンは管理者パスワードと同じくらい強い権限を持ちます。** トークンがあれば、自動化の作成・削除、連絡先の閲覧、お客さんへのメッセージ送信、一斉配信ができます。MCP だけでなく管理画面用の API (`/api/*`) にも使えます。
+- **トークンは、そのワークスペースについて管理者パスワードと同じくらい強い権限を持ちます。** トークンがあれば、そのワークスペースの自動化の作成・削除、連絡先の閲覧、お客さんへのメッセージ送信、一斉配信ができます。MCP だけでなく管理画面用の API (`/api/*`、トークンのワークスペースに固定) にも使えます。
 - トークンをチャットや SNS、公開リポジトリに貼らないでください。
 - 漏れたかもしれない場合は、**「設定」→「AI 連携 (MCP)」→「トークンを再発行」** を押してください。古いトークンはすぐに使えなくなります。使わなくなったら **「無効化」** を押してください。
 - トークンの再発行と無効化は、管理画面にパスワードでログインしているときだけ行えます (トークン自身では再発行できません)。
-- Sokuto はトークンそのものを保存せず、ハッシュ値 (SHA-256) だけを KV に保存しています。
+- Sokuto はトークンそのものを保存せず、ハッシュ値 (SHA-256) だけを KV に保存しています。ワークスペースを削除すると、そのトークンも使えなくなります。
 
 ---
 
 ## English summary
 
-Sokuto includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`, authenticated with `Authorization: Bearer <token>`. Generate the token in **Settings → AI (MCP)**; it is shown only once and can be rotated or revoked there (session login required).
+Sokuto includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`, authenticated with `Authorization: Bearer <token>`. Generate the token in **Settings → AI (MCP)**; it is shown only once and can be rotated or revoked there (session login required). Tokens are per workspace: a token only sees and changes the workspace it was issued in (`get_overview` reports `workspace: { id, name }`), and is revoked when that workspace is deleted; issue one token per workspace to drive several. Workspaces themselves are managed only in the admin.
 
 - **Claude Code**: `claude mcp add --transport http sokuto https://<worker>/mcp --header "Authorization: Bearer <token>"`
 - **Claude Desktop**: use `mcp-remote` in `claude_desktop_config.json` (`npx -y mcp-remote <url> --header "Authorization: Bearer ${SOKUTO_TOKEN}"`). Custom connectors in the Claude UI expect OAuth, which Sokuto does not support yet.
 - **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokuto yet.
 - **Cursor**: `mcp.json` with `url` and `headers`.
 
-26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. `update_flow` keeps the stored canvas `layout` (admin node positions) when the new definition omits it. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access (MCP and `/api/*`); only its SHA-256 hash is stored.
+26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. `update_flow` keeps the stored canvas `layout` (admin node positions) when the new definition omits it. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access to its workspace (MCP and `/api/*`, pinned to that workspace); only its SHA-256 hash is stored.

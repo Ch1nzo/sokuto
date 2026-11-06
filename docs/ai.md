@@ -26,7 +26,7 @@ Sokuto の自動化では、LLM (大規模言語モデル) を 2 か所で使え
 ## 2. 設定する
 
 1. 管理画面の **設定** → **AI 応答 (LLM)** を開きます。
-2. **プロバイダー** を選び、**API キー** (Workers AI では不要)、必要なら **モデル** と **Base URL** を入力して **保存** します。API キーは暗号化して保存され、画面にも API にも二度と表示されません。
+2. **プロバイダー** を選び、**API キー** (Workers AI では不要)、必要なら **モデル** と **Base URL** を入力して **保存** します。API キーは暗号化して保存され、画面にも API にも二度と表示されません。AI の設定はワークスペースごとです (ワークスペースごとに別のプロバイダーや API キーを使えます)。
 3. **接続テスト** を押し、「応答: OK」のようにモデルの返事が表示されれば完了です。
 
 設定を削除すると、AI 応答ステップは何も送らずに次へ進み、意図トリガーは反応しなくなります。
@@ -86,6 +86,6 @@ AI 応答ステップは、モデルに `{"reply": "返事", "done": true/false}
 
 - **AI reply step** (`ai`): `{ "type": "ai", "instructions": "…" (≤4000; only `{{bot.*}}` placeholders are expanded, never contact data, so a customer cannot rewrite the instructions), "knowledge"?: "FAQ…" (≤20000), "maxTurns"?: 5 (1–20), "next" }`. The model answers the message that reached the step (or greets), then one API call per incoming message, until it returns `done: true` or `maxTurns` replies were sent; then the flow goes to `next`. History is the step's last 12 messages only. Hand-over keywords still win; button taps go to their buttons. If the AI is not configured or fails, nothing is sent, an `error` event is logged (dry runs: `notes`) and the flow continues. Not allowed in sequences.
 - **Intent trigger** (`intent`): `{ "type": "intent", "description": "asks about shipping" (≤300), "examples"?: [...] (≤10) }`. When a message (2+ characters, no waiting session) matches no specific trigger, one AI call classifies it against the intent triggers of all live flows on that channel and starts the match; otherwise `first_message` / `any_message` apply. With at least one live intent trigger, every unmatched message costs one call.
-- **Providers**: Anthropic (API key, default `claude-sonnet-5-5`), any OpenAI-compatible API (key + model, optional Base URL) or Cloudflare Workers AI (`AI` binding, free daily allowance; not available under `npm run dev`). Set it up in **Settings → AI replies (LLM)** and use **Test connection**; the key is stored encrypted.
+- **Providers**: Anthropic (API key, default `claude-sonnet-5-5`), any OpenAI-compatible API (key + model, optional Base URL) or Cloudflare Workers AI (`AI` binding, free daily allowance; not available under `npm run dev`). Set it up in **Settings → AI replies (LLM)** and use **Test connection**; the key is stored encrypted. The AI settings are per workspace.
 - **Costs**: each turn and each classification is billed by the provider, including runs from the admin tester and MCP `test_flow` (nothing is sent to LINE/Meta, but the AI is called for real).
 - **Models that ignore the JSON format**: fenced or wrapped JSON is still parsed; plain text is sent as is and treated as `done: false`, so the conversation ends at `maxTurns`. Unparsable intent replies count as no match.

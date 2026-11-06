@@ -7,7 +7,7 @@ import type { AiCaller, AiRequest } from '../src/ai'
 const db = {} as unknown as Db
 
 function flow(definition: FlowDefinition, over: Partial<FlowRecord> = {}): FlowRecord {
-  return { id: 7, name: 'Test flow', channel: 'line', status: 'draft', kind: 'flow', definition, createdAt: '', updatedAt: '', ...over }
+  return { id: 7, workspaceId: 1, name: 'Test flow', channel: 'line', status: 'draft', kind: 'flow', definition, createdAt: '', updatedAt: '', ...over }
 }
 
 describe('simulateFlow', () => {

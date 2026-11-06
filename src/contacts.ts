@@ -1,35 +1,44 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, sql, type AnyColumn } from 'drizzle-orm'
 import type { Db } from './db'
 import { schema } from './db'
 import type { Channel, ChannelProfile } from './channels/types'
 
 export type ContactRow = typeof schema.contacts.$inferSelect
 
-export async function findContact(db: Db, channel: Channel, channelUserId: string): Promise<ContactRow | undefined> {
+export async function findContact(db: Db, ws: number, channel: Channel, channelUserId: string): Promise<ContactRow | undefined> {
   return db
     .select()
     .from(schema.contacts)
-    .where(and(eq(schema.contacts.channel, channel), eq(schema.contacts.channelUserId, channelUserId)))
+    .where(and(eq(schema.contacts.workspaceId, ws), eq(schema.contacts.channel, channel), eq(schema.contacts.channelUserId, channelUserId)))
     .get()
 }
 
+/** A contact of workspace `ws` by id. */
+export async function getContact(db: Db, ws: number, id: number): Promise<ContactRow | undefined> {
+  return db.select().from(schema.contacts).where(and(eq(schema.contacts.id, id), eq(schema.contacts.workspaceId, ws))).get()
+}
+
+/** `contactId` belongs to a contact of workspace `ws` (for tables without a workspace column). */
+export const ofWorkspace = (contactId: AnyColumn, ws: number) => sql`${contactId} in (select id from contacts where workspace_id = ${ws})`
+
 export async function upsertContact(
   db: Db,
+  ws: number,
   channel: Channel,
   channelUserId: string,
   profile: () => Promise<ChannelProfile>,
 ): Promise<{ contact: ContactRow; created: boolean }> {
-  const existing = await findContact(db, channel, channelUserId)
+  const existing = await findContact(db, ws, channel, channelUserId)
   if (existing) return { contact: existing, created: false }
   const p = await profile().catch(() => ({}) as ChannelProfile)
   const created = await db
     .insert(schema.contacts)
-    .values({ channel, channelUserId, displayName: p.displayName ?? null, avatarUrl: p.avatarUrl ?? null, username: p.username ?? null })
+    .values({ workspaceId: ws, channel, channelUserId, displayName: p.displayName ?? null, avatarUrl: p.avatarUrl ?? null, username: p.username ?? null })
     .onConflictDoNothing()
     .returning()
     .get()
   if (created) return { contact: created, created: true }
-  const again = await findContact(db, channel, channelUserId)
+  const again = await findContact(db, ws, channel, channelUserId)
   if (!again) throw new Error('contact upsert failed')
   return { contact: again, created: false }
 }

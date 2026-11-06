@@ -15,15 +15,15 @@ export async function markProcessed(db: Db, id: string): Promise<boolean> {
   return Boolean(inserted)
 }
 
-export async function liveFlows(db: Db) {
-  const rows = await db.select().from(schema.flows).where(eq(schema.flows.status, 'live')).orderBy(schema.flows.id)
+export async function liveFlows(db: Db, ws: number) {
+  const rows = await db.select().from(schema.flows).where(and(eq(schema.flows.workspaceId, ws), eq(schema.flows.status, 'live'))).orderBy(schema.flows.id)
   return rows.map(parseFlow)
 }
 
-/** Processes one normalized inbound event end to end. */
-export async function handleInbound(db: Db, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string, ai?: AiCaller): Promise<void> {
-  if (!(await markProcessed(db, `${event.channel}:${event.eventId}`))) return
-  const { contact: initial, created } = await upsertContact(db, event.channel, event.channelUserId, () => adapter.getProfile(event.channelUserId))
+/** Processes one normalized inbound event of workspace `ws` end to end. */
+export async function handleInbound(db: Db, ws: number, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string, ai?: AiCaller): Promise<void> {
+  if (!(await markProcessed(db, `${ws}:${event.channel}:${event.eventId}`))) return
+  const { contact: initial, created } = await upsertContact(db, ws, event.channel, event.channelUserId, () => adapter.getProfile(event.channelUserId))
   let contact: ContactRow = initial
 
   if (event.type === 'unfollow') {
@@ -38,16 +38,16 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   await logMessage(db, { contactId: contact.id, direction: 'in', source: 'user', kind, text: displayText ?? null, payload: { type: event.type, payload: event.payload, commentId: event.commentId, postId: event.postId, attachments: event.attachments } })
   await db.update(schema.contacts).set({ unread: (contact.unread ?? 0) + 1, status: 'open' }).where(eq(schema.contacts.id, contact.id))
 
-  const general = await getGeneral(db)
+  const general = await getGeneral(db, ws)
   if (general.paused) return
-  const base = { db, adapter, replyToken, timezone: general.timezone, botFields: general.botFields, ai }
+  const base = { db, ws, adapter, replyToken, timezone: general.timezone, botFields: general.botFields, ai }
 
   // Hand-over keywords pause the bot for this contact and notify the team.
   if (event.type === 'message' && event.text && general.handoffKeywords.some((k) => k && event.text!.toLowerCase().includes(k.toLowerCase()))) {
     await setBotPaused(db, contact.id, true)
     await db.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
     await db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
-    await db.insert(schema.notifications).values({ contactId: contact.id, text: `${contact.displayName ?? contact.channelUserId} が担当者を希望しています` })
+    await db.insert(schema.notifications).values({ workspaceId: ws, contactId: contact.id, text: `${contact.displayName ?? contact.channelUserId} が担当者を希望しています` })
     if (general.handoffReply) {
       const res = await adapter.send(contact.channelUserId, { text: general.handoffReply }, { replyToken })
       await logMessage(db, { contactId: contact.id, direction: 'out', source: 'bot', kind: 'text', text: general.handoffReply, error: res.ok ? undefined : res.error })
@@ -57,16 +57,16 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
 
   if (await isBotPaused(db, contact)) return
 
-  const flows = await liveFlows(db)
+  const flows = await liveFlows(db, ws)
 
   // 0. Broadcast buttons (`sk-bc:<broadcastId>:<i>`): count the tap and start its automation.
   // Handled before the session so a tap while a question is waiting is not taken as the answer.
   const bc = parseBroadcastPayload(event.payload)
   if (bc) {
-    const row = await db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, bc.broadcastId)).get()
+    const row = await db.select().from(schema.broadcasts).where(and(eq(schema.broadcasts.id, bc.broadcastId), eq(schema.broadcasts.workspaceId, ws))).get()
     const button = row ? parseBroadcastButtons(row.buttons)[bc.index] : undefined
     if (row && button) {
-      await logEvent(db, { type: 'button_clicked', channel: contact.channel, contactId: contact.id, meta: { broadcastId: row.id, index: bc.index, label: button.label } })
+      await logEvent(db, { workspaceId: ws, type: 'button_clicked', channel: contact.channel, contactId: contact.id, meta: { broadcastId: row.id, index: bc.index, label: button.label } })
       await db.update(schema.broadcasts).set({ clicked: sql`${schema.broadcasts.clicked} + 1` }).where(eq(schema.broadcasts.id, row.id))
       const flow = flows.find((f) => f.id === button.flowId)
       if (flow) await startFlow({ ...base, contact, flow }, null)

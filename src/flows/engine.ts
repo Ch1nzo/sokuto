@@ -13,6 +13,8 @@ export type SessionRow = typeof schema.sessions.$inferSelect
 
 export type RunContext = {
   db: Db
+  /** Workspace of the contact and flow: events, notifications and goto / subscribe targets stay inside it. */
+  ws: number
   adapter: ChannelAdapter
   contact: ContactRow
   flow: FlowRecord
@@ -58,7 +60,7 @@ export function parseFlow(row: typeof schema.flows.$inferSelect): FlowRecord {
   } catch {
     definition = { triggers: [], entry: null, steps: [] }
   }
-  return { id: row.id, name: row.name, channel: row.channel as FlowRecord['channel'], status: row.status as FlowRecord['status'], kind: row.kind as FlowRecord['kind'], definition, createdAt: row.createdAt, updatedAt: row.updatedAt }
+  return { id: row.id, workspaceId: row.workspaceId, name: row.name, channel: row.channel as FlowRecord['channel'], status: row.status as FlowRecord['status'], kind: row.kind as FlowRecord['kind'], definition, createdAt: row.createdAt, updatedAt: row.updatedAt }
 }
 
 export function buttonPayload(flowId: number, stepId: string, index: number): string {
@@ -192,8 +194,8 @@ async function isFollower(ctx: RunContext): Promise<boolean> {
   return ctx.followsBusiness
 }
 
-export async function logEvent(db: Db, ev: { type: string; channel?: string; flowId?: number; stepId?: string; contactId?: number; meta?: unknown }) {
-  await db.insert(schema.events).values({ type: ev.type, channel: ev.channel, flowId: ev.flowId, stepId: ev.stepId, contactId: ev.contactId, meta: ev.meta === undefined ? null : JSON.stringify(ev.meta) })
+export async function logEvent(db: Db, ev: { workspaceId: number; type: string; channel?: string; flowId?: number; stepId?: string; contactId?: number; meta?: unknown }) {
+  await db.insert(schema.events).values({ workspaceId: ev.workspaceId, type: ev.type, channel: ev.channel, flowId: ev.flowId, stepId: ev.stepId, contactId: ev.contactId, meta: ev.meta === undefined ? null : JSON.stringify(ev.meta) })
 }
 
 export async function logMessage(
@@ -228,7 +230,7 @@ async function deliver(ctx: RunContext, step: Step, msg: OutboundMessage) {
   }
   if (ctx.dryRun) return result
   await logMessage(ctx.db, { contactId: ctx.contact.id, direction: 'out', source: 'bot', kind: msg.text ? 'text' : msg.cards?.length ? 'cards' : (msg.attachment?.type ?? (msg.imageUrl ? 'image' : 'text')), text: msg.text, payload: msg, flowId: ctx.flow.id, stepId: step.id, error: result.ok ? undefined : result.error })
-  await logEvent(ctx.db, { type: result.ok ? 'step_sent' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: result.ok ? undefined : { error: result.error } })
+  await logEvent(ctx.db, { workspaceId: ctx.ws, type: result.ok ? 'step_sent' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: result.ok ? undefined : { error: result.error } })
   return result
 }
 
@@ -251,7 +253,7 @@ async function endSession(ctx: RunContext) {
   }
   if (ctx.sequence) await ctx.db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.id, ctx.sequence.id))
   else await ctx.db.delete(schema.sessions).where(eq(schema.sessions.contactId, ctx.contact.id))
-  await logEvent(ctx.db, { type: 'flow_completed', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id })
+  await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'flow_completed', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id })
 }
 
 /** Top-level buttons, then each card's buttons: the position here is the index in the button payload. */
@@ -311,7 +313,7 @@ async function performRequest(ctx: RunContext, step: Step & { type: 'request' })
     }
     for (const s of step.save ?? []) ctx.contact = await setField(ctx.db, ctx.contact, s.field, pickPath(data, s.path).slice(0, 2000))
   } catch (e) {
-    await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { url, error: String(e) } })
+    await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { url, error: String(e) } })
   }
 }
 
@@ -330,7 +332,7 @@ function renderBotFields(text: string, botFields?: Record<string, string>): stri
 async function aiTurn(ctx: RunContext, step: Step & { type: 'ai' }, input: string | undefined, state: AiState): Promise<boolean> {
   const fail = async (error: string) => {
     if (ctx.dryRun) (ctx.dryRunNotes ??= []).push(`ai ${step.id}: ${error}`)
-    else await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { error } })
+    else await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { error } })
     return true
   }
   if (!ctx.ai) return fail('ai_not_configured')
@@ -383,7 +385,7 @@ export async function performActions(ctx: RunContext, actions: Array<{ type: str
         ctx.contact = await setField(ctx.db, ctx.contact, String(a.field), render(ctx, String(a.value ?? '')))
         break
       case 'notify':
-        await ctx.db.insert(schema.notifications).values({ contactId: ctx.contact.id, text: render(ctx, String(a.text ?? `{{name}} が自動化「${ctx.flow.name}」に反応しました`)) })
+        await ctx.db.insert(schema.notifications).values({ workspaceId: ctx.ws, contactId: ctx.contact.id, text: render(ctx, String(a.text ?? `{{name}} が自動化「${ctx.flow.name}」に反応しました`)) })
         break
       case 'pause_bot':
         await setBotPaused(ctx.db, ctx.contact.id, true, typeof a.minutes === 'number' ? a.minutes : undefined)
@@ -391,7 +393,7 @@ export async function performActions(ctx: RunContext, actions: Array<{ type: str
         break
       case 'subscribe': {
         const res = await subscribeSequence(ctx.db, ctx.contact, Number(a.flowId))
-        if (res !== 'ok' && res !== 'exists') await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'subscribe', sequenceId: a.flowId, error: res } })
+        if (res !== 'ok' && res !== 'exists') await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'subscribe', sequenceId: a.flowId, error: res } })
         break
       }
       case 'unsubscribe':
@@ -495,7 +497,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         break
       }
       case 'goto': {
-        const row = await ctx.db.select().from(schema.flows).where(eq(schema.flows.id, step.flowId)).get()
+        const row = await ctx.db.select().from(schema.flows).where(and(eq(schema.flows.id, step.flowId), eq(schema.flows.workspaceId, ctx.ws))).get()
         if (!row) return endSession(ctx)
         ctx.flow = parseFlow(row)
         current = ctx.flow.definition.entry
@@ -506,7 +508,7 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         const text = ctx.dryRun ? variants[0] : variants[Math.floor(Math.random() * variants.length)]
         if (text && ctx.commentId && ctx.adapter.replyToComment) {
           const res = await ctx.adapter.replyToComment(ctx.commentId, render(ctx, text))
-          if (!ctx.dryRun) await logEvent(ctx.db, { type: res.ok ? 'comment_replied' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: res.ok ? undefined : { error: res.error } })
+          if (!ctx.dryRun) await logEvent(ctx.db, { workspaceId: ctx.ws, type: res.ok ? 'comment_replied' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: res.ok ? undefined : { error: res.error } })
         }
         current = step.next ?? null
         break
@@ -525,10 +527,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
 }
 
 export async function startFlow(ctx: RunContext, trigger: Trigger | null): Promise<void> {
-  if (!ctx.dryRun) await logEvent(ctx.db, { type: 'trigger_fired', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: trigger ? { trigger: trigger.type } : undefined })
+  if (!ctx.dryRun) await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'trigger_fired', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: trigger ? { trigger: trigger.type } : undefined })
   if (trigger?.type === 'comment' && trigger.like && ctx.commentId && ctx.adapter.likeComment) {
     const res = await ctx.adapter.likeComment(ctx.commentId).catch((e: unknown) => ({ ok: false as const, error: String(e) }))
-    if (!res.ok && !ctx.dryRun) await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'like_comment', error: res.error } })
+    if (!res.ok && !ctx.dryRun) await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'like_comment', error: res.error } })
   }
   await runFrom(ctx, ctx.flow.definition.entry)
 }
@@ -570,7 +572,7 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
       ctx.contact = { ...ctx.contact, fields: JSON.stringify(f) }
     } else {
       ctx.contact = await setField(ctx.db, ctx.contact, step.field, value)
-      await logEvent(ctx.db, { type: 'input_saved', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { field: step.field } })
+      await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'input_saved', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { field: step.field } })
     }
     await runFrom(ctx, step.next)
     return true
@@ -580,7 +582,7 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
     if (!parsed || parsed.flowId !== ctx.flow.id || parsed.stepId !== step.id) return false
     const button = flattenButtons(step)[parsed.index]
     if (!button) return false
-    if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
+    if (!ctx.dryRun) await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
     await runFrom(ctx, button.next)
     return true
   }
@@ -608,7 +610,7 @@ export async function resumeFromButton(ctx: RunContext, payload: string): Promis
   if (!step || step.type !== 'message') return false
   const button = flattenButtons(step)[parsed.index]
   if (!button) return false
-  if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
+  if (!ctx.dryRun) await logEvent(ctx.db, { workspaceId: ctx.ws, type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
   await runFrom(ctx, button.next)
   return true
 }
@@ -616,12 +618,12 @@ export async function resumeFromButton(ctx: RunContext, payload: string): Promis
 /** Enrolls a contact in a live sequence; the scheduler runs the first step on its next tick (within a minute). */
 export async function subscribeSequence(db: Db, contact: ContactRow, flowId: number): Promise<'ok' | 'exists' | 'not_a_sequence' | 'flow_not_live'> {
   const row = await db.select().from(schema.flows).where(eq(schema.flows.id, flowId)).get()
-  if (!row || row.kind !== 'sequence') return 'not_a_sequence'
+  if (!row || row.kind !== 'sequence' || row.workspaceId !== contact.workspaceId) return 'not_a_sequence'
   if (row.status !== 'live') return 'flow_not_live'
   const values = { contactId: contact.id, flowId, stepId: parseFlow(row).definition.entry, resumeAt: new Date().toISOString() }
   const inserted = await db.insert(schema.sequenceSubscriptions).values(values).onConflictDoNothing().returning().get()
   if (!inserted) return 'exists'
-  await logEvent(db, { type: 'trigger_fired', channel: contact.channel, flowId, contactId: contact.id, meta: { trigger: 'subscribe' } })
+  await logEvent(db, { workspaceId: contact.workspaceId, type: 'trigger_fired', channel: contact.channel, flowId, contactId: contact.id, meta: { trigger: 'subscribe' } })
   return 'ok'
 }
 

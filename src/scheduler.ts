@@ -7,18 +7,22 @@ import { isBotPaused } from './contacts'
 import type { Channel } from './channels/types'
 import { dueSessions } from './inbound'
 import { parseFlow, runFrom, logMessage, type RunContext } from './flows/engine'
-import { getGeneral } from './settings'
+import { getGeneral, type GeneralSettings } from './settings'
 import { loadSegment, matchesSegment, tagsByContact } from './segments'
 import { broadcastSendPlan, buildBroadcastMessage } from './broadcasts'
-import { lazyAi } from './ai'
+import { lazyAi, type AiCaller } from './ai'
 
 const BROADCAST_PER_TICK = 30
 
 export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: number; broadcastSent: number }> {
   let resumed = 0
-  const general = await getGeneral(db)
-  const { timezone, botFields } = general
-  const ai = lazyAi(env, db)
+  // Settings and AI of each workspace, loaded once per tick (the workspace comes from the contact).
+  const perWs = new Map<number, { general: GeneralSettings; ai: AiCaller }>()
+  const wsSettings = async (ws: number) => {
+    let v = perWs.get(ws)
+    if (!v) perWs.set(ws, (v = { general: await getGeneral(db, ws), ai: lazyAi(env, db, ws) }))
+    return v
+  }
   for (const s of await dueSessions(db)) {
     const contact = await db.select().from(schema.contacts).where(eq(schema.contacts.id, s.contactId)).get()
     const row = await db.select().from(schema.flows).where(eq(schema.flows.id, s.flowId)).get()
@@ -26,11 +30,13 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
       await db.delete(schema.sessions).where(eq(schema.sessions.contactId, s.contactId))
       continue
     }
-    const adapter = await getAdapter(env, db, contact.channel as Channel)
+    const ws = contact.workspaceId
+    const adapter = await getAdapter(env, db, ws, contact.channel as Channel)
     if (!adapter) continue
     const flow = parseFlow(row)
     const step = flow.definition.steps.find((x) => x.id === s.stepId)
-    const ctx: RunContext = { db, adapter, contact, flow, timezone, botFields, ai }
+    const { general, ai } = await wsSettings(ws)
+    const ctx: RunContext = { db, ws, adapter, contact, flow, timezone: general.timezone, botFields: general.botFields, ai }
     await runFrom(ctx, step && step.type === 'delay' ? step.next : null)
     resumed++
   }
@@ -44,14 +50,16 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
       await db.delete(subs).where(eq(subs.id, s.id))
       continue
     }
+    const ws = contact.workspaceId
+    const { general, ai } = await wsSettings(ws)
     if (general.paused || (await isBotPaused(db, contact))) {
       // Bot paused (globally or for this contact after a hand-over): retry in an hour instead of clogging the batch.
       await db.update(subs).set({ resumeAt: new Date(Date.now() + 3600_000).toISOString() }).where(eq(subs.id, s.id))
       continue
     }
-    const adapter = await getAdapter(env, db, contact.channel as Channel)
+    const adapter = await getAdapter(env, db, ws, contact.channel as Channel)
     if (!adapter) continue
-    await runFrom({ db, adapter, contact, flow: parseFlow(row), timezone, botFields, ai, sequence: { id: s.id } }, s.stepId)
+    await runFrom({ db, ws, adapter, contact, flow: parseFlow(row), timezone: general.timezone, botFields: general.botFields, ai, sequence: { id: s.id } }, s.stepId)
     resumed++
   }
 
@@ -67,7 +75,7 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
   const now = new Date().toISOString()
   const due = await db.select().from(schema.broadcasts).where(and(eq(schema.broadcasts.status, 'scheduled'), lte(schema.broadcasts.scheduledAt, now)))
   for (const b of due) {
-    const targets = await broadcastTargets(db, b.channel as Channel | 'any', b.tag, b.segmentId)
+    const targets = await broadcastTargets(db, b.workspaceId, b.channel as Channel | 'any', b.tag, b.segmentId)
     if (targets.length > 0) await db.insert(schema.broadcastJobs).values(targets.map((t) => ({ broadcastId: b.id, contactId: t.id })))
     await db.update(schema.broadcasts).set({ status: targets.length ? 'running' : 'done', total: targets.length }).where(eq(schema.broadcasts.id, b.id))
   }
@@ -98,7 +106,7 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
         await db.update(schema.broadcasts).set({ failed: sql`${schema.broadcasts.failed} + 1` }).where(eq(schema.broadcasts.id, b.id))
         continue
       }
-      const adapter = await getAdapter(env, db, contact.channel as Channel)
+      const adapter = await getAdapter(env, db, b.workspaceId, contact.channel as Channel)
       if (!adapter) {
         await db.update(schema.broadcastJobs).set({ status: 'failed', error: 'channel not configured' }).where(eq(schema.broadcastJobs.id, job.id))
         continue
@@ -116,12 +124,12 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
   return sent
 }
 
-/** Contacts on `channel` in the segment (which replaces the tag filter) or with the tag. A deleted segment reaches nobody. */
-export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null) {
-  const all = await db.select().from(schema.contacts)
+/** Contacts of workspace `ws` on `channel` in the segment (which replaces the tag filter) or with the tag. A deleted segment reaches nobody. */
+export async function broadcastTargets(db: Db, ws: number, channel: Channel | 'any', tag: string | null, segmentId: number | null = null) {
+  const all = await db.select().from(schema.contacts).where(eq(schema.contacts.workspaceId, ws))
   let targets = all.filter((c) => channel === 'any' || c.channel === channel)
   if (segmentId !== null) {
-    const seg = await loadSegment(db, segmentId)
+    const seg = await loadSegment(db, ws, segmentId)
     if (!seg) return []
     const tags = await tagsByContact(db)
     // ponytail: O(n) in-memory scan over all contacts (rules are not SQL, and D1 caps bound parameters at 100); move to SQL if contacts outgrow Worker memory
@@ -135,8 +143,8 @@ export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: st
 }
 
 /** Used by the admin to preview how many people a broadcast would reach right now. With a message tag every Meta contact is reachable. */
-export async function broadcastReach(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null, withTag = false) {
-  const targets = await broadcastTargets(db, channel, tag, segmentId)
+export async function broadcastReach(db: Db, ws: number, channel: Channel | 'any', tag: string | null, segmentId: number | null = null, withTag = false) {
+  const targets = await broadcastTargets(db, ws, channel, tag, segmentId)
   const reachable = targets.filter((c) => withTag || c.channel === 'line' || (c.lastInboundAt && Date.now() - new Date(c.lastInboundAt).getTime() <= 24 * 3600 * 1000))
   return { total: targets.length, reachable: reachable.length }
 }

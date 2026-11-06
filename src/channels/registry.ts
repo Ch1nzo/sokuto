@@ -6,12 +6,12 @@ import { LineAdapter } from './line'
 import { MetaAdapter } from './meta'
 import type { Channel } from './types'
 
-export async function getAdapter(env: Env, db: Db, channel: Channel): Promise<ChannelAdapter | null> {
+export async function getAdapter(env: Env, db: Db, ws: number, channel: Channel): Promise<ChannelAdapter | null> {
   if (channel === 'line') {
-    const cfg = await getChannelConfig(db, env.KV, 'line')
+    const cfg = await getChannelConfig(db, env.KV, ws, 'line')
     return cfg ? new LineAdapter(cfg) : null
   }
-  const cfg = await getChannelConfig(db, env.KV, 'meta')
+  const cfg = await getChannelConfig(db, env.KV, ws, 'meta')
   if (!cfg) return null
   if (channel === 'instagram' && !cfg.instagramAccountId) return null
   return new MetaAdapter(channel, cfg, env.META_GRAPH_VERSION || undefined)

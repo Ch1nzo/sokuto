@@ -75,11 +75,14 @@ npm run typecheck  # Worker (tsconfig.json) と管理画面 (admin/tsconfig.json
    npm run db:generate   # drizzle-kit generate → migrations/ に SQL が追加される
    ```
 
-3. ローカルに適用します。
+3. データの移行が必要なら、生成された SQL ファイルの末尾に手で追記します。drizzle-kit はテーブルの変更しか書かないためです。例: `migrations/0002_workspaces.sql` は、`workspaces` テーブルと各テーブルの `workspace_id` 列 (既定 1) を作ったあと、ワークスペース 1 (「Default」) を挿入し、既存の `settings` のキーに `ws:1:` を付けています。これで既存のデータはすべてワークスペース 1 に入ります。
+4. ローカルに適用します。
 
    ```bash
    npm run migrate:local
    ```
+
+テーブルを追加するときは、そのデータがワークスペースごとかを決めてください。連絡先・自動化・配信を通じてたどれないデータなら `workspace_id` 列を付け、API・MCP・定期処理で絞り込みます。設定は `getSetting(db, ws, key)` などで読み書きすると、キーに `ws:<ID>:` が付きます。
 
 本番では、`npm run deploy` が最初に `wrangler d1 migrations apply DB --remote` を実行するので、デプロイ時に自動で適用されます。Deploy to Cloudflare ボタンでインストールした人も、リポジトリに変更が push されると Cloudflare のビルドで同じスクリプトが実行されます。
 
@@ -136,9 +139,9 @@ sokuto/
 ├── src/                      # Worker
 │   ├── index.ts              # エントリポイント (ルーティングと scheduled ハンドラー)
 │   ├── env.ts                # 環境変数・バインディングの型
-│   ├── auth/index.ts         # 初回パスワード設定、ログイン、Cookie セッション、MCP Bearer 認証
+│   ├── auth/index.ts         # 初回パスワード設定、ログイン、Cookie セッション、MCP Bearer 認証、ワークスペースの決定
 │   ├── routes/
-│   │   ├── webhooks.ts       # POST /webhooks/line, GET/POST /webhooks/meta
+│   │   ├── webhooks.ts       # POST /webhooks/line/:ws?, GET/POST /webhooks/meta/:ws?
 │   │   ├── api.ts            # 管理画面用 REST API (/api/*)
 │   │   └── mcp.ts            # MCP サーバー (/mcp) とツール定義
 │   ├── channels/
@@ -156,7 +159,8 @@ sokuto/
 │   ├── inbound.ts            # 受信イベントの処理 (重複排除、担当者呼び出し、トリガー照合)
 │   ├── scheduler.ts          # 定期処理 (待機の再開、一斉配信)
 │   ├── contacts.ts           # 連絡先・タグ・フィールド・ボット停止
-│   ├── settings.ts           # 設定、チャネル / AI 設定の暗号化保存、自動生成の秘密情報
+│   ├── settings.ts           # 設定 (キーはワークスペースごと)、チャネル / AI 設定の暗号化保存、自動生成の秘密情報
+│   ├── workspaces.ts         # ワークスペースの一覧・作成・名前変更・削除
 │   ├── ai.ts                 # AI プロバイダーの呼び出し (Anthropic / OpenAI 互換 / Workers AI) と応答の解析
 │   ├── crypto.ts             # HMAC、PBKDF2、署名付きトークン、AES-GCM
 │   └── db/                   # Drizzle のスキーマと接続
@@ -184,7 +188,7 @@ sokuto/
    - `ChannelAdapter` を実装したクラス (`send`, `getProfile`。コメント機能があれば `replyToComment`, `sendPrivateReply`)。`OutboundMessage` のボタン・クイックリプライをサービスの形式に変換します。ボタンの `payload` (`sk:...`) はそのまま返ってくるようにしてください。
 3. **設定**: `src/settings.ts` に `FooConfig` 型を追加し、`ChannelConfigs` に `foo` を加えます。秘密の値のフィールド名を `SECRET_FIELDS` に追加すると、自動で暗号化されます。`configuredChannels` にも追加します。
 4. **レジストリ**: `src/channels/registry.ts` の `getAdapter` で `FooAdapter` を返すようにします。
-5. **Webhook**: `src/routes/webhooks.ts` に `POST /foo` を追加します。署名を検証し、`processAll` に渡してください (処理は `waitUntil` で行い、すぐに 200 を返します)。`/webhooks/*` は `run_worker_first` に含まれているので、`wrangler.jsonc` の変更は不要です。
+5. **Webhook**: `src/routes/webhooks.ts` に `POST /foo/:ws?` を追加します。`c.get('ws')` のワークスペースの設定を読み、署名を検証し、`processAll` に渡してください (処理は `waitUntil` で行い、すぐに 200 を返します)。`/webhooks/*` は `run_worker_first` に含まれているので、`wrangler.jsonc` の変更は不要です。
 6. **管理 API**: `src/routes/api.ts` に `POST/DELETE /channels/foo` (と必要なら `/channels/foo/test`) を追加し、`GET /channels` の応答に状態と Webhook URL を加えます。
 7. **検証と MCP**: `src/flows/validate.ts` の `flowChannelSchema`、`src/routes/mcp.ts` の `z.enum(['line', 'messenger', 'instagram'])` (`test_flow`, `list_contacts`) に `'foo'` を追加します。
 8. **管理画面**: `admin/src/pages/Channels.tsx` に接続フォームを、`admin/src/lib/i18n.ts` に `channel_foo` などの文言を追加します。
@@ -212,7 +216,7 @@ sokuto/
 - Prerequisites: Node 22+, npm. `npm install` (runs `wrangler types`), then `npm run migrate:local`. No secrets are needed; keys are generated into local KV on first use. `.dev.vars` is only for overriding `META_GRAPH_VERSION`.
 - `npm run dev` builds the admin and starts `wrangler dev --local` on :8787 (no Workers AI: the `AI` binding is remote-only; run `npx wrangler login` then `npx wrangler dev` to try it). `npm run dev:ui` starts Vite on :5173 and proxies `/api`, `/webhooks` and `/mcp` to :8787. Trigger the scheduler with `POST /api/scheduler/run` (logged in) or `wrangler dev --test-scheduled` + `/__scheduled`. Use a tunnel such as `cloudflared` to receive real webhooks locally.
 - `npm test` (Vitest, `tests/**/*.test.ts`), `npm run typecheck` (worker and admin).
-- After editing `src/db/schema.ts`, run `npm run db:generate` and `npm run migrate:local`; `npm run deploy` applies migrations remotely before deploying.
+- After editing `src/db/schema.ts`, run `npm run db:generate`, hand-append any data migration to the generated SQL (e.g. `0002_workspaces.sql` inserts workspace 1 and prefixes existing settings keys with `ws:1:`), then `npm run migrate:local`; `npm run deploy` applies migrations remotely before deploying. New tables either carry `workspace_id` or are reached through a contact, flow or broadcast; settings go through `getSetting(db, ws, key)` (`ws:<id>:` prefix).
 - Manual deploy: `npx wrangler login`, create the D1 database and KV namespace, put their IDs into `wrangler.jsonc` (the repo has dummy IDs), then `npm run build && npm run deploy`.
 - Adding a channel: extend `Channel`, write an adapter implementing `ChannelAdapter` plus signature check and webhook parser, add a config type (secret fields listed in `SECRET_FIELDS` are encrypted), wire `registry.ts`, `routes/webhooks.ts`, `routes/api.ts`, `flowChannelSchema`, the MCP enums, the admin Channels page and i18n.
 - Adding a step type: extend `Step`/`STEP_TYPES`, `stepSchema` and reference checks in `validateFlow`, document it in `FLOW_SCHEMA_DOC`, implement it in `runFrom` (respect `ctx.dryRun`; use `saveSession`/`resumeSession` if it waits), then add the editor form (`StepBody` in `admin/src/pages/flow-editor/StepCard.tsx`), its pointers in `flow-editor/graph.ts` (`outlets`/`setPointer`, which drive the canvas handles and edges), the node icon and summary in `flow-editor/Canvas.tsx`, i18n strings and tests.

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { authRoutes, requireAuth, type AppEnv } from './auth'
+import { authRoutes, requireAuth, resolveWorkspace, type AppEnv } from './auth'
 import { webhookRoutes } from './routes/webhooks'
-import { apiRoutes } from './routes/api'
+import { apiRoutes, workspaceRoutes } from './routes/api'
 import { mcpRoutes } from './routes/mcp'
 import { createDb } from './db'
 import { runScheduledTasks } from './scheduler'
@@ -13,6 +13,9 @@ app.get('/health', (c) => c.json({ ok: true, name: 'sokuto' }))
 app.route('/webhooks', webhookRoutes)
 app.route('/api/auth', authRoutes)
 app.use('/api/*', requireAuth)
+// Workspace management is not scoped to one workspace (it answers before resolveWorkspace runs).
+app.route('/api/workspaces', workspaceRoutes)
+app.use('/api/*', resolveWorkspace)
 app.route('/api', apiRoutes)
 app.route('/mcp', mcpRoutes)
 

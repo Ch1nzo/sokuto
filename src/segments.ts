@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { Db } from './db'
 import { schema } from './db'
 import type { ContactRow } from './contacts'
@@ -19,9 +19,9 @@ export function parseSegment(row: typeof schema.segments.$inferSelect): Segment 
   return { id: row.id, name: row.name, rules, mode: row.mode === 'any' ? 'any' : 'all', createdAt: row.createdAt }
 }
 
-export async function loadSegment(db: Db, id: number): Promise<Segment | null> {
+export async function loadSegment(db: Db, ws: number, id: number): Promise<Segment | null> {
   if (!Number.isInteger(id)) return null
-  const row = await db.select().from(schema.segments).where(eq(schema.segments.id, id)).get()
+  const row = await db.select().from(schema.segments).where(and(eq(schema.segments.id, id), eq(schema.segments.workspaceId, ws))).get()
   return row ? parseSegment(row) : null
 }
 

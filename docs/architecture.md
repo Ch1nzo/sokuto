@@ -27,14 +27,24 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 - Webhook は署名を検証したらすぐに応答を返し、実際の処理 (連絡先の作成、自動化の実行、送信) は `ctx.waitUntil` でバックグラウンドで行います。LINE / Meta のタイムアウトを避けるためです。
 - `GET /health` は `{ "ok": true, "name": "sokuto" }` を返します。
 
+## ワークスペース
+
+1 つの Sokuto (1 つの Worker・D1・KV) で、複数の**ワークスペース** (店舗やブランド) を運用できます。ワークスペースごとに、LINE / Meta の接続、連絡先と会話、自動化とシーケンス、一斉配信、セグメント、定型文、レポート (`events`)、通知、一般設定 (ボット名・タイムゾーン・担当者呼び出し・ボット変数)、AI 設定、Messenger / Instagram のプロフィールと LINE リッチメニュー、MCP トークンが分かれます。管理者パスワード、セッション、暗号化鍵、Meta の検証トークンは全ワークスペース共通です。最初からあるデータはワークスペース 1 (「Default」) になり、ワークスペース 1 は削除できません。コードは `src/workspaces.ts` です。
+
+- **どのワークスペースか**: 管理画面の API (`/api/*`) は、ヘッダー `X-Workspace: <ID>` (なければ Cookie `sokuto_ws`、どちらもなければ 1) でワークスペースを選びます (`src/auth/index.ts` の `resolveWorkspace`)。存在しない ID は 404 `workspace_not_found` です。MCP トークンで呼んだ場合は、トークンのワークスペースに固定されます (ヘッダーは無視)。
+- **ワークスペースの管理**: `GET /api/workspaces` (`{ workspaces: [{ id, name, createdAt }], current }`)、`POST /api/workspaces { name }` (201)、`PUT /api/workspaces/:id { name }`、`DELETE /api/workspaces/:id` (ID 1 は 400 `cannot_delete_default`)。名前は 1〜60 文字 (それ以外は 400 `invalid_name`)。パスワードでログインしたセッションからだけ使えます (MCP トークンでは 403 `session_required`)。削除すると、そのワークスペースの連絡先・会話・セッション・タグ・シーケンス登録・配信 (と宛先)・自動化・セグメント・定型文・記録・通知・設定を 1 回の D1 バッチで消し、MCP トークンも無効にします。
+- **Webhook URL**: `/webhooks/line/<ID>`、`/webhooks/meta/<ID>` (管理画面の「チャネル接続」に、開いているワークスペースの URL が表示されます)。ID のない `/webhooks/line`・`/webhooks/meta` はワークスペース 1 として扱うので、ワークスペース機能より前に登録した URL もそのまま動きます。ID が正の整数でなければ 404 `workspace_not_found`、そのワークスペースにチャネルが接続されていなければ 404 `line_not_configured` / `meta_not_configured` です。Meta の検証 (`GET`) はどちらの URL でも共通の検証トークンで応答します。Meta アプリの Webhook の URL は 1 つなので、Meta はワークスペースごとに別のアプリを使います。
+- **定期処理** は全ワークスペースをまとめて処理し、ワークスペースは連絡先 (待機・シーケンス) や配信の行から決めます。
+
 ## データモデル (D1)
 
 定義は `src/db/schema.ts` (Drizzle ORM)、マイグレーションは `migrations/` にあります。日時はすべて ISO 8601 文字列 (UTC) です。
 
 | テーブル | 内容 |
 | --- | --- |
-| `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み)、`profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID)、`ai` (AI プロバイダー・モデル・Base URL と API キー (暗号化済み)) |
-| `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数、会話の状態 `status` (`open` / `closed`。メッセージを受信すると `open` に戻る)、社内メモ `notes` (5,000 文字まで) |
+| `workspaces` | ワークスペース。`id`、名前、作成日時。ID 1 (「Default」) はマイグレーションで作られます |
+| `settings` | キーと JSON 値。キーは `ws:<ワークスペース ID>:` で始まります (`settings.ts` の `wsKey`)。`ws:<ID>:general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信・ボット変数)、`ws:<ID>:channel:line`、`ws:<ID>:channel:meta` (トークンは暗号化済み)、`ws:<ID>:profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`ws:<ID>:richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID)、`ws:<ID>:ai` (AI プロバイダー・モデル・Base URL と API キー (暗号化済み)) |
+| `contacts` | 連絡先。`workspace_id` + `channel` + `channel_user_id` で一意 (同じ人が別のワークスペースにいれば別の連絡先)。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数、会話の状態 `status` (`open` / `closed`。メッセージを受信すると `open` に戻る)、社内メモ `notes` (5,000 文字まで) |
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
 | `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、種類 (`flow` / `sequence`。作成時にだけ決まる)、定義 (JSON) |
@@ -44,9 +54,11 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | `broadcast_jobs` | 配信の宛先 1 件ごとの送信状態 (`pending`/`sent`/`failed`/`skipped`) |
 | `segments` | セグメント (保存した条件)。名前、条件 `rules` (条件分岐ステップと同じ形式の JSON)、`mode` (`all`/`any`)。連絡先一覧の絞り込み (`GET /api/contacts?segment=`) と一斉配信の対象に使います |
 | `events` | レポート用の記録。`trigger_fired`, `step_sent`, `button_clicked`, `input_saved`, `flow_completed`, `comment_replied`, `error` |
-| `processed_events` | 処理済みの Webhook イベント ID。再送されたイベントを二重に処理しないため。2 日より古いものは定期処理で削除 |
+| `processed_events` | 処理済みの Webhook イベント ID (`<ワークスペース ID>:<チャネル>:<イベント ID>`)。再送されたイベントを二重に処理しないため。2 日より古いものは定期処理で削除 |
 | `notifications` | 「担当者に通知」アクションや担当者呼び出しで作られる通知 |
 | `snippets` | 受信箱の返信欄に挿入する定型文。名前 (60 文字まで) と本文 (2,000 文字まで) |
+
+`contacts`、`flows`、`broadcasts`、`segments`、`snippets`、`events`、`notifications` には `workspace_id` (既定 1) があり、API・MCP・Webhook・定期処理はすべてこの列で絞り込みます。`contact_tags`、`messages`、`sessions`、`sequence_subscriptions`、`broadcast_jobs` は連絡先・自動化・配信を通じてワークスペースが決まるので、列を持ちません。
 
 KV には次のキーが入ります。
 
@@ -56,7 +68,9 @@ KV には次のキーが入ります。
 | `secret:enc_key` | チャネルのトークンを暗号化する AES-GCM 鍵 (初回に自動生成) |
 | `secret:meta_verify_token` | Meta Webhook の検証トークン (初回に自動生成) |
 | `admin:password` | 管理者パスワードのハッシュ (PBKDF2) |
-| `mcp:token_hash` | MCP トークンの SHA-256 ハッシュ |
+| `mcp:ws:<ID>` | そのワークスペースの MCP トークンの SHA-256 ハッシュ |
+| `mcp:token:<ハッシュ>` | MCP トークンのワークスペース ID (Bearer 認証で引く) |
+| `mcp:token_hash` | ワークスペース機能より前の MCP トークン (ワークスペース 1 のもの)。最初に使われたときに上の 2 つのキーへ移して削除します |
 | `ratelimit:login:<IP>` | ログイン試行回数 (15 分で消える) |
 
 ## フローエンジン
@@ -78,7 +92,9 @@ KV には次のキーが入ります。
 
 ### 受信から返信まで (`src/inbound.ts`)
 
-1. `processed_events` でイベント ID を確認し、処理済みなら何もしない。
+Webhook の URL で決まったワークスペース (`handleInbound(db, ws, …)`) の中だけで処理します。連絡先、公開中の自動化、一般設定、配信ボタン、通知、記録はすべてそのワークスペースのものです。
+
+1. `processed_events` でイベント ID (`<ワークスペース ID>:<チャネル>:<イベント ID>`) を確認し、処理済みなら何もしない。
 2. 連絡先を探す / 作る (新規ならプロフィールを取得)。受信メッセージを記録し、未読数を増やす。
 3. 設定でボット全体が停止中なら終了。
 4. **担当者呼び出しキーワード** (初期値: 担当者・オペレーター・human・agent) を含むメッセージなら、その連絡先のボットを停止し、セッションを消し、通知を作り、設定の返信文を送って終了。
@@ -143,21 +159,21 @@ payload に自動化とステップの情報が入っているので、**セッ�
 - `line.ts`: 署名検証 (HMAC-SHA256、Base64)、Webhook の解析、送信。送信時は、受信時の **reply token を 1 回だけ使い** (無料)、使用済みや期限切れならプッシュ API で送ります。管理画面用に、Bot 情報の取得、Webhook URL の登録 (`PUT /v2/bot/channel/webhook/endpoint`)、Webhook のテスト、リッチメニューの作成・画像アップロード (`api-data.line.me`)・既定の設定・削除も実装しています (`buildRichMenu` が分割数から各エリアの範囲を計算)。
 - `meta.ts`: 署名検証 (`X-Hub-Signature-256`、HMAC-SHA256 hex)、`page` / `instagram` 両方の Webhook の解析 (メッセージ、postback、クイックリプライ、ref、ストーリーへのメンション・返信、Facebook の `feed` コメント、Instagram の `comments`)、Send API での送信、コメントへの公開返信とプライベート返信、コメントへのいいね (`POST /{comment-id}/likes`。失敗はエラーイベントとして記録)。Instagram のプロフィール取得では `is_user_follow_business` も読みます (相手が DM を送った後にだけ取得できます)。管理画面用に、ページアクセストークンの確認 (ページとリンクされた Instagram ビジネスアカウントの取得)、ページの購読 (`subscribed_apps`)、Messenger Profile API (`/me/messenger_profile`、Instagram は `platform=instagram` で会話スターターと固定メニューのみ) の設定と削除を実装しています。Graph API のバージョンは環境変数 `META_GRAPH_VERSION` (初期値 `v25.0`) です。
 
-Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:meta`) を共有し、ページにリンクされた Instagram アカウントがあれば Instagram も有効になります。
+Messenger と Instagram は 1 つの Meta アプリ (ワークスペースごとに 1 つの設定 `ws:<ID>:channel:meta`) を共有し、ページにリンクされた Instagram アカウントがあれば Instagram も有効になります。
 
 ## AI プロバイダー (`src/ai.ts`)
 
-設定行 `ai` (管理画面の「設定」→「AI 応答 (LLM)」) で選んだプロバイダーを `complete(cfg, req, env.AI)` で呼びます。
+ワークスペースの設定行 `ws:<ID>:ai` (管理画面の「設定」→「AI 応答 (LLM)」) で選んだプロバイダーを `complete(cfg, req, env.AI)` で呼びます。
 
 - `anthropic`: `POST https://api.anthropic.com/v1/messages` (既定モデル `claude-sonnet-5-5`)。
 - `openai`: `POST {Base URL}/chat/completions` (Base URL の既定は `https://api.openai.com/v1`。OpenAI 互換 API ならどれでも可。モデルは必須)。
 - `workers_ai`: Worker の `AI` バインディング (`wrangler.jsonc` の `"ai": { "binding": "AI" }`、既定モデル `@cf/meta/llama-3.3-70b-instruct-fp8-fast`)。バインディングがない古いデプロイでは `workers_ai_binding_missing`、`wrangler dev --local` (`npm run dev`) では「Binding AI needs to be run remotely」のエラーになります。
 
-`ai` ステップと `intent` トリガーが使います (Webhook・定期処理・テスト実行が `RunContext.ai` に `lazyAi` を渡します)。`lazyAi(env, db)` は初回の呼び出しで設定を読み、未設定なら `ai_not_configured` で失敗します。`parseAiReply` (`{"reply","done"}`)、`intentPrompt` / `parseIntent` / `classifyIntent` (意図の分類) は純粋関数で、JSON の前後の文章やコードフェンスを許容します。管理用 API: `PUT` / `DELETE /api/settings/ai`、`POST /api/settings/ai/test` (API キーは返しません)。
+`ai` ステップと `intent` トリガーが使います (Webhook・定期処理・テスト実行が `RunContext.ai` に `lazyAi` を渡します)。`lazyAi(env, db, ws)` は初回の呼び出しでそのワークスペースの設定を読み、未設定なら `ai_not_configured` で失敗します。`parseAiReply` (`{"reply","done"}`)、`intentPrompt` / `parseIntent` / `classifyIntent` (意図の分類) は純粋関数で、JSON の前後の文章やコードフェンスを許容します。管理用 API: `PUT` / `DELETE /api/settings/ai`、`POST /api/settings/ai/test` (API キーは返しません)。
 
 ## 定期処理 (`src/scheduler.ts`)
 
-Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/run` で手動実行も可能)。
+Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/run` で手動実行も可能)。全ワークスペースをまとめて処理し、待機とシーケンスは連絡先の `workspace_id`、一斉配信は配信の `workspace_id` から、使うチャネル設定・一般設定 (1 回の実行でワークスペースごとに 1 度だけ読む)・AI 設定を決めます。
 
 1. **待機の再開**: `resume_at` を過ぎた `delay` セッションを最大 25 件、続きから実行します。自動化が下書きに戻っていたらセッションを消します。10 秒以下の待機は 1 回の実行で合計 20 秒まではその場で待つため、ここに来るのはそれより長い待機だけです。
 2. **シーケンスの配信**: `resume_at` を過ぎた `sequence_subscriptions` を最大 25 件、`step_id` のステップから実行します。シーケンスが公開中でない (または削除された) 場合は登録を削除します。 ボット全体が停止中、またはその連絡先のボットが停止中 (担当者対応中) のときは送らず、1 時間後に再試行します。
@@ -178,7 +194,7 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 - **初回セットアップ**: 管理者パスワードが未設定のとき、最初にアクセスした人がパスワードを設定できます。デプロイ後すぐに設定してください。
 - **セッション**: ログインすると、HMAC-SHA256 で署名された有効期限 30 日のトークンが Cookie (`sokuto_session`、HttpOnly、SameSite=Lax、HTTPS では Secure) に入ります。サーバー側にセッションの一覧は持ちません。ログアウトは Cookie を消すだけなので、すべてのセッションを無効にしたいときは KV の `secret:session_secret` を削除します (次のアクセスで新しい鍵が作られます)。
 - **ログインの試行制限**: IP アドレスごとに、15 分間で 10 回までです (KV で数えます)。
-- **MCP トークン**: `sk_` で始まるランダムな文字列で、KV には SHA-256 ハッシュだけを保存します。MCP (`/mcp`) と管理用 API (`/api/*`) の両方に使えます。再発行と無効化はパスワードでログインしたセッションからだけ行えます。
+- **MCP トークン**: `sk_` で始まるランダムな文字列で、ワークスペースごとに 1 つです。KV には SHA-256 ハッシュだけを保存します。MCP (`/mcp`) と管理用 API (`/api/*`) の両方に使えますが、発行したワークスペースのデータにしか触れません (`X-Workspace` ヘッダーは無視)。ワークスペースの作成・名前変更・削除、トークンの再発行と無効化は、パスワードでログインしたセッションからだけ行えます。
 - **Webhook の検証**: LINE は `X-Line-Signature` (チャネルシークレットによる HMAC)、Meta は `X-Hub-Signature-256` (app secret による HMAC) を、定数時間比較で検証します。署名が合わないリクエストは 401 で拒否します。
 - **重複処理の防止**: Webhook の再送で同じイベントが届いても、`processed_events` で 1 回だけ処理します。
 
@@ -188,10 +204,11 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
-- **Data**: D1 tables `settings` (incl. `profile:meta`, `richmenu:line` and `ai`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`, `snippets` (canned inbox replies); contacts carry an inbox `status` (`open`/`closed`, reopened by any inbound message) and internal `notes`. KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
+- **Workspaces** (`src/workspaces.ts`): one deployment hosts several workspaces (shops / brands), each with its own LINE / Meta connection, contacts, conversations, flows, broadcasts, segments, snippets, events, notifications, general settings, bot variables, AI settings, profile / rich menu and MCP token; the admin password, sessions, the encryption key and the Meta verify token are shared. Existing data is workspace 1 ("Default"), which cannot be deleted. `/api/*` picks the workspace from the `X-Workspace` header (else the `sokuto_ws` cookie, else 1; unknown → 404 `workspace_not_found`); an MCP token is pinned to its own workspace. `GET/POST /api/workspaces`, `PUT/DELETE /api/workspaces/:id` (session only, else 403 `session_required`; deleting 1 → 400 `cannot_delete_default`; deleting removes all of the workspace's rows in one D1 batch and its MCP token). Webhooks are `/webhooks/line/<id>` and `/webhooks/meta/<id>`; the old URLs without an id are workspace 1. A Meta app has one callback URL, so use one Meta app per workspace. The scheduler runs all workspaces, taking the workspace from the contact or broadcast row.
+- **Data**: D1 tables `workspaces`, `settings` (keys prefixed `ws:<id>:`: `general`, `channel:line`, `channel:meta`, `profile:meta`, `richmenu:line`, `ai`), `contacts` (unique per `workspace_id` + `channel` + `channel_user_id`), `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`, `snippets` (canned inbox replies); contacts carry an inbox `status` (`open`/`closed`, reopened by any inbound message) and internal `notes`. `contacts`, `flows`, `broadcasts`, `segments`, `snippets`, `events` and `notifications` carry `workspace_id`; the other tables are reached through a contact, flow or broadcast. `processed_events` ids are `<workspace>:<channel>:<event id>`. KV holds auto-generated secrets, the password hash, MCP tokens (`mcp:ws:<id>` = hash, `mcp:token:<hash>` = workspace id; the pre-workspace `mcp:token_hash` is moved to workspace 1 on first use) and login rate-limit counters.
 - **Flow engine**: a flow is `{ triggers, entry, steps }` (10 triggers, 10 step types) plus an optional UI-only `layout` of canvas node positions, which `PUT /api/flows/:id` and MCP `update_flow` keep when an update omits it. One session per contact waits for `input`, `button`, `ai` (an AI conversation; transcript of the last 12 messages in `context`) or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → broadcast button `sk-bc:<broadcast>:<i>` (logs `button_clicked`, increments `broadcasts.clicked`, starts the button's live flow; checked before the session so a tap is never taken as an answer) → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`) → intent triggers (no session, a text of 2+ characters that matched no specific trigger: one AI call classifies it against every live `intent` trigger on the channel). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`; `ai` steps and intent triggers call the AI passed in `SimulateOptions.ai`, which the admin tester and MCP `test_flow` set to the real provider, so tests are billed). See [ai.md](ai.md).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random / request steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
-- **AI providers** (`src/ai.ts`, used by `ai` steps and `intent` triggers): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db)` loads the `ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
+- **AI providers** (`src/ai.ts`, used by `ai` steps and `intent` triggers): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db, ws)` loads the workspace's `ws:<id>:ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped unless the broadcast has a Meta message tag; up to 3 buttons, links or `sk-bc:` postbacks that start a flow, with tap counts), and prunes dedupe records. Delay resumes do not check the 24 h window.
-- **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.
+- **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; one MCP token per workspace, stored as SHA-256, valid for `/mcp` and `/api/*` but only for its workspace; constant-time webhook signature checks.

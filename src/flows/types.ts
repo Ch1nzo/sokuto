@@ -62,6 +62,7 @@ export type FlowDefinition = {
 
 export type FlowRecord = {
   id: number
+  workspaceId: number
   name: string
   channel: Channel | 'any'
   status: 'draft' | 'live'

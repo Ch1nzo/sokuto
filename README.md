@@ -34,6 +34,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - 設定: ボット変数 (営業時間などを一度登録し、どのメッセージでも `{{bot.hours}}` のように使えます)
 - AI 応答 (Anthropic / OpenAI 互換 / Workers AI): 「設定」→「AI 応答 (LLM)」でプロバイダーと API キーを登録し、接続テストできます (キーは暗号化して保存)。「AI 応答 (会話)」ステップは指示と参考情報 (FAQ など) をもとにお客さんと会話し、目的を果たすか最大回数に達したら次のステップへ進みます。「意図」トリガーは、キーワードに一致しないメッセージを AI が判定して当てはまる自動化を始めます。呼び出しごとにプロバイダーの料金がかかり、テストでも実際に呼び出します (Workers AI は Cloudflare の無料枠内で使えます)。詳しくは [docs/ai.md](docs/ai.md)
 - MCP サーバー: 26 個のツールで自動化・連絡先・受信箱・配信・レポートを AI から操作 ([docs/mcp.md](docs/mcp.md))
+- ワークスペース: 複数の店舗 / ブランドを 1 つの Sokuto で運用。接続・連絡先・自動化・設定がワークスペースごとに分かれ、サイドバーで切替 (管理者パスワードは共通。MCP トークンはワークスペースごと)
 
 ## 5 分でインストール
 
@@ -143,6 +144,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 - Channel settings: Messenger/Instagram Get Started, greeting, persistent menu and ice breakers, and the LINE rich menu, each item starting a flow.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
 - AI replies (Anthropic, OpenAI-compatible, or Workers AI; set up in Settings with a connection test, key stored encrypted): an AI reply step that holds a conversation from your instructions and FAQ text, and intent triggers that let the AI pick a flow for messages no keyword matched. Each call is billed by the provider, test runs included; Workers AI runs within Cloudflare's free tier. See [docs/ai.md](docs/ai.md).
+- Workspaces: run several shops / brands from one Sokuto. Connections, contacts, automations and settings are separate per workspace, switched from the sidebar (one admin password; one MCP token per workspace).
 
 ### Install in 5 minutes
 

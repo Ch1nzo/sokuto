@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db'
 import { schema } from './db'
@@ -7,7 +7,7 @@ import type { Channel } from './channels/types'
 
 /**
  * Secrets that Sokuto generates by itself on first run and keeps in KV.
- * Users never have to configure these.
+ * Users never have to configure these. Shared by all workspaces.
  */
 export type SecretName = 'session_secret' | 'enc_key' | 'meta_verify_token'
 
@@ -64,7 +64,7 @@ export const DEFAULT_GENERAL: GeneralSettings = {
 
 const flowId = z.number().int().positive()
 
-/** Messenger / Instagram profile (`settings` row `profile:meta`). Menu items open a URL or start a flow. */
+/** Messenger / Instagram profile (`settings` row `ws:<id>:profile:meta`). Menu items open a URL or start a flow. */
 export const metaProfileSchema = z.object({
   greeting: z.string().trim().max(160).optional(),
   getStartedFlowId: flowId.optional(),
@@ -81,7 +81,7 @@ export const metaProfileSchema = z.object({
 })
 export type MetaProfile = z.infer<typeof metaProfileSchema>
 
-/** LINE default rich menu (`settings` row `richmenu:line`). `layout` is the number of areas. */
+/** LINE default rich menu (`settings` row `ws:<id>:richmenu:line`). `layout` is the number of areas. */
 export const lineRichMenuSchema = z
   .object({
     imageUrl: z.string().url().regex(/^https?:\/\//),
@@ -98,13 +98,16 @@ export const lineRichMenuSchema = z
   .refine((m) => m.cells.length === m.layout, { message: 'cells must match the layout', path: ['cells'] })
 export type LineRichMenu = z.infer<typeof lineRichMenuSchema>
 
-/** AI provider for the AI reply step and intent triggers (`settings` row `ai`, `apiKey` encrypted). */
+/** AI provider for the AI reply step and intent triggers (`settings` row `ws:<id>:ai`, `apiKey` encrypted). */
 export type AiConfig = { provider: 'anthropic' | 'openai' | 'workers_ai'; apiKey?: string; model?: string; baseUrl?: string }
 
 const SECRET_FIELDS = new Set(['channelSecret', 'channelAccessToken', 'appSecret', 'pageAccessToken', 'apiKey'])
 
-export async function getSetting<T>(db: Db, key: string): Promise<T | null> {
-  const row = await db.select().from(schema.settings).where(eq(schema.settings.key, key)).get()
+/** Settings rows are per workspace: `ws:<id>:<key>`. */
+export const wsKey = (ws: number, key: string) => `ws:${ws}:${key}`
+
+export async function getSetting<T>(db: Db, ws: number, key: string): Promise<T | null> {
+  const row = await db.select().from(schema.settings).where(eq(schema.settings.key, wsKey(ws, key))).get()
   if (!row) return null
   try {
     return JSON.parse(row.value) as T
@@ -113,20 +116,20 @@ export async function getSetting<T>(db: Db, key: string): Promise<T | null> {
   }
 }
 
-export async function putSetting(db: Db, key: string, value: unknown): Promise<void> {
+export async function putSetting(db: Db, ws: number, key: string, value: unknown): Promise<void> {
   const json = JSON.stringify(value)
   await db
     .insert(schema.settings)
-    .values({ key, value: json, updatedAt: new Date().toISOString() })
+    .values({ key: wsKey(ws, key), value: json, updatedAt: new Date().toISOString() })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: json, updatedAt: new Date().toISOString() } })
 }
 
-export async function deleteSetting(db: Db, key: string): Promise<void> {
-  await db.delete(schema.settings).where(eq(schema.settings.key, key))
+export async function deleteSetting(db: Db, ws: number, key: string): Promise<void> {
+  await db.delete(schema.settings).where(eq(schema.settings.key, wsKey(ws, key)))
 }
 
-export async function getGeneral(db: Db): Promise<GeneralSettings> {
-  const stored = await getSetting<Partial<GeneralSettings>>(db, 'general')
+export async function getGeneral(db: Db, ws: number): Promise<GeneralSettings> {
+  const stored = await getSetting<Partial<GeneralSettings>>(db, ws, 'general')
   return { ...DEFAULT_GENERAL, ...(stored ?? {}) }
 }
 
@@ -138,41 +141,44 @@ async function transform(obj: Record<string, unknown>, fn: (v: string) => Promis
   return out
 }
 
-/** Settings row whose SECRET_FIELDS are AES-GCM encrypted with the KV `enc_key`. */
-export async function getSecretSetting<T>(db: Db, kv: KVNamespace, key: string): Promise<T | null> {
-  const stored = await getSetting<Record<string, unknown>>(db, key)
+/** Settings row whose SECRET_FIELDS are AES-GCM encrypted with the KV `enc_key` (shared by all workspaces). */
+export async function getSecretSetting<T>(db: Db, kv: KVNamespace, ws: number, key: string): Promise<T | null> {
+  const stored = await getSetting<Record<string, unknown>>(db, ws, key)
   if (!stored) return null
   const enc = await getOrCreateSecret(kv, 'enc_key')
   return (await transform(stored, (v) => decryptString(enc, v))) as T
 }
 
-export async function putSecretSetting(db: Db, kv: KVNamespace, key: string, value: object) {
+export async function putSecretSetting(db: Db, kv: KVNamespace, ws: number, key: string, value: object) {
   const enc = await getOrCreateSecret(kv, 'enc_key')
-  await putSetting(db, key, await transform(value as Record<string, unknown>, (v) => encryptString(enc, v)))
+  await putSetting(db, ws, key, await transform(value as Record<string, unknown>, (v) => encryptString(enc, v)))
 }
 
-export async function getChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, name: K): Promise<ChannelConfigs[K] | null> {
-  return getSecretSetting<ChannelConfigs[K]>(db, kv, `channel:${name}`)
+export async function getChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, ws: number, name: K): Promise<ChannelConfigs[K] | null> {
+  return getSecretSetting<ChannelConfigs[K]>(db, kv, ws, `channel:${name}`)
 }
 
-export async function putChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, name: K, value: NonNullable<ChannelConfigs[K]>) {
-  await putSecretSetting(db, kv, `channel:${name}`, value)
+export async function putChannelConfig<K extends keyof ChannelConfigs>(db: Db, kv: KVNamespace, ws: number, name: K, value: NonNullable<ChannelConfigs[K]>) {
+  await putSecretSetting(db, kv, ws, `channel:${name}`, value)
 }
 
-export const getAiConfig = (db: Db, kv: KVNamespace) => getSecretSetting<AiConfig>(db, kv, 'ai')
-export const putAiConfig = (db: Db, kv: KVNamespace, cfg: AiConfig) => putSecretSetting(db, kv, 'ai', cfg)
+export const getAiConfig = (db: Db, kv: KVNamespace, ws: number) => getSecretSetting<AiConfig>(db, kv, ws, 'ai')
+export const putAiConfig = (db: Db, kv: KVNamespace, ws: number, cfg: AiConfig) => putSecretSetting(db, kv, ws, 'ai', cfg)
 
-export async function deleteChannelConfig(db: Db, name: keyof ChannelConfigs) {
-  await db.delete(schema.settings).where(eq(schema.settings.key, `channel:${name}`))
+export async function deleteChannelConfig(db: Db, ws: number, name: keyof ChannelConfigs) {
+  await deleteSetting(db, ws, `channel:${name}`)
 }
 
 /** Which channels are configured. Messenger and Instagram share one Meta app. */
-export async function configuredChannels(db: Db): Promise<Channel[]> {
-  const rows = await db.select({ key: schema.settings.key, value: schema.settings.value }).from(schema.settings)
+export async function configuredChannels(db: Db, ws: number): Promise<Channel[]> {
+  const rows = await db
+    .select({ key: schema.settings.key, value: schema.settings.value })
+    .from(schema.settings)
+    .where(inArray(schema.settings.key, [wsKey(ws, 'channel:line'), wsKey(ws, 'channel:meta')]))
   const out: Channel[] = []
   for (const r of rows) {
-    if (r.key === 'channel:line') out.push('line')
-    if (r.key === 'channel:meta') {
+    if (r.key === wsKey(ws, 'channel:line')) out.push('line')
+    if (r.key === wsKey(ws, 'channel:meta')) {
       out.push('messenger')
       try {
         const v = JSON.parse(r.value) as { instagramAccountId?: string }

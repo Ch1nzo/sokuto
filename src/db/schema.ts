@@ -2,6 +2,16 @@ import { integer, sqliteTable, text, index, uniqueIndex } from 'drizzle-orm/sqli
 
 const now = () => new Date().toISOString()
 
+export const workspaces = sqliteTable('workspaces', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(now),
+})
+
+/** Every row of tables reached without a contact or flow belongs to one workspace (1 = Default). */
+const workspaceId = () => integer('workspace_id').notNull().default(1)
+
+/** Keys are workspace-prefixed: `ws:<id>:general`, `ws:<id>:channel:line`, … (see settings.ts wsKey). */
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
@@ -12,6 +22,7 @@ export const contacts = sqliteTable(
   'contacts',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
     channel: text('channel').notNull(),
     channelUserId: text('channel_user_id').notNull(),
     displayName: text('display_name'),
@@ -29,7 +40,7 @@ export const contacts = sqliteTable(
     createdAt: text('created_at').notNull().$defaultFn(now),
     updatedAt: text('updated_at').notNull().$defaultFn(now),
   },
-  (t) => [uniqueIndex('contacts_channel_user').on(t.channel, t.channelUserId), index('contacts_last_inbound').on(t.lastInboundAt)],
+  (t) => [uniqueIndex('contacts_channel_user').on(t.workspaceId, t.channel, t.channelUserId), index('contacts_workspace').on(t.workspaceId), index('contacts_last_inbound').on(t.lastInboundAt)],
 )
 
 export const contactTags = sqliteTable(
@@ -60,16 +71,21 @@ export const messages = sqliteTable(
   (t) => [index('messages_contact').on(t.contactId, t.createdAt)],
 )
 
-export const flows = sqliteTable('flows', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  channel: text('channel').notNull().default('any'),
-  status: text('status').notNull().default('draft'),
-  kind: text('kind').notNull().default('flow'), // flow | sequence
-  definition: text('definition').notNull(), // JSON FlowDefinition
-  createdAt: text('created_at').notNull().$defaultFn(now),
-  updatedAt: text('updated_at').notNull().$defaultFn(now),
-})
+export const flows = sqliteTable(
+  'flows',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
+    name: text('name').notNull(),
+    channel: text('channel').notNull().default('any'),
+    status: text('status').notNull().default('draft'),
+    kind: text('kind').notNull().default('flow'), // flow | sequence
+    definition: text('definition').notNull(), // JSON FlowDefinition
+    createdAt: text('created_at').notNull().$defaultFn(now),
+    updatedAt: text('updated_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('flows_workspace').on(t.workspaceId)],
+)
 
 export const sessions = sqliteTable(
   'sessions',
@@ -89,6 +105,7 @@ export const sessions = sqliteTable(
 
 export const broadcasts = sqliteTable('broadcasts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  workspaceId: workspaceId(),
   name: text('name').notNull(),
   channel: text('channel').notNull().default('any'),
   tag: text('tag'),
@@ -123,6 +140,7 @@ export const events = sqliteTable(
   'events',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
     type: text('type').notNull(), // trigger_fired | step_sent | button_clicked | input_saved | flow_completed | comment_replied | error
     channel: text('channel'),
     flowId: integer('flow_id'),
@@ -143,6 +161,7 @@ export const notifications = sqliteTable(
   'notifications',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
+    workspaceId: workspaceId(),
     contactId: integer('contact_id'),
     text: text('text').notNull(),
     read: integer('read').notNull().default(0),
@@ -166,6 +185,7 @@ export const sequenceSubscriptions = sqliteTable(
 
 export const segments = sqliteTable('segments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  workspaceId: workspaceId(),
   name: text('name').notNull(),
   rules: text('rules').notNull().default('[]'), // JSON ConditionRule[]
   mode: text('mode').notNull().default('all'), // all | any
@@ -174,6 +194,7 @@ export const segments = sqliteTable('segments', {
 
 export const snippets = sqliteTable('snippets', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  workspaceId: workspaceId(),
   name: text('name').notNull(),
   text: text('text').notNull(),
   createdAt: text('created_at').notNull().$defaultFn(now),
