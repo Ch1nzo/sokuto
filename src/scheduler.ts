@@ -7,6 +7,7 @@ import type { Channel } from './channels/types'
 import { dueSessions } from './inbound'
 import { parseFlow, runFrom, logMessage, type RunContext } from './flows/engine'
 import { getGeneral } from './settings'
+import { loadSegment, matchesSegment, tagsByContact } from './segments'
 
 const BROADCAST_PER_TICK = 30
 
@@ -41,7 +42,7 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
   const now = new Date().toISOString()
   const due = await db.select().from(schema.broadcasts).where(and(eq(schema.broadcasts.status, 'scheduled'), lte(schema.broadcasts.scheduledAt, now)))
   for (const b of due) {
-    const targets = await broadcastTargets(db, b.channel as Channel | 'any', b.tag)
+    const targets = await broadcastTargets(db, b.channel as Channel | 'any', b.tag, b.segmentId)
     if (targets.length > 0) await db.insert(schema.broadcastJobs).values(targets.map((t) => ({ broadcastId: b.id, contactId: t.id })))
     await db.update(schema.broadcasts).set({ status: targets.length ? 'running' : 'done', total: targets.length }).where(eq(schema.broadcasts.id, b.id))
   }
@@ -91,10 +92,17 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
   return sent
 }
 
-export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: string | null) {
-  const all = await db.select({ id: schema.contacts.id, channel: schema.contacts.channel, lastInboundAt: schema.contacts.lastInboundAt }).from(schema.contacts)
+/** Contacts on `channel` in the segment (which replaces the tag filter) or with the tag. A deleted segment reaches nobody. */
+export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null) {
+  const all = await db.select().from(schema.contacts)
   let targets = all.filter((c) => channel === 'any' || c.channel === channel)
-  if (tag) {
+  if (segmentId !== null) {
+    const seg = await loadSegment(db, segmentId)
+    if (!seg) return []
+    const tags = await tagsByContact(db)
+    // ponytail: O(n) in-memory scan over all contacts (rules are not SQL, and D1 caps bound parameters at 100); move to SQL if contacts outgrow Worker memory
+    targets = targets.filter((c) => matchesSegment(seg, c, tags.get(c.id) ?? []))
+  } else if (tag) {
     const tagged = await db.select({ contactId: schema.contactTags.contactId }).from(schema.contactTags).where(eq(schema.contactTags.tag, tag))
     const ids = new Set(tagged.map((t) => t.contactId))
     targets = targets.filter((c) => ids.has(c.id))
@@ -103,8 +111,8 @@ export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: st
 }
 
 /** Used by the admin to preview how many people a broadcast would reach right now. */
-export async function broadcastReach(db: Db, channel: Channel | 'any', tag: string | null) {
-  const targets = await broadcastTargets(db, channel, tag)
+export async function broadcastReach(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null) {
+  const targets = await broadcastTargets(db, channel, tag, segmentId)
   const reachable = targets.filter((c) => c.channel === 'line' || (c.lastInboundAt && Date.now() - new Date(c.lastInboundAt).getTime() <= 24 * 3600 * 1000))
   return { total: targets.length, reachable: reachable.length }
 }

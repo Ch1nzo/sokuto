@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Badge, Button, Text, TextField, useToast } from '@channel.io/bezier-react'
-import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, PeopleIcon, SearchIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { Badge, Button, HStack, ListItem, Modal, ModalBody, ModalContent, ModalHeader, Text, TextField, VStack, useToast } from '@channel.io/bezier-react'
+import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, FunnelIcon, PeopleIcon, SearchIcon, TrashIcon } from '@channel.io/bezier-icons'
+import type { ConditionRule } from '@shared/flows/types'
 import { api, errorMessage } from '../lib/api'
 import { useLang, useT } from '../lib/i18n'
 import {
@@ -15,11 +16,15 @@ import {
   PageHeader,
   RelativeTime,
   SelectInput,
+  TextInputField,
   contactDisplayName,
   formatNumber,
   type Column,
 } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
+import { AddButton } from './flow-editor/fields'
+import { RulesEditor } from './flow-editor/RulesEditor'
+import './flow-editor.css'
 import './contacts.css'
 
 type Contact = {
@@ -37,6 +42,10 @@ type Contact = {
 
 type ContactsResponse = { contacts: Contact[]; total: number; page: number; size: number }
 type TagCount = { tag: string; n: number }
+type Segment = { id: number; name: string; rules: ConditionRule[]; mode: 'all' | 'any' }
+type SegmentForm = Omit<Segment, 'id'> & { id: number | null }
+
+const blankSegment = (): SegmentForm => ({ id: null, name: '', rules: [{ field: 'tag', op: 'has_tag', value: '' }], mode: 'all' })
 
 const SUMMARY_FIELDS = ['phone', 'email', 'name', 'first_name']
 /** Tags shown per row before "+N". */
@@ -53,6 +62,107 @@ function fieldsSummary(fields: Record<string, string>): { text: string; full: st
   return { text: rest > 0 ? `${text} (+${rest})` : text, full: keys.map((k) => `${k}: ${fields[k]}`).join('\n') }
 }
 
+/** List + edit form for saved segments. `onChanged(deletedId?)` runs after a save or delete. */
+function SegmentManager({ show, onHide, segments, onChanged }: { show: boolean; onHide: () => void; segments: Segment[]; onChanged: (deletedId?: number) => void }) {
+  const t = useT()
+  const { lang } = useLang()
+  const fmt = formatNumber(lang)
+  const toast = useToast()
+  const [form, setForm] = useState<SegmentForm>(blankSegment)
+  const [error, setError] = useState<unknown>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const saved = segments.find((s) => s.id === form.id)
+
+  const edit = (f: SegmentForm) => {
+    setForm(f)
+    setError(null)
+  }
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault()
+    if (busy || !form.name.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      const body = { name: form.name, rules: form.rules, mode: form.mode }
+      const r = form.id ? await api.put<{ segment: Segment }>(`/api/segments/${form.id}`, body) : await api.post<{ segment: Segment }>('/api/segments', body)
+      setForm(r.segment)
+      toast.addToast(t('segments_saved'), { preset: 'success' })
+      onChanged()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (s: Segment) => {
+    try {
+      await api.delete(`/api/segments/${s.id}`)
+      toast.addToast(t('segments_deleted'), { preset: 'success' })
+      edit(blankSegment())
+      onChanged(s.id)
+    } catch (err) {
+      toast.addToast(errorMessage(err), { preset: 'error' })
+    }
+  }
+
+  return (
+    <>
+      <Modal show={show} onHide={onHide}>
+        <ModalContent width="min(760px, 100vw)" showCloseIcon>
+          <ModalHeader title={t('contacts_manage_segments')} />
+          <ModalBody>
+            <div className="ct-seg">
+              <div className="ct-seg__list">
+                <div>
+                  <AddButton text={t('segments_new')} onClick={() => edit(blankSegment())} />
+                </div>
+                {segments.length === 0 ? (
+                  <EmptyState compact icon={FunnelIcon} title={t('segments_empty')} />
+                ) : (
+                  <div className="list">
+                    {segments.map((s) => (
+                      <ListItem
+                        key={s.id}
+                        size="m"
+                        active={s.id === form.id}
+                        content={<span className="list-text">{s.name}</span>}
+                        description={t('segments_rules_count').replace('{n}', fmt(s.rules.length))}
+                        onClick={() => edit(s)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <VStack as="form" spacing={16} onSubmit={save} className="ct-seg__form">
+                <TextInputField label={t('segments_name')} value={form.name} maxLength={100} required onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <RulesEditor value={form} t={t} onChange={(patch) => setForm({ ...form, ...patch })} />
+                {error !== null && <ErrorBanner error={error} />}
+                <HStack spacing={8} justify="end" wrap>
+                  {saved && <Button styleVariant="secondary" colorVariant="red" leftContent={TrashIcon} text={t('delete')} onClick={() => setConfirming(true)} />}
+                  <Button type="submit" text={t('save')} loading={busy} disabled={!form.name.trim()} />
+                </HStack>
+              </VStack>
+            </div>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+      <ConfirmAction
+        show={confirming && saved !== undefined}
+        onHide={() => setConfirming(false)}
+        onConfirm={() => {
+          if (saved) void remove(saved)
+        }}
+        title={t('segments_delete_title')}
+        description={saved ? t('segments_delete_desc').replace('{name}', saved.name) : undefined}
+        confirmText={t('delete')}
+      />
+    </>
+  )
+}
+
 export default function Contacts() {
   const t = useT()
   const { lang } = useLang()
@@ -64,6 +174,9 @@ export default function Contacts() {
   const [tag, setTag] = useState('')
   const [tagQuery, setTagQuery] = useState('')
   const [channel, setChannel] = useState('')
+  const [segment, setSegment] = useState('')
+  const [segments, setSegments] = useState<Segment[]>([])
+  const [managing, setManaging] = useState(false)
   const [page, setPage] = useState(1)
   const [data, setData] = useState<ContactsResponse | null>(null)
   const [tags, setTags] = useState<TagCount[]>([])
@@ -79,7 +192,16 @@ export default function Contacts() {
 
   useEffect(() => {
     setPage(1)
-  }, [debouncedQ, tag, channel])
+  }, [debouncedQ, tag, channel, segment])
+
+  const loadSegments = useCallback(() => {
+    api
+      .get<{ segments: Segment[] }>('/api/segments')
+      .then((r) => setSegments(r.segments))
+      .catch(() => setSegments([]))
+  }, [])
+
+  useEffect(loadSegments, [loadSegments])
 
   useEffect(() => {
     api
@@ -94,6 +216,7 @@ export default function Contacts() {
     if (debouncedQ) params.set('q', debouncedQ)
     if (tag) params.set('tag', tag)
     if (channel) params.set('channel', channel)
+    if (segment) params.set('segment', segment)
     params.set('page', String(page))
     setLoading(true)
     api
@@ -109,7 +232,7 @@ export default function Contacts() {
     return () => {
       cancelled = true
     }
-  }, [debouncedQ, tag, channel, page, reload])
+  }, [debouncedQ, tag, channel, segment, page, reload])
 
   const remove = async (c: Contact) => {
     try {
@@ -132,6 +255,8 @@ export default function Contacts() {
     }
     return [{ value: '', label: t('contacts_all_tags') }, ...capped.map((x) => ({ value: x.tag, label: `${x.tag} (${fmt(x.n)})` }))]
   }, [tags, tagQuery, tag, t, fmt])
+
+  const segmentOptions = [{ value: '', label: t('contacts_all_segments') }, ...segments.map((s) => ({ value: String(s.id), label: s.name }))]
 
   const channelOptions = [
     { value: '', label: t('channel_any') },
@@ -250,14 +375,17 @@ export default function Contacts() {
           )
         }
         actions={
-          <Button
-            as="a"
-            {...{ href: '/api/contacts/export.csv', download: 'contacts.csv' }}
-            styleVariant="secondary"
-            colorVariant="monochrome-dark"
-            leftContent={DownloadIcon}
-            text={t('contacts_export')}
-          />
+          <>
+            <Button styleVariant="secondary" colorVariant="monochrome-dark" leftContent={FunnelIcon} text={t('contacts_manage_segments')} onClick={() => setManaging(true)} />
+            <Button
+              as="a"
+              {...{ href: '/api/contacts/export.csv', download: 'contacts.csv' }}
+              styleVariant="secondary"
+              colorVariant="monochrome-dark"
+              leftContent={DownloadIcon}
+              text={t('contacts_export')}
+            />
+          </>
         }
       />
 
@@ -294,6 +422,9 @@ export default function Contacts() {
         </div>
         <div className="ct-filters__channel">
           <SelectInput value={channel} options={channelOptions} onChange={setChannel} aria-label={t('editor_channel')} />
+        </div>
+        <div className="ct-filters__segment">
+          <SelectInput value={segment} options={segmentOptions} onChange={setSegment} aria-label={t('contacts_segments')} />
         </div>
       </div>
 
@@ -356,6 +487,17 @@ export default function Contacts() {
         title={t('contacts_delete_title')}
         description={pendingDelete ? t('contacts_delete_desc').replace('{name}', contactDisplayName(pendingDelete)) : undefined}
         confirmText={t('delete')}
+      />
+
+      <SegmentManager
+        show={managing}
+        onHide={() => setManaging(false)}
+        segments={segments}
+        onChanged={(deletedId) => {
+          loadSegments()
+          if (deletedId !== undefined && String(deletedId) === segment) setSegment('')
+          else setReload((n) => n + 1)
+        }}
       />
     </div>
   )

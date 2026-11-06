@@ -2,7 +2,7 @@
 
 .ct-filters {
   display: grid; gap: 8px; align-items: start;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
 }
 .ct-filters__tag { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ct-filters > * { min-width: 0; }
@@ -30,3 +30,10 @@
 }
 @media (max-width: 860px) { .ct-name { max-width: 160px; } }
 .ct-inline { display: flex; }
+
+/* Segment manager modal */
+.ct-seg { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 16px; align-items: start; padding-bottom: 16px; }
+.ct-seg__list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ct-seg__list .list { max-height: 50vh; overflow-y: auto; padding: 0; }
+.ct-seg__form { min-width: 0; }
+@media (max-width: 860px) { .ct-seg { grid-template-columns: minmax(0, 1fr); } .ct-seg__list .list { max-height: 30vh; } }

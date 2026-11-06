@@ -1,9 +1,10 @@
-import { Badge, Button, HStack, SegmentedControl, SegmentedControlItem, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
+import { Badge, Button, HStack, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
 import { ArrowDownIcon, ArrowUpIcon, CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
-import type { Action, ButtonDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
+import type { Action, ButtonDef, FlowRecord, Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
 import { SelectField, SelectInput, TextAreaField, TextInputField } from '../../components'
 import { AddButton, IconBtn, ListInputField, StepPicker } from './fields'
+import { RulesEditor } from './RulesEditor'
 import {
   ACTION_TYPES,
   DELAY_PRESETS,
@@ -11,8 +12,6 @@ import {
   MAX_BUTTON_LABEL,
   MAX_CHOICE_LABEL,
   MAX_REPLY_VARIANTS,
-  OPS_WITHOUT_VALUE,
-  RULE_OPS,
   STEP_TYPES,
   VALIDATE_TYPES,
   changeStepType,
@@ -119,44 +118,9 @@ function QuestionBody({ step, onChange, steps, t }: BodyProps<'question'>) {
 }
 
 function ConditionBody({ step, onChange, steps, t }: BodyProps<'condition'>) {
-  const setRule = (i: number, r: ConditionRule) => onChange({ ...step, rules: step.rules.map((x, j) => (j === i ? r : x)) })
   return (
     <>
-      <VStack spacing={8}>
-        <Text typo="13" bold color="txt-black-darker">
-          {t('editor_rules')}
-        </Text>
-        {step.rules.map((r, i) => {
-          const noValue = OPS_WITHOUT_VALUE.includes(r.op)
-          return (
-            <div className={noValue ? 'fe-rule fe-rule--novalue' : 'fe-rule'} key={i}>
-              <TextField className="fe-rule__field" value={r.field} placeholder="tag / channel / last_input / field" aria-label={t('editor_rule_field')} onChange={(e) => setRule(i, { ...r, field: e.target.value })} />
-              <div className="fe-rule__op">
-                <SelectInput
-                  aria-label={t('editor_rule_op')}
-                  value={r.op}
-                  options={RULE_OPS.map((op) => ({ value: op, label: op }))}
-                  onChange={(op) => setRule(i, OPS_WITHOUT_VALUE.includes(op) ? { field: r.field, op } : { ...r, op, value: r.value ?? '' })}
-                />
-              </div>
-              {!noValue && <TextField className="fe-rule__value" value={r.value ?? ''} aria-label={t('editor_value')} placeholder={t('editor_value')} onChange={(e) => setRule(i, { ...r, value: e.target.value })} />}
-              <div className="fe-rule__remove">
-                <IconBtn icon={CancelIcon} label={t('delete')} disabled={step.rules.length <= 1} onClick={() => onChange({ ...step, rules: step.rules.filter((_, j) => j !== i) })} />
-              </div>
-            </div>
-          )
-        })}
-        <HStack spacing={8} justify="between" wrap>
-          <AddButton text={t('editor_add_rule')} onClick={() => onChange({ ...step, rules: [...step.rules, { field: '', op: 'equals', value: '' }] })} />
-          <SegmentedControl type="radiogroup" size="s" width={260} value={step.mode ?? 'all'} onValueChange={(mode: 'all' | 'any') => onChange({ ...step, mode })} aria-label={t('editor_rules')}>
-            <SegmentedControlItem value="all">{t('editor_mode_all')}</SegmentedControlItem>
-            <SegmentedControlItem value="any">{t('editor_mode_any')}</SegmentedControlItem>
-          </SegmentedControl>
-        </HStack>
-        <Text typo="12" color="txt-black-dark" className="fe-wrap">
-          {t('editor_rule_fields_help')}
-        </Text>
-      </VStack>
+      <RulesEditor value={step} t={t} onChange={(patch) => onChange({ ...step, ...patch })} />
       <div className="fe-grid-2">
         <StepPicker label={t('editor_yes')} value={step.yes} steps={steps} selfId={step.id} t={t} onChange={(yes) => onChange({ ...step, yes })} />
         <StepPicker label={t('editor_no')} value={step.no} steps={steps} selfId={step.id} t={t} onChange={(no) => onChange({ ...step, no })} />

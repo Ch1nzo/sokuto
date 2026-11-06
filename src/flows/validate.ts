@@ -16,10 +16,17 @@ const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('story_reply') }),
 ])
 
-const ruleSchema = z.object({
+export const ruleSchema = z.object({
   field: z.string().min(1),
   op: z.enum(['equals', 'not_equals', 'contains', 'has_tag', 'not_has_tag', 'is_set', 'is_empty', 'gt', 'gte', 'lt', 'lte']),
   value: z.string().optional(),
+})
+
+/** Body of POST/PUT /api/segments and MCP create_segment. */
+export const segmentInputSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  rules: z.array(ruleSchema).min(1).max(20),
+  mode: z.enum(['all', 'any']).default('all'),
 })
 
 const actionSchema = z.discriminatedUnion('type', [
@@ -125,6 +132,7 @@ Steps:
   "validate" checks and normalizes the answer before saving (phone: digits with an optional leading +, 8–15 digits, spaces/hyphens/parentheses removed; number: half-width; url: http(s) only; date: saved as YYYY-MM-DD, real days only). An invalid answer gets "retryText" and the question keeps waiting: always write a retryText that says what format is expected (the default is a generic Japanese sentence). "skipLabel" adds a quick reply that moves on to "next" without saving the field; with it, at most 12 choices.
 - { "id", "type": "condition", "rules": [{ "field": "rating", "op": "lte", "value": "2" }], "mode"?: "all"|"any", "yes": stepId, "no": stepId }
   ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name", "is_follower" ("true"/"false"; Instagram follow status, always "true" on other channels), "hour" ("0"–"23" in the bot time zone), "weekday" ("0" = Sunday … "6" = Saturday), "days_since_created", "days_since_last_inbound" (whole days; empty for a new contact). Any other field is a contact field; use "tag" with has_tag / not_has_tag.
+  Segments (create_segment) reuse these rules and mode to filter contacts and target broadcasts; there "last_input" is always empty.
   Compare numbers as strings: { "field": "hour", "op": "gte", "value": "9" }
 - { "id", "type": "action", "actions": [{ "type": "add_tag", "tag": "interested" }, { "type": "remove_tag", "tag": "x" }, { "type": "set_field", "field": "f", "value": "v" }, { "type": "notify", "text": "..." }, { "type": "pause_bot", "minutes"?: 60 }, { "type": "webhook", "url": "https://..." }], "next": stepId }
 - { "id", "type": "delay", "seconds": 3600, "next": stepId }  waits ≤10 s inline with a typing indicator (up to 20 s per run); longer waits resume from the scheduler, which runs every minute
