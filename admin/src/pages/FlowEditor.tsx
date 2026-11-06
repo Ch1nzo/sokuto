@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Badge,
@@ -10,45 +10,36 @@ import {
   ConfirmModalContent,
   ConfirmModalFooter,
   ConfirmModalHeader,
+  HStack,
+  Tag,
   Text,
   TextField,
   VStack,
   useToast,
 } from '@channel.io/bezier-react'
-import { ErrorTriangleIcon, FlowIcon, InfoIcon, PlayIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { CancelIcon, ErrorTriangleIcon, FlowIcon, InfoIcon, PlayIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { FlowDefinition, FlowRecord, Step, Trigger } from '@shared/flows/types'
 import { api } from '../lib/api'
 import { useT, type Key } from '../lib/i18n'
-import { Card, EmptyState, ErrorBanner, LoadingState, PageHeader, SelectInput } from '../components'
+import { EmptyState, ErrorBanner, LoadingState, PageHeader, SelectInput } from '../components'
 import { formatFlowError } from './flow-editor/errors'
-import { AddButton, StepPicker } from './flow-editor/fields'
-import { clearRefs, defaultStep, FLOW_CHANNELS, newStepId, SEQUENCE_STEP_TYPES, STEP_TYPES, type FlowChannel, type StepType } from './flow-editor/model'
-import { StepCard } from './flow-editor/StepCard'
+import { AddButton, IconBtn } from './flow-editor/fields'
+import { START, autoLayout, errorStepIds, outlets, setPointer, type Point } from './flow-editor/graph'
+import { changeStepType, clearRefs, defaultStep, FLOW_CHANNELS, newStepId, SEQUENCE_STEP_TYPES, STEP_TYPES, type FlowChannel, type StepType } from './flow-editor/model'
+import { Canvas, type CanvasInstance } from './flow-editor/Canvas'
+import { StepBody } from './flow-editor/StepCard'
 import { TestPanel } from './flow-editor/TestPanel'
 import { TriggerList } from './flow-editor/TriggerCard'
 import './flow-editor.css'
 
-const MOBILE_QUERY = '(max-width: 860px)'
-
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia(query).matches)
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return
-    const mql = window.matchMedia(query)
-    const onChange = () => setMatches(mql.matches)
-    onChange()
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
-  }, [query])
-  return matches
-}
+/** Flows saved before the canvas (and templates) have no layout: arrange them once on open. */
+const withLayout = (d: FlowDefinition): FlowDefinition => (d.layout ? d : { ...d, layout: autoLayout(d) })
 
 export default function FlowEditor() {
   const t = useT()
   const navigate = useNavigate()
   const toast = useToast()
   const { id = '' } = useParams<{ id: string }>()
-  const isMobile = useMediaQuery(MOBILE_QUERY)
   const [flow, setFlow] = useState<FlowRecord | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -58,11 +49,15 @@ export default function FlowEditor() {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [errorIds, setErrorIds] = useState<Set<string>>(() => new Set())
   const [warnings, setWarnings] = useState<string[]>([])
   const [allFlows, setAllFlows] = useState<FlowRecord[]>([])
   const [newStepType, setNewStepType] = useState<StepType>('message')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
+  const rf = useRef<CanvasInstance | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setFlow(null)
@@ -73,7 +68,7 @@ export default function FlowEditor() {
         setFlow(r.flow)
         setName(r.flow.name)
         setChannel(r.flow.channel)
-        setDef(r.flow.definition)
+        setDef(withLayout(r.flow.definition))
         setDirty(false)
       })
       .catch((err: unknown) => setLoadError(err))
@@ -93,10 +88,9 @@ export default function FlowEditor() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
 
-  // Mobile bottom sheet: close it when leaving mobile; lock page scroll and close on Escape while open.
-  const sheetOpen = isMobile && testOpen
+  // Test drawer: lock page scroll and close on Escape while open.
   useEffect(() => {
-    if (!sheetOpen) return
+    if (!testOpen) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
@@ -107,63 +101,91 @@ export default function FlowEditor() {
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
-  }, [sheetOpen])
+  }, [testOpen])
 
   const touch = () => setDirty(true)
-  const updateDef = (fn: (d: FlowDefinition) => FlowDefinition) => {
+  const updateDef = useCallback((fn: (d: FlowDefinition) => FlowDefinition) => {
     setDef(fn)
-    touch()
-  }
+    setDirty(true)
+  }, [])
 
   /* triggers */
   const updateTriggers = (fn: (ts: Trigger[]) => Trigger[]) => updateDef((d) => ({ ...d, triggers: fn(d.triggers) }))
 
   /* steps */
-  const setStep = (i: number, s: Step) => updateDef((d) => ({ ...d, steps: d.steps.map((x, j) => (j === i ? s : x)) }))
-  const addStep = () =>
-    updateDef((d) => {
-      const step = defaultStep(newStepType, newStepId(d.steps, newStepType))
-      return { ...d, steps: [...d.steps, step], entry: d.entry ?? step.id }
-    })
-  const removeStep = (i: number) =>
-    updateDef((d) => {
-      const removed = d.steps[i]
-      if (!removed) return d
-      return {
-        ...d,
-        entry: d.entry === removed.id ? null : d.entry,
-        steps: d.steps.filter((_, j) => j !== i).map((s) => clearRefs(s, removed.id)),
-      }
-    })
-  const moveStep = (i: number, delta: -1 | 1) =>
-    updateDef((d) => {
-      const j = i + delta
-      if (j < 0 || j >= d.steps.length) return d
-      const steps = [...d.steps]
-      const a = steps[i]
-      const b = steps[j]
-      if (!a || !b) return d
-      steps[i] = b
-      steps[j] = a
-      return { ...d, steps }
-    })
+  const setStep = (s: Step) => updateDef((d) => ({ ...d, steps: d.steps.map((x) => (x.id === s.id ? s : x)) }))
+  const removeSteps = useCallback(
+    (ids: string[]) => {
+      const gone = new Set(ids)
+      updateDef((d) => {
+        const layout = { ...d.layout }
+        for (const sid of ids) delete layout[sid]
+        return {
+          ...d,
+          entry: d.entry && gone.has(d.entry) ? null : d.entry,
+          steps: d.steps.filter((s) => !gone.has(s.id)).map((s) => ids.reduce(clearRefs, s)),
+          layout,
+        }
+      })
+      setSelectedId((sel) => (sel && gone.has(sel) ? null : sel))
+    },
+    [updateDef],
+  )
+
+  /** New node right of the selected one (or in the middle of the view), linked from the selected step's empty `next`. */
+  const addStep = () => {
+    const step = defaultStep(newStepType, newStepId(def.steps, newStepType))
+    const layout = { ...def.layout }
+    const from = selectedId ? layout[selectedId] : undefined
+    let pos: Point = { x: 0, y: 0 }
+    if (from) pos = { x: from.x + 320, y: from.y }
+    else {
+      const r = canvasRef.current?.getBoundingClientRect()
+      const c = r && rf.current ? rf.current.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : pos
+      pos = { x: Math.round(c.x / 16) * 16 - 128, y: Math.round(c.y / 16) * 16 - 48 }
+    }
+    while (Object.values(layout).some((p) => Math.abs(p.x - pos.x) < 240 && Math.abs(p.y - pos.y) < 120)) pos = { ...pos, y: pos.y + 160 }
+    layout[step.id] = pos
+    updateDef((d) => ({
+      ...d,
+      entry: d.entry ?? step.id,
+      layout,
+      steps: [...d.steps.map((s) => (s.id === selectedId && outlets(s).some((o) => o.handle === 'next' && !o.target) ? setPointer(s, 'next', step.id) : s)), step],
+    }))
+    setSelectedId(step.id)
+  }
+
+  const arrange = () => {
+    updateDef((d) => ({ ...d, layout: autoLayout(d) }))
+    requestAnimationFrame(() => void rf.current?.fitView({ maxZoom: 1 }))
+  }
 
   /* server actions */
-  const save = async (): Promise<boolean> => {
+  const showError = (err: unknown) => {
+    const text = formatFlowError(err, t)
+    setError(text)
+    setErrorIds(errorStepIds(text.split('\n'), def.steps))
+  }
+  const clearError = () => {
     setError('')
+    setErrorIds(new Set())
+  }
+
+  const save = async (): Promise<boolean> => {
+    clearError()
     setWarnings([])
     setBusy(true)
     try {
       const r = await api.put<{ flow: FlowRecord; warnings: string[] }>(`/api/flows/${id}`, { name, channel, definition: def })
       setFlow(r.flow)
-      setDef(r.flow.definition)
+      setDef(withLayout(r.flow.definition))
       setName(r.flow.name)
       setDirty(false)
       setWarnings(r.warnings ?? [])
       toast.addToast(t('saved'), { preset: 'success' })
       return true
     } catch (err) {
-      setError(formatFlowError(err, t))
+      showError(err)
       return false
     } finally {
       setBusy(false)
@@ -172,7 +194,7 @@ export default function FlowEditor() {
 
   const publish = async () => {
     if (dirty && !(await save())) return
-    setError('')
+    clearError()
     setBusy(true)
     try {
       const r = await api.post<{ ok: boolean; warnings?: string[] }>(`/api/flows/${id}/publish`)
@@ -180,21 +202,21 @@ export default function FlowEditor() {
       setWarnings(r.warnings ?? [])
       toast.addToast(t('status_live'), { preset: 'success' })
     } catch (err) {
-      setError(formatFlowError(err, t))
+      showError(err)
     } finally {
       setBusy(false)
     }
   }
 
   const unpublish = async () => {
-    setError('')
+    clearError()
     setBusy(true)
     try {
       await api.post(`/api/flows/${id}/unpublish`)
       setFlow((f) => (f ? { ...f, status: 'draft' } : f))
       toast.addToast(t('status_draft'), { preset: 'default' })
     } catch (err) {
-      setError(formatFlowError(err, t))
+      showError(err)
     } finally {
       setBusy(false)
     }
@@ -202,14 +224,14 @@ export default function FlowEditor() {
 
   const remove = async () => {
     setConfirmDelete(false)
-    setError('')
+    clearError()
     setBusy(true)
     try {
       await api.delete(`/api/flows/${id}`)
       setDirty(false)
       navigate('/flows')
     } catch (err) {
-      setError(formatFlowError(err, t))
+      showError(err)
       setBusy(false)
     }
   }
@@ -228,6 +250,8 @@ export default function FlowEditor() {
   const live = flow.status === 'live'
   const isSequence = flow.kind === 'sequence'
   const stepTypes = isSequence ? SEQUENCE_STEP_TYPES : STEP_TYPES
+  const selectedStep = def.steps.find((s) => s.id === selectedId)
+  const closeBtn = <IconBtn icon={CancelIcon} label={t('close')} onClick={() => setSelectedId(null)} />
 
   return (
     <div className="stack fe-page">
@@ -281,16 +305,6 @@ export default function FlowEditor() {
         actions={
           <ButtonGroup className="fe-actions">
             <Button text={t('save')} loading={busy && dirty} disabled={busy || !dirty} onClick={() => void save()} />
-            <Button
-              className="fe-test-toggle"
-              styleVariant="secondary"
-              colorVariant="monochrome-dark"
-              leftContent={PlayIcon}
-              text={t('editor_test')}
-              aria-expanded={sheetOpen}
-              aria-controls="fe-test-sheet"
-              onClick={() => setTestOpen((o) => !o)}
-            />
             {live ? (
               <Button styleVariant="secondary" colorVariant="monochrome-dark" text={t('editor_unpublish')} disabled={busy} onClick={() => void unpublish()} />
             ) : (
@@ -304,74 +318,95 @@ export default function FlowEditor() {
       {error && <ErrorBanner error={error} />}
       {warnings.length > 0 && <Banner className="fe-warnings" variant="orange" icon={ErrorTriangleIcon} content={`${t('editor_warnings')}\n${warnings.map((w) => `• ${w}`).join('\n')}`} />}
 
-      <div className="fe-layout">
-        <div className="fe-main stack">
-          {isSequence ? (
-            <Banner variant="default" icon={InfoIcon} content={t('editor_sequence_note')} />
-          ) : (
-            <Card title={t('editor_triggers')}>
-              <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />
-            </Card>
-          )}
+      <div className="fe-toolbar">
+        <div className="fe-toolbar__select">
+          <SelectInput
+            aria-label={t('editor_step_type')}
+            value={newStepType}
+            options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
+            onChange={setNewStepType}
+          />
+        </div>
+        <AddButton text={t('editor_add_step')} onClick={addStep} />
+        <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" text={t('editor_canvas_arrange')} onClick={arrange} />
+        <Button
+          size="s"
+          styleVariant="secondary"
+          colorVariant="monochrome-dark"
+          leftContent={PlayIcon}
+          text={t('editor_test')}
+          aria-expanded={testOpen}
+          aria-controls="fe-test-sheet"
+          onClick={() => setTestOpen((o) => !o)}
+        />
+      </div>
 
-          <Card title={t('editor_steps')}>
-            <VStack spacing={16}>
-              <Banner variant="default" icon={InfoIcon} content={t('editor_placeholders')} />
-              <StepPicker label={t('editor_entry')} value={def.entry} steps={def.steps} t={t} allowEnd={false} onChange={(entry) => updateDef((d) => ({ ...d, entry }))} />
-              {def.steps.length === 0 ? (
-                <EmptyState compact icon={FlowIcon} title={t('editor_no_steps')} />
-              ) : (
-                def.steps.map((s, i) => (
-                  <StepCard
-                    key={s.id + ':' + i}
-                    step={s}
-                    index={i}
-                    count={def.steps.length}
-                    isEntry={def.entry === s.id}
-                    steps={def.steps}
-                    stepTypes={stepTypes}
-                    flows={allFlows}
-                    currentId={flow.id}
-                    t={t}
-                    onChange={(ns) => setStep(i, ns)}
-                    onMove={(delta) => moveStep(i, delta)}
-                    onRemove={() => removeStep(i)}
-                  />
-                ))
-              )}
-              <div className="fe-add-step">
-                <div className="fe-add-step__select">
-                  <SelectInput
-                    aria-label={t('editor_step_type')}
-                    value={newStepType}
-                    options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
-                    onChange={setNewStepType}
-                  />
-                </div>
-                <AddButton text={t('editor_add_step')} onClick={addStep} />
-              </div>
-            </VStack>
-          </Card>
+      <div className="fe-layout">
+        <div className="fe-canvas" ref={canvasRef}>
+          <Canvas
+            definition={def}
+            isSequence={isSequence}
+            selectedId={selectedId}
+            errorIds={errorIds}
+            onSelect={setSelectedId}
+            onChange={updateDef}
+            onRemove={removeSteps}
+            onInit={(instance) => (rf.current = instance)}
+          />
         </div>
 
-        <aside
-          id="fe-test-sheet"
-          className={['fe-side', testOpen ? 'is-open' : ''].filter(Boolean).join(' ')}
-          {...(isMobile ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'fe-test-title', hidden: !testOpen } : {})}
-        >
-          {isMobile && <div className="fe-side__scrim" onClick={() => setTestOpen(false)} aria-hidden="true" />}
-          <div className="fe-side__panel">
-            <TestPanel
-              flowId={id}
-              definition={def}
-              kind={flow.kind}
-              defaultChannel={channel === 'any' ? 'line' : channel}
-              t={t}
-              onClose={isMobile ? () => setTestOpen(false) : undefined}
-            />
-          </div>
+        <aside className={['fe-panel', selectedId ? 'is-open' : ''].filter(Boolean).join(' ')} aria-label={selectedStep?.id ?? t('editor_triggers')}>
+          {selectedId === START ? (
+            <VStack spacing={16}>
+              <div className="fe-panel__head">
+                <Text as="h2" typo="16" bold color="txt-black-darkest" className="fe-grow">
+                  {isSequence ? t('editor_canvas_start') : t('editor_triggers')}
+                </Text>
+                {closeBtn}
+              </div>
+              {isSequence ? <Banner variant="default" icon={InfoIcon} content={t('editor_sequence_note')} /> : <TriggerList triggers={def.triggers} t={t} onChange={updateTriggers} />}
+            </VStack>
+          ) : selectedStep ? (
+            <VStack spacing={16}>
+              <div className="fe-panel__head">
+                <Tag size="m" variant="monochrome-dark" className="fe-mono">
+                  {selectedStep.id}
+                </Tag>
+                <div className="fe-grow">
+                  <SelectInput
+                    aria-label={t('editor_step_type')}
+                    value={selectedStep.type}
+                    options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
+                    onChange={(type: StepType) => setStep(changeStepType(selectedStep, type))}
+                  />
+                </div>
+                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${selectedStep.id}`} onClick={() => removeSteps([selectedStep.id])} />
+                {closeBtn}
+              </div>
+              <HStack>
+                {def.entry === selectedStep.id ? (
+                  <Badge size="m" variant="green">
+                    {t('editor_entry')}
+                  </Badge>
+                ) : (
+                  <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" text={t('editor_canvas_set_entry')} onClick={() => updateDef((d) => ({ ...d, entry: selectedStep.id }))} />
+                )}
+              </HStack>
+              <Banner variant="default" icon={InfoIcon} content={t('editor_placeholders')} />
+              <StepBody key={selectedStep.id} step={selectedStep} steps={def.steps} t={t} flows={allFlows} currentId={flow.id} onChange={setStep} />
+            </VStack>
+          ) : (
+            <EmptyState compact icon={FlowIcon} title={t('editor_canvas_select')} description={t('editor_canvas_hint')} />
+          )}
         </aside>
       </div>
+
+      <aside id="fe-test-sheet" className="fe-side" role="dialog" aria-modal aria-labelledby="fe-test-title" hidden={!testOpen}>
+        <div className="fe-side__scrim" onClick={() => setTestOpen(false)} aria-hidden="true" />
+        <div className="fe-side__panel">
+          <TestPanel flowId={id} definition={def} kind={flow.kind} defaultChannel={channel === 'any' ? 'line' : channel} t={t} onClose={() => setTestOpen(false)} />
+        </div>
+      </aside>
 
       <ConfirmModal show={confirmDelete} onHide={() => setConfirmDelete(false)}>
         <ConfirmModalContent>

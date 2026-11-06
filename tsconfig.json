@@ -11,7 +11,8 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@shared/*": ["./src/*"] }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "worker-configuration.d.ts"]
 }

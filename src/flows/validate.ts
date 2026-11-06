@@ -86,6 +86,7 @@ export const flowDefinitionSchema = z.object({
   triggers: z.array(triggerSchema),
   entry: z.string().nullable(),
   steps: z.array(stepSchema).max(200),
+  layout: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
 })
 
 export const flowChannelSchema = z.enum(['any', 'line', 'messenger', 'instagram'])
@@ -158,6 +159,7 @@ export function validateFlow(input: unknown, kind: FlowRecord['kind'] = 'flow'):
 /** Human-readable description of the flow JSON for AI assistants (MCP get_flow_schema). */
 export const FLOW_SCHEMA_DOC = `A flow definition is a JSON object: { "triggers": Trigger[], "entry": stepId | null, "steps": Step[] }.
 Steps are a graph: each step names the next step id (or null to end). Use short ids like "m1", "q1", "c1".
+Optional "layout" holds the admin canvas node positions ({ "<stepId>" | "start": { "x", "y" } }); it is UI-only: omit it (update_flow keeps the stored one).
 
 Triggers (when the flow starts):
 - { "type": "keyword", "keywords": ["価格","price"], "match": "contains"|"exact"|"starts_with" }  message containing a keyword

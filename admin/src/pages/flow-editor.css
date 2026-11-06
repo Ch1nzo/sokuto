@@ -1,5 +1,8 @@
 /* Flow editor (pages/FlowEditor.tsx + pages/flow-editor/*). Unlayered class rules only; see components/README.md. */
 
+/* The canvas wants the whole width and height of the main area. */
+.main__inner:has(> .fe-page) { max-width: none; padding-bottom: var(--page-pad-y); }
+
 /* ---------- header ---------- */
 .fe-name { width: 100%; max-width: 560px; }
 .fe-name, .fe-name input { font-size: 18px; font-weight: 700; }
@@ -7,13 +10,70 @@
 .fe-channel { display: flex; align-items: center; gap: 8px; }
 .fe-channel__select { width: 160px; }
 .fe-actions { flex-wrap: wrap; }
-.fe-test-toggle { display: none; }
 
-/* ---------- layout ---------- */
-.fe-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
-.fe-main { min-width: 0; }
-.fe-side { min-width: 0; position: sticky; top: 16px; }
-.fe-side__panel { min-width: 0; }
+/* ---------- toolbar + canvas + side panel ---------- */
+.fe-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fe-toolbar__select { width: 200px; }
+
+.fe-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; height: calc(100vh - 208px); height: calc(100dvh - 208px); min-height: 480px; }
+.fe-canvas {
+  min-width: 0; height: 100%; overflow: hidden; isolation: isolate;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
+}
+.fe-panel {
+  min-width: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
+  background: var(--bg-white-normal);
+}
+.fe-panel__head { display: flex; align-items: center; gap: 8px; }
+
+/* React Flow colors from Bezier tokens, so dark mode follows the app theme. */
+.fe-canvas .react-flow {
+  --xy-background-color: var(--bg-grey-lightest);
+  --xy-background-pattern-dots-color: var(--bdr-black-dark);
+  --xy-edge-stroke: var(--txt-black-dark);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-selected: var(--bgtxt-blue-normal);
+  --xy-connectionline-stroke: var(--bgtxt-blue-normal);
+  --xy-connectionline-stroke-width: 1.5;
+  --xy-edge-label-background-color: var(--bg-white-normal);
+  --xy-edge-label-color: var(--txt-black-darker);
+  --xy-minimap-background-color: var(--bg-white-normal);
+  --xy-minimap-node-background-color: var(--bg-black-light);
+  --xy-minimap-mask-background-color: var(--bg-black-lightest);
+  --xy-controls-button-background-color: var(--bg-white-normal);
+  --xy-controls-button-background-color-hover: var(--bg-black-lightest);
+  --xy-controls-button-color: var(--txt-black-darker);
+  --xy-controls-button-color-hover: var(--txt-black-darkest);
+  --xy-controls-button-border-color: var(--bdr-black-light);
+}
+.fe-canvas .react-flow__edge-text { font-size: 12px; }
+
+/* ---------- nodes ---------- */
+.fe-node {
+  position: relative; width: 260px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px 6px;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-12);
+  background: var(--bg-white-normal); box-shadow: var(--ev-1);
+  color: var(--txt-black-darkest); font-size: 13px; line-height: 1.4;
+}
+.fe-node.is-selected { border-color: var(--bgtxt-blue-normal); box-shadow: 0 0 0 1px var(--bgtxt-blue-normal), var(--ev-2); }
+.fe-node.is-error { border-color: var(--bgtxt-red-normal); box-shadow: 0 0 0 1px var(--bgtxt-red-normal), var(--ev-2); }
+.fe-node__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fe-node__head > * { flex: none; white-space: nowrap; }
+.fe-node__type { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-node__body {
+  color: var(--txt-black-darker); font-size: 12px; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+.fe-node__outlets { display: flex; flex-direction: column; margin: 0 -12px; padding-top: 4px; border-top: 1px solid var(--bdr-black-lightest); }
+.fe-node__outlet { position: relative; display: flex; justify-content: flex-end; padding: 3px 14px 3px 12px; font-size: 12px; color: var(--txt-black-dark); }
+.fe-node__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-node .react-flow__handle { width: 10px; height: 10px; background: var(--bg-white-normal); border: 2px solid var(--txt-black-dark); }
+.fe-node .react-flow__handle-connecting, .fe-node .react-flow__handle:hover { border-color: var(--bgtxt-blue-normal); }
+@media (pointer: coarse) { .fe-node .react-flow__handle { width: 16px; height: 16px; } }
 
 /* ---------- generic editor pieces ---------- */
 .fe-grow { flex: 1 1 auto; min-width: 0; }
@@ -36,12 +96,6 @@
   background: var(--bg-black-lightest);
 }
 
-/* step header: [id tag + entry badge] [type select] [up down remove] */
-.fe-step__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.fe-step__meta { display: flex; align-items: center; gap: 6px; flex: none; }
-.fe-step__type { flex: 1 1 200px; min-width: 0; }
-.fe-step__tools { display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
-
 /* condition rule row: field | op | value | × */
 .fe-rule { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; }
 .fe-rule--novalue { grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto; }
@@ -54,15 +108,26 @@
 .fe-delay__input { width: 160px; }
 .fe-delay__presets { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.fe-add-step { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
-.fe-add-step__select { width: 220px; }
-
 .fe-warnings { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* ---------- test panel ---------- */
+/* The side panel is narrow: one column, stacked rule rows (same as the ≤600px rules below). */
+.fe-panel .fe-grid-2 { grid-template-columns: minmax(0, 1fr); }
+.fe-panel .fe-item { padding: 12px; }
+.fe-panel .fe-rule, .fe-panel .fe-rule--novalue { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 8px; border-bottom: 1px solid var(--bdr-black-light); }
+.fe-panel .fe-rule__field { grid-column: 1; }
+.fe-panel .fe-rule__op { grid-column: 1; grid-row: 2; }
+.fe-panel .fe-rule__value { grid-column: 1; grid-row: 3; }
+.fe-panel .fe-rule__remove { grid-column: 2; grid-row: 1; }
+
+/* ---------- test drawer (right side, all sizes) ---------- */
+.fe-side { position: fixed; inset: 0; z-index: 900; display: flex; justify-content: flex-end; }
+.fe-side[hidden] { display: none; }
+.fe-side__scrim { position: absolute; inset: 0; background: var(--bgtxt-absolute-black-lighter, rgba(0, 0, 0, 0.4)); }
+.fe-side__panel { position: relative; width: min(420px, 100%); height: 100%; overflow-y: auto; overscroll-behavior: contain; background: var(--bg-white-normal); box-shadow: var(--ev-6); }
+.fe-side__panel > .fe-test { min-height: 100%; border: 0; border-radius: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+
 .fe-test { display: flex; flex-direction: column; gap: 12px; }
 .fe-test__head { display: flex; align-items: flex-start; gap: 8px; }
-.fe-test__close { display: none; }
 .fe-test__sends { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .fe-transcript {
@@ -94,17 +159,19 @@ a.chip { text-decoration: none; }
 .fe-notes { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .fe-notes li { display: flex; align-items: flex-start; gap: 6px; }
 
-/* ---------- mobile: one column, Test panel as a bottom sheet ---------- */
+/* ---------- mobile: canvas fills the screen, the side panel is a bottom sheet ---------- */
 @media (max-width: 860px) {
-  .fe-layout { grid-template-columns: minmax(0, 1fr); }
-  .fe-test-toggle { display: inline-flex; }
-  .fe-test__close { display: inline-flex; }
-
-  .fe-side { position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column; justify-content: flex-end; }
-  .fe-side[hidden] { display: none; }
-  .fe-side__scrim { position: absolute; inset: 0; background: var(--bgtxt-absolute-black-lighter, rgba(0, 0, 0, 0.4)); }
-  .fe-side__panel { position: relative; max-height: 88vh; max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain; }
-  .fe-side__panel > .fe-test { border-radius: var(--radius-16) var(--radius-16) 0 0; border-bottom: 0; box-shadow: var(--ev-6); padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .fe-layout { grid-template-columns: minmax(0, 1fr); height: calc(100vh - 120px); height: calc(100dvh - 120px); min-height: 360px; }
+  .fe-panel {
+    display: none;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 800;
+    height: auto; max-height: 70vh; max-height: 70dvh;
+    border-bottom: 0; border-radius: var(--radius-16) var(--radius-16) 0 0;
+    box-shadow: var(--ev-6);
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .fe-panel.is-open { display: block; }
+  .fe-canvas .react-flow__minimap { display: none; }
   .fe-transcript { max-height: 40vh; }
 }
 
@@ -125,9 +192,7 @@ a.chip { text-decoration: none; }
   .fe-branch { grid-template-columns: 80px 52px minmax(0, 1fr) auto; }
   .fe-branch__next { grid-column: 1 / 4; grid-row: 2; }
   .fe-delay__input { width: 100%; }
-  .fe-add-step { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .fe-add-step__select { width: 100%; }
+  .fe-toolbar__select { flex: 1 1 140px; width: auto; }
   .fe-test__sends { display: grid; grid-template-columns: minmax(0, 1fr); }
   .fe-item { padding: 12px; }
-  .fe-step__type { flex-basis: 120px; }
 }

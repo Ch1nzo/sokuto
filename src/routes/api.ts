@@ -307,7 +307,8 @@ apiRoutes.put('/flows/:id', async (c) => {
   if (body.definition !== undefined) {
     const v = validateFlow(body.definition, flow.kind)
     if (!v.ok) return c.json({ error: 'invalid_definition', errors: v.errors }, 400)
-    patch.definition = JSON.stringify(v.definition)
+    // A definition without canvas positions (e.g. edited over MCP) keeps the stored ones.
+    patch.definition = JSON.stringify({ ...v.definition, layout: v.definition.layout ?? flow.definition.layout })
     warnings = v.warnings
   }
   if (body.status === 'live' || body.status === 'draft') patch.status = body.status

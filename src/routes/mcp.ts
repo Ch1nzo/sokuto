@@ -88,7 +88,8 @@ export function buildMcpServer(env: Env): McpServer {
       if (definition !== undefined) {
         const v = validateFlow(definition, flow.kind)
         if (!v.ok) return fail('invalid_definition', v.errors)
-        patch.definition = JSON.stringify(v.definition)
+        // A definition without canvas positions (e.g. edited over MCP) keeps the stored ones.
+        patch.definition = JSON.stringify({ ...v.definition, layout: v.definition.layout ?? flow.definition.layout })
         warnings = v.warnings
       }
       const row = await d.update(schema.flows).set(patch).where(eq(schema.flows.id, id)).returning().get()

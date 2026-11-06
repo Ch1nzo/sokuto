@@ -202,7 +202,7 @@ sokuto/
    - すぐ次へ進むなら `current = step.next ?? null` として `break`。
    - お客さんの入力を待つなら `saveSession(ctx, { stepId, waiting: '...' })` して `return` し、`resumeSession` に再開の処理を追加します。
    - `ctx.dryRun` が true のとき (テスト実行) は、外部への送信や D1 への書き込みをしないようにします。
-5. **管理画面**: 自動化の編集画面にフォームを追加し、`admin/src/lib/i18n.ts` に `step_typing` の文言 (日本語・英語) を追加します。
+5. **管理画面**: `admin/src/pages/flow-editor/StepCard.tsx` の `StepBody` にフォームを追加します。次のステップへのポインタ (キャンバスの端子と線) は `flow-editor/graph.ts` の `outlets` と `setPointer` が決めるので、`next` 以外のポインタを持つなら両方に追加します (`tests/graph.test.ts`)。ノードのアイコンと要約は `flow-editor/Canvas.tsx` の `STEP_ICONS` と `summary` です。`admin/src/lib/i18n.ts` に `step_typing` の文言 (日本語・英語) を追加します。
 6. **テスト**: `tests/` に検証とテスト実行 (`simulateFlow`) のテストを追加します。
 
 ---
@@ -215,4 +215,4 @@ sokuto/
 - After editing `src/db/schema.ts`, run `npm run db:generate` and `npm run migrate:local`; `npm run deploy` applies migrations remotely before deploying.
 - Manual deploy: `npx wrangler login`, create the D1 database and KV namespace, put their IDs into `wrangler.jsonc` (the repo has dummy IDs), then `npm run build && npm run deploy`.
 - Adding a channel: extend `Channel`, write an adapter implementing `ChannelAdapter` plus signature check and webhook parser, add a config type (secret fields listed in `SECRET_FIELDS` are encrypted), wire `registry.ts`, `routes/webhooks.ts`, `routes/api.ts`, `flowChannelSchema`, the MCP enums, the admin Channels page and i18n.
-- Adding a step type: extend `Step`/`STEP_TYPES`, `stepSchema` and reference checks in `validateFlow`, document it in `FLOW_SCHEMA_DOC`, implement it in `runFrom` (respect `ctx.dryRun`; use `saveSession`/`resumeSession` if it waits), then add the editor UI, i18n strings and tests.
+- Adding a step type: extend `Step`/`STEP_TYPES`, `stepSchema` and reference checks in `validateFlow`, document it in `FLOW_SCHEMA_DOC`, implement it in `runFrom` (respect `ctx.dryRun`; use `saveSession`/`resumeSession` if it waits), then add the editor form (`StepBody` in `admin/src/pages/flow-editor/StepCard.tsx`), its pointers in `flow-editor/graph.ts` (`outlets`/`setPointer`, which drive the canvas handles and edges), the node icon and summary in `flow-editor/Canvas.tsx`, i18n strings and tests.

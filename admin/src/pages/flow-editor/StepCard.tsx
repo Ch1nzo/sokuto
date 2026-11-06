@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Badge, Button, HStack, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
-import { ArrowDownIcon, ArrowUpIcon, CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
+import { Badge, Button, HStack, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
+import { CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { Action, AttachmentDef, ButtonDef, CardDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
 import { SelectField, SelectInput, TextAreaField, TextInputField } from '../../components'
@@ -20,7 +20,6 @@ import {
   MAX_REPLY_VARIANTS,
   MAX_REQUEST_SAVES,
   VALIDATE_TYPES,
-  changeStepType,
   defaultAction,
   type ActionType,
   type StepOf,
@@ -483,7 +482,8 @@ function AiBody({ step, onChange, steps, t }: BodyProps<'ai'>) {
   )
 }
 
-function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; onChange: (s: Step) => void; steps: Step[]; t: TFn; flows: FlowRecord[]; currentId: number }) {
+/** The form of one step (shown in the canvas side panel). */
+export function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; onChange: (s: Step) => void; steps: Step[]; t: TFn; flows: FlowRecord[]; currentId: number }) {
   switch (step.type) {
     case 'message': return <MessageBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'question': return <QuestionBody step={step} onChange={onChange} steps={steps} t={t} />
@@ -496,64 +496,4 @@ function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; 
     case 'request': return <RequestBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'ai': return <AiBody step={step} onChange={onChange} steps={steps} t={t} />
   }
-}
-
-export function StepCard({
-  step,
-  index,
-  count,
-  isEntry,
-  steps,
-  stepTypes,
-  flows,
-  currentId,
-  onChange,
-  onMove,
-  onRemove,
-  t,
-}: {
-  step: Step
-  index: number
-  count: number
-  isEntry: boolean
-  steps: Step[]
-  /** Step types offered in the type select (sequences allow fewer). */
-  stepTypes: StepType[]
-  flows: FlowRecord[]
-  currentId: number
-  onChange: (s: Step) => void
-  onMove: (delta: -1 | 1) => void
-  onRemove: () => void
-  t: TFn
-}) {
-  return (
-    <section className="fe-item fe-step" aria-label={`${step.id} · ${t(`step_${step.type}` as Key)}`}>
-      <div className="fe-step__head">
-        <div className="fe-step__meta">
-          <Tag size="m" variant="monochrome-dark" className="fe-mono">
-            {step.id}
-          </Tag>
-          {isEntry && (
-            <Badge size="m" variant="green">
-              {t('editor_entry')}
-            </Badge>
-          )}
-        </div>
-        <div className="fe-step__type">
-          <SelectInput
-            aria-label={t('editor_step_type')}
-            value={step.type}
-            options={stepTypes.map((type) => ({ value: type, label: t(`step_${type}` as Key) }))}
-            onChange={(type: StepType) => onChange(changeStepType(step, type))}
-          />
-        </div>
-        <div className="fe-step__tools">
-          <IconBtn icon={ArrowUpIcon} label={t('editor_move_up')} disabled={index === 0} onClick={() => onMove(-1)} />
-          <IconBtn icon={ArrowDownIcon} label={t('editor_move_down')} disabled={index === count - 1} onClick={() => onMove(1)} />
-          <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${step.id}`} onClick={onRemove} />
-        </div>
-      </div>
-      <StepBody step={step} steps={steps} t={t} flows={flows} currentId={currentId} onChange={onChange} />
-    </section>
-  )
 }

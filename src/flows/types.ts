@@ -56,6 +56,8 @@ export type FlowDefinition = {
   /** Id of the first step. */
   entry: string | null
   steps: Step[]
+  /** Canvas node positions (admin UI only; keys are step ids and "start"). The engine ignores it. */
+  layout?: Record<string, { x: number; y: number }>
 }
 
 export type FlowRecord = {

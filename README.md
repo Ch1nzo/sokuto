@@ -24,6 +24,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - ステップ (10 種類): メッセージ (画像・ボタン・カルーセル・動画 / 音声 / ファイル付き) / 質問して保存 (メール・電話番号・数値・URL・日付の入力チェック、スキップボタン) / 条件分岐 (フィールド・タグ・時刻・曜日・登録や前回受信からの日数・Instagram のフォロー有無) / アクション (タグ・フィールド・担当者通知・ボット停止・Webhook・シーケンスへの登録 / 解除) / 待機 (10 秒以下は入力中を表示してその場で待機) / ランダム分岐 / 別の自動化へ / コメントに公開返信 (複数パターンからランダムに選択) / 外部リクエスト (HTTPS の API を呼び、応答の値をフィールドに保存) / AI 応答 (指示と FAQ をもとに AI が会話し、終わったら次へ)
 - シーケンス (ステップ配信): トリガーのない自動化で、登録した人に「今日 → 1 日後 → 3 日後」のように待機を挟んで順に配信します。自動化のアクション「シーケンスに登録 / 解除」や AI (MCP) で登録し、受信箱で登録中のシーケンスの確認と解除ができます
 - テンプレート (7 種類): あいさつ、コメント「価格」→ DM、コメント → フォロー確認してリンク送信、よくある質問、満足度アンケート、注文受付、ストーリーメンションのお礼
+- エディタ: トリガーと各ステップをノードとして並べ、線でつないで流れを作るキャンバス形式です。ドラッグで配置、端子から線を引いて次のステップを設定、自動整列、ミニマップがあり、選んだノードの内容は右のパネル (スマートフォンでは下から出るパネル) で編集します。ノードの位置も保存されます
 - 受信箱: 全チャネルの会話を一か所で確認し、返信できます。人が返信するとその相手のボットは自動で停止します。「担当者」「オペレーター」などのキーワードでも停止できます。対応が済んだ会話は「完了」にでき (新しいメッセージが届くと「対応中」に戻ります)、お客さんには見えない社内メモと、設定で登録した定型文の挿入も使えます。
 - 連絡先: タグ、カスタムフィールド (電話番号など)、検索、CSV エクスポート、セグメント (条件分岐と同じ条件を保存して絞り込みや配信先に使う)
 - 一斉配信: タグまたはセグメントで絞り込み、日時を予約して配信 (1 分ごとに最大 30 通ずつ送信)。ボタン (リンク / 自動化を始める) とクリック数、Meta のメッセージタグ (24 時間外への送信) に対応
@@ -108,7 +109,6 @@ D1 (連絡先・会話・自動化・統計)   KV (自動生成された鍵・�
 Sokuto は noflow.pro を参考にしたオープンソースの代替ですが、同じものではありません。現時点の違いを正直に挙げると、次のとおりです。
 
 - **ホスト型のインストーラーはまだありません**。Deploy to Cloudflare ボタンで自分の Cloudflare にデプロイする形です。
-- **キャンバス (ノードをつなぐ図) のエディタはありません**。ステップを上から並べるリスト形式のエディタです。複雑な分岐は AI (MCP) に作ってもらうと楽です。
 - **Meta アプリの設定は手動です**。Facebook / Instagram を使うには、自分で Meta 開発者アプリを作り、一般公開する場合はアプリレビューを通す必要があります ([docs/setup-meta.md](docs/setup-meta.md))。ここが一番手間のかかる部分です。
 - 一方で、LINE に対応していること、ソースコードとデータがすべて自分の手元にあること、費用がかからないことは Sokuto の利点です。
 
@@ -138,6 +138,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 - 10 triggers (keyword, comment with exclude keywords and auto-like, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply, intent classified by AI)
 - 10 step types (message with image, buttons, carousel cards and video/audio/file attachments, question with input validation (email/phone/number/url/date) and skip, condition (fields, tags, hour, weekday, days since signup or last message, Instagram follow status), action, delay (≤10 s waits inline with a typing indicator), random, goto, public comment reply with random variants, external request (calls an HTTPS API and saves values from the JSON response to fields), AI reply (a multi-turn AI conversation from your instructions and FAQ text))
 - Sequences (drip campaigns): trigger-less flows that send their steps over time (delay steps between messages) to contacts enrolled with a "subscribe to sequence" action or over MCP; the inbox shows and removes enrollments.
+- Canvas editor: triggers and steps are nodes joined by lines (drag to place, draw a line from a handle to set the next step, auto-arrange, mini-map); the selected node is edited in a side panel (a bottom sheet on phones), and node positions are saved.
 - 7 templates (including a comment → follow check → link gate), a unified inbox with human hand-over, open/closed conversations (a new message reopens), internal notes and snippets (canned replies), contacts with tags/fields/CSV export and segments (saved condition rules), scheduled broadcasts to a tag or segment (30 messages per minute) with buttons (link / start a flow), click counts and Meta message tags, per-flow reports, a dry-run tester and an MCP server with 26 tools.
 - Channel settings: Messenger/Instagram Get Started, greeting, persistent menu and ice breakers, and the LINE rich menu, each item starting a flow.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
@@ -166,4 +167,4 @@ See [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/
 
 ### Compared with noflow
 
-No hosted installer yet (you deploy to your own Cloudflare), no canvas editor (list-based editor; let an AI build complex flows), and the Meta app setup and App Review are manual. In exchange: LINE support, full ownership of code and data, and no fees.
+No hosted installer yet (you deploy to your own Cloudflare), and the Meta app setup and App Review are manual. In exchange: LINE support, full ownership of code and data, and no fees.

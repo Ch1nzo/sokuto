@@ -1,6 +1,7 @@
 import type { useT } from '../../lib/i18n'
-import type { Action, AttachmentDef, ButtonDef, ConditionRule, FlowRecord, Step, Trigger } from '@shared/flows/types'
+import type { Action, AttachmentDef, ConditionRule, FlowRecord, Step, Trigger } from '@shared/flows/types'
 import type { Channel, OutboundMessage } from '@shared/channels/types'
+import { outlets, setPointer } from './graph'
 
 /* ---------- Local mirrors of server-only types (src/flows/simulate.ts pulls runtime deps) ---------- */
 
@@ -111,20 +112,7 @@ export function changeStepType(s: Step, type: StepType): Step {
 
 /** Replace every pointer to `removedId` in a step with null. */
 export function clearRefs(s: Step, removedId: string): Step {
-  const fix = (v: string | null | undefined) => (v === removedId ? null : v)
-  const fixButtons = (bs: ButtonDef[]) => bs.map((b) => ('next' in b ? { ...b, next: fix(b.next) } : b))
-  switch (s.type) {
-    case 'message':
-      return { ...s, next: fix(s.next), buttons: s.buttons && fixButtons(s.buttons), cards: s.cards?.map((c) => ({ ...c, buttons: fixButtons(c.buttons) })) }
-    case 'condition':
-      return { ...s, yes: fix(s.yes), no: fix(s.no) }
-    case 'random':
-      return { ...s, branches: s.branches.map((b) => ({ ...b, next: fix(b.next) })) }
-    case 'goto':
-      return s
-    default:
-      return { ...s, next: fix(s.next) }
-  }
+  return outlets(s).reduce((acc, o) => (o.target === removedId ? setPointer(acc, o.handle, null) : acc), s)
 }
 
 export function stepSummary(s: Step): string {

@@ -31,6 +31,13 @@ describe('validateFlow', () => {
     }
   })
 
+  it('keeps an optional canvas layout (stale keys allowed) and rejects malformed points', () => {
+    const layout = { start: { x: -320, y: 0 }, m1: { x: 0, y: 16 }, gone: { x: 5, y: 5 } }
+    const r = validateFlow({ ...validDef, layout })
+    expect(r.ok && r.definition.layout).toEqual(layout)
+    expect(validateFlow({ ...validDef, layout: { m1: { x: '0', y: 0 } } }).ok).toBe(false)
+  })
+
   it('accepts an empty flow with a warning about missing triggers', () => {
     const r = validateFlow({ triggers: [], entry: null, steps: [] })
     expect(r.ok).toBe(true)

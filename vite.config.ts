@@ -22,6 +22,8 @@ export default defineConfig({
               name: 'vendor',
               test: /[\\/]node_modules[\\/](@channel\.io[\\/]bezier-(react|icons)|react|react-dom|react-router|react-router-dom|scheduler)[\\/]/,
             },
+            // React Flow (+ its d3/zustand deps) is used only by the lazy flow editor.
+            { name: 'canvas', test: /[\\/]node_modules[\\/](@xyflow|d3-[a-z]+|zustand|classcat|use-sync-external-store)[\\/]/ },
           ],
         },
       },
