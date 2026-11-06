@@ -84,7 +84,7 @@ npm run typecheck  # Worker (tsconfig.json) と管理画面 (admin/tsconfig.json
 
 テーブルを追加するときは、そのデータがワークスペースごとかを決めてください。連絡先・自動化・配信を通じてたどれないデータなら `workspace_id` 列を付け、API・MCP・定期処理で絞り込みます。設定は `getSetting(db, ws, key)` などで読み書きすると、キーに `ws:<ID>:` が付きます。
 
-本番では、`npm run deploy` が最初に `wrangler d1 migrations apply DB --remote` を実行するので、デプロイ時に自動で適用されます。Deploy to Cloudflare ボタンでインストールした人も、リポジトリに変更が push されると Cloudflare のビルドで同じスクリプトが実行されます。
+本番では、`npm run deploy` が `wrangler d1 migrations apply DB --remote` も実行するので、デプロイ時に自動で適用されます。Deploy to Cloudflare ボタンでインストールした人も、リポジトリに変更が push されると Cloudflare のビルドで同じスクリプトが実行されます。
 
 ## 手動でデプロイする
 
@@ -96,29 +96,23 @@ Deploy to Cloudflare ボタンを使わずに、自分のパソコンからデ�
    npx wrangler login
    ```
 
-2. D1 データベースと KV を作ります。
-
-   ```bash
-   npx wrangler d1 create sokuto-db
-   npx wrangler kv namespace create KV
-   ```
-
-3. 表示された ID を `wrangler.jsonc` の `d1_databases[0].database_id` と `kv_namespaces[0].id` に書き込みます (リポジトリの値はダミーの `0000...` です)。
-4. デプロイします。
+2. デプロイします。
 
    ```bash
    npm run build    # 管理画面をビルド
-   npm run deploy   # D1 マイグレーションを本番に適用 → wrangler deploy
+   npm run deploy   # D1 マイグレーションを本番に適用 + wrangler deploy
    ```
 
-5. 表示された `https://sokuto.<あなたのサブドメイン>.workers.dev` を開き、管理者パスワードを設定します。
+   `wrangler.jsonc` には D1 と KV の ID を書いていません。`wrangler deploy` が D1 データベース `sokuto-db` を名前で探し (なければ作成)、KV も初回に作成して、2 回目以降は前回のものを引き継ぎます。`npm run deploy` (`scripts/deploy.mjs`) は、データベースがあればマイグレーション → デプロイ、初回はデプロイ (データベース作成) → マイグレーションの順に実行します。
+
+3. 表示された `https://sokuto.<あなたのサブドメイン>.workers.dev` を開き、管理者パスワードを設定します。
 
 ## npm スクリプト一覧
 
 | スクリプト | 内容 |
 | --- | --- |
 | `build` | `vite build`。管理画面を `dist/client` にビルド |
-| `deploy` | `wrangler d1 migrations apply DB --remote && wrangler deploy` |
+| `deploy` | `node scripts/deploy.mjs`。D1 マイグレーションを本番に適用して `wrangler deploy` (初回はデプロイ後にマイグレーション) |
 | `dev` | `vite build && wrangler dev --local` (http://localhost:8787、Workers AI なし) |
 | `dev:ui` | `vite` (http://localhost:5173、API は :8787 へ転送) |
 | `migrate:local` | ローカルの D1 にマイグレーションを適用 |
@@ -136,6 +130,7 @@ sokuto/
 ├── vite.config.ts            # 管理画面のビルド設定 (root: admin, 出力: dist/client)
 ├── drizzle.config.ts         # drizzle-kit の設定
 ├── migrations/               # D1 のマイグレーション SQL
+├── scripts/deploy.mjs        # 本番デプロイ (npm run deploy): D1 マイグレーションと wrangler deploy
 ├── src/                      # Worker
 │   ├── index.ts              # エントリポイント (ルーティングと scheduled ハンドラー)
 │   ├── env.ts                # 環境変数・バインディングの型
@@ -217,6 +212,6 @@ sokuto/
 - `npm run dev` builds the admin and starts `wrangler dev --local` on :8787 (no Workers AI: the `AI` binding is remote-only; run `npx wrangler login` then `npx wrangler dev` to try it). `npm run dev:ui` starts Vite on :5173 and proxies `/api`, `/webhooks` and `/mcp` to :8787. Trigger the scheduler with `POST /api/scheduler/run` (logged in) or `wrangler dev --test-scheduled` + `/__scheduled`. Use a tunnel such as `cloudflared` to receive real webhooks locally.
 - `npm test` (Vitest, `tests/**/*.test.ts`), `npm run typecheck` (worker and admin).
 - After editing `src/db/schema.ts`, run `npm run db:generate`, hand-append any data migration to the generated SQL (e.g. `0002_workspaces.sql` inserts workspace 1 and prefixes existing settings keys with `ws:1:`), then `npm run migrate:local`; `npm run deploy` applies migrations remotely before deploying. New tables either carry `workspace_id` or are reached through a contact, flow or broadcast; settings go through `getSetting(db, ws, key)` (`ws:<id>:` prefix).
-- Manual deploy: `npx wrangler login`, create the D1 database and KV namespace, put their IDs into `wrangler.jsonc` (the repo has dummy IDs), then `npm run build && npm run deploy`.
+- Manual deploy: `npx wrangler login`, then `npm run build && npm run deploy`. `wrangler.jsonc` has no resource IDs: `wrangler deploy` looks up D1 `sokuto-db` by name (creating it if missing) and creates or inherits the KV namespace. `scripts/deploy.mjs` migrates before deploying, or after it on the first deploy when the database does not exist yet.
 - Adding a channel: extend `Channel`, write an adapter implementing `ChannelAdapter` plus signature check and webhook parser, add a config type (secret fields listed in `SECRET_FIELDS` are encrypted), wire `registry.ts`, `routes/webhooks.ts`, `routes/api.ts`, `flowChannelSchema`, the MCP enums, the admin Channels page and i18n.
 - Adding a step type: extend `Step`/`STEP_TYPES`, `stepSchema` and reference checks in `validateFlow`, document it in `FLOW_SCHEMA_DOC`, implement it in `runFrom` (respect `ctx.dryRun`; use `saveSession`/`resumeSession` if it waits), then add the editor form (`StepBody` in `admin/src/pages/flow-editor/StepCard.tsx`), its pointers in `flow-editor/graph.ts` (`outlets`/`setPointer`, which drive the canvas handles and edges), the node icon and summary in `flow-editor/Canvas.tsx`, i18n strings and tests.
