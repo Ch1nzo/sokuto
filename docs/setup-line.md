@@ -87,6 +87,24 @@ LINE Developers コンソール (https://developers.line.biz/console/) で、対
 3. Sokuto で **「自動化」→「テンプレートから作る」→「友だち追加・初回メッセージのあいさつ」** を作り、**「公開する」** を押します。
 4. ボットをいったんブロックして解除する (または別のアカウントで友だち追加する) と、あいさつが届きます。メッセージを送ると、Sokuto の **「受信箱」** にも表示されます。
 
+## 6. リッチメニュー
+
+トーク画面の下に表示されるメニュー (リッチメニュー) を、Sokuto から設定できます。**「チャネル接続」** の LINE の枠の下にある **「リッチメニュー」** で設定します。
+
+1. メニューの画像を用意し、インターネットから見える URL に置きます。**JPEG または PNG、1 MB 以下**で、サイズは **大: 2500×1686** または **小: 2500×843** ピクセルです。
+2. 画像 URL を入れ、大きさ (大 / 小) と **分割数** (1・2・3・4・6) を選びます。画像は左上から右へ、上の段から下の段へ均等に分けられます (4 は 2×2、6 は 3×2)。
+3. **メニューバーの文言** (14 文字まで) を入れます。トーク画面の下でメニューを開くボタンに表示されます。
+4. エリアごとに、押したときの動きを選びます。
+   - **自動化を始める**: 選んだ自動化が始まります (自動化は公開中にしてください)。
+   - **リンクを開く**: URL を開きます。
+   - **テキストを送る**: お客さんの代わりにテキストを送ります。キーワードトリガーで受けられます。
+   - **payload (上級)**: ボタン payload トリガー用の値を送ります。
+5. **「保存して適用」** を押すと、Sokuto が画像を取得して LINE にリッチメニューを作り、すべての友だちの既定のメニューに設定します。前に Sokuto で作ったメニューは削除されます。
+
+**「リッチメニューを削除」** で既定の設定を解除し、メニューを削除します。
+
+> リッチメニューは **LINE Official Account Manager** の「リッチメニュー」でも作れます。その場合は、アクションを「テキスト」にして、送られる文言をキーワードトリガーで受けてください。Messaging API で設定したメニュー (Sokuto で設定したもの) のほうが優先して表示されます。
+
 ---
 
 ## うまくいかないとき
@@ -135,5 +153,6 @@ LINE からの Webhook は「チャネルシークレット」で署名されて
 3. In Sokuto open **Channels**, paste both into the LINE card and click **Connect**. Sokuto validates the token and registers the webhook URL `https://<worker>/webhooks/line` automatically.
 4. In LINE Official Account Manager → Settings → Response settings: **Auto-reply messages off**, **Webhooks on** (and turn off the greeting message if you use the follow trigger).
 5. Click **Test connection** (runs LINE's webhook test), add the bot as a friend via the QR code and publish the welcome template.
+6. Optional: set the default **rich menu** in the LINE card (public JPEG/PNG URL ≤1 MB, 2500×1686 or 2500×843, 1/2/3/4/6 areas, each starting a flow, opening a link or sending text). Sokuto downloads the image, creates the menu, uploads the image and sets it as default for all friends. You can also build menus in LINE Official Account Manager (text action + keyword trigger).
 
 Troubleshooting: `bad_signature` means the stored channel secret is wrong (disconnect and reconnect); no reply usually means the webhook is off, the flow is still a draft, the bot is paused for that contact, or the trigger does not match. Push messages (broadcasts, post-delay messages, manual replies, 2nd+ step per incoming message) count against the plan's monthly quota; replies are free.

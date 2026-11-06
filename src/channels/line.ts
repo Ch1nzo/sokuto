@@ -1,9 +1,11 @@
 import { hmacSha256, toBase64, timingSafeEqual } from '../crypto'
 import type { ChannelAdapter, ParsedWebhook, SendOptions } from './adapter'
 import type { ChannelProfile, InboundEvent, OutboundButton, OutboundMessage, SendResult } from './types'
-import type { LineConfig } from '../settings'
+import type { LineConfig, LineRichMenu } from '../settings'
+import { flowPayload } from '../flows/engine'
 
 const API = 'https://api.line.me'
+const DATA_API = 'https://api-data.line.me'
 
 export async function verifyLineSignature(channelSecret: string, body: string, signature: string | undefined): Promise<boolean> {
   if (!signature) return false
@@ -173,4 +175,68 @@ export async function lineTestWebhook(accessToken: string): Promise<{ ok: boolea
   })
   const j = (await res.json().catch(() => ({}))) as { success?: boolean; reason?: string; detail?: string }
   return { ok: Boolean(j.success), detail: j.detail ?? j.reason }
+}
+
+/** Rich menu layout (number of areas) → [columns, rows]. */
+export const GRID: Record<LineRichMenu['layout'], [number, number]> = { 1: [1, 1], 2: [2, 1], 3: [3, 1], 4: [2, 2], 6: [3, 2] }
+
+/** LINE rich menu object: the image is split into an even grid, areas left to right, top to bottom. */
+export function buildRichMenu(m: LineRichMenu) {
+  const width = 2500
+  const height = m.size === 'full' ? 1686 : 843
+  const [cols, rows] = GRID[m.layout]
+  const areas = m.cells.slice(0, cols * rows).map((c, i) => {
+    const x = Math.round(((i % cols) * width) / cols)
+    const y = Math.round((Math.floor(i / cols) * height) / rows)
+    const label = c.label?.slice(0, 20) || undefined
+    const action =
+      c.type === 'uri'
+        ? { type: 'uri', label, uri: c.value }
+        : c.type === 'message'
+          ? { type: 'message', label, text: c.value }
+          : { type: 'postback', label, data: c.type === 'flow' ? flowPayload(Number(c.value)) : c.value, displayText: c.type === 'flow' ? label : undefined }
+    return {
+      bounds: { x, y, width: Math.round((((i % cols) + 1) * width) / cols) - x, height: Math.round(((Math.floor(i / cols) + 1) * height) / rows) - y },
+      action,
+    }
+  })
+  return { size: { width, height }, selected: true, name: 'Sokuto', chatBarText: m.chatBarText.slice(0, 14), areas }
+}
+
+type LineResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/** Calls the LINE API with the channel token. JSON bodies are serialized; anything else (image bytes) is sent as is. */
+export async function lineRequest<T = Record<string, unknown>>(token: string, method: string, url: string, body?: unknown, contentType = 'application/json'): Promise<LineResult<T>> {
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { 'Content-Type': contentType } : {}) },
+    body: body === undefined ? undefined : contentType === 'application/json' ? JSON.stringify(body) : (body as BodyInit),
+  })
+  const text = await res.text()
+  if (!res.ok) return { ok: false, error: `LINE ${res.status}: ${text.slice(0, 300)}` }
+  try {
+    return { ok: true, data: JSON.parse(text || '{}') as T }
+  } catch {
+    return { ok: true, data: {} as T }
+  }
+}
+
+export function lineCreateRichMenu(token: string, menu: ReturnType<typeof buildRichMenu>) {
+  return lineRequest<{ richMenuId: string }>(token, 'POST', `${API}/v2/bot/richmenu`, menu)
+}
+
+export function lineUploadRichMenuImage(token: string, id: string, bytes: ArrayBuffer, contentType: string) {
+  return lineRequest(token, 'POST', `${DATA_API}/v2/bot/richmenu/${encodeURIComponent(id)}/content`, bytes, contentType)
+}
+
+export function lineSetDefaultRichMenu(token: string, id: string) {
+  return lineRequest(token, 'POST', `${API}/v2/bot/user/all/richmenu/${encodeURIComponent(id)}`)
+}
+
+export function lineClearDefaultRichMenu(token: string) {
+  return lineRequest(token, 'DELETE', `${API}/v2/bot/user/all/richmenu`)
+}
+
+export function lineDeleteRichMenu(token: string, id: string) {
+  return lineRequest(token, 'DELETE', `${API}/v2/bot/richmenu/${encodeURIComponent(id)}`)
 }

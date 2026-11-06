@@ -33,7 +33,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 
 | テーブル | 内容 |
 | --- | --- |
-| `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み) |
+| `settings` | キーと JSON 値。`general` (ボット名・言語・タイムゾーン・全体停止・担当者呼び出しキーワードと返信)、`channel:line`、`channel:meta` (トークンは暗号化済み)、`profile:meta` (Messenger / Instagram のあいさつ・「はじめる」ボタン・固定メニュー・会話スターター)、`richmenu:line` (LINE リッチメニューの設定と適用中のメニュー ID) |
 | `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数 |
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
@@ -81,6 +81,7 @@ KV には次のキーが入ります。
 5. その連絡先のボットが停止中なら終了 (`bot_paused_until` を過ぎていれば自動で再開)。
 6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ。関係のない入力なら 7 へ進む。
 7. **ボタンの payload** (`sk:...`) なら、セッションがなくてもその自動化の続きを実行。
+   - 7b. **`sk-flow:<自動化 ID>`** の postback (Messenger / Instagram の「はじめる」ボタン・固定メニュー・会話スターター、LINE リッチメニューの「自動化を始める」) なら、その自動化が公開中であればトリガーに関係なく最初から始める。公開中でなければ 8 へ。
 8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。`any_message` に `cooldownHours` があり、その連絡先で同じ自動化が指定時間内に起動済み (`events` の `trigger_fired`) なら起動しない。
 
 ### セッションと待機
@@ -105,7 +106,7 @@ KV には次のキーが入ります。
 
 ### ボタンの payload
 
-ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。
+ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。チャネル設定 (Messenger / Instagram のプロフィール、LINE リッチメニュー) から自動化を始める項目には `sk-flow:<自動化 ID>` が付きます。
 
 payload に自動化とステップの情報が入っているので、**セッションがなくても続きを実行できます**。これは Facebook / Instagram のコメントからの流れで重要です。コメントで始まった自動化の最初のメッセージは、コメントへの「プライベート返信」として Messenger に届きます。コメントの投稿者の ID と Messenger の ID は別物として届くことがあり、セッションとはつながりませんが、お客さんが DM のボタンを押すと payload から自動化とステップがわかるので、Messenger 側で会話を続けられます。
 
@@ -131,8 +132,8 @@ payload に自動化とステップの情報が入っているので、**セッ�
 - `types.ts`: チャネルに依存しない受信イベント `InboundEvent` と送信メッセージ `OutboundMessage`。
 - `adapter.ts`: `ChannelAdapter` インターフェース (`send`, `getProfile`, 任意で `replyToComment`, `sendPrivateReply`, `likeComment`)。`getProfile` が返す `ChannelProfile.followsBusiness` は Instagram のフォロー有無で、条件の `is_follower` が使います (自動化の実行ごとに 1 回だけ取得)。
 - `registry.ts`: 保存された設定からアダプターを作る `getAdapter`。
-- `line.ts`: 署名検証 (HMAC-SHA256、Base64)、Webhook の解析、送信。送信時は、受信時の **reply token を 1 回だけ使い** (無料)、使用済みや期限切れならプッシュ API で送ります。管理画面用に、Bot 情報の取得、Webhook URL の登録 (`PUT /v2/bot/channel/webhook/endpoint`)、Webhook のテストも実装しています。
-- `meta.ts`: 署名検証 (`X-Hub-Signature-256`、HMAC-SHA256 hex)、`page` / `instagram` 両方の Webhook の解析 (メッセージ、postback、クイックリプライ、ref、ストーリーへのメンション・返信、Facebook の `feed` コメント、Instagram の `comments`)、Send API での送信、コメントへの公開返信とプライベート返信、コメントへのいいね (`POST /{comment-id}/likes`。失敗はエラーイベントとして記録)。Instagram のプロフィール取得では `is_user_follow_business` も読みます (相手が DM を送った後にだけ取得できます)。管理画面用に、ページアクセストークンの確認 (ページとリンクされた Instagram ビジネスアカウントの取得) と、ページの購読 (`subscribed_apps`) を実装しています。Graph API のバージョンは環境変数 `META_GRAPH_VERSION` (初期値 `v25.0`) です。
+- `line.ts`: 署名検証 (HMAC-SHA256、Base64)、Webhook の解析、送信。送信時は、受信時の **reply token を 1 回だけ使い** (無料)、使用済みや期限切れならプッシュ API で送ります。管理画面用に、Bot 情報の取得、Webhook URL の登録 (`PUT /v2/bot/channel/webhook/endpoint`)、Webhook のテスト、リッチメニューの作成・画像アップロード (`api-data.line.me`)・既定の設定・削除も実装しています (`buildRichMenu` が分割数から各エリアの範囲を計算)。
+- `meta.ts`: 署名検証 (`X-Hub-Signature-256`、HMAC-SHA256 hex)、`page` / `instagram` 両方の Webhook の解析 (メッセージ、postback、クイックリプライ、ref、ストーリーへのメンション・返信、Facebook の `feed` コメント、Instagram の `comments`)、Send API での送信、コメントへの公開返信とプライベート返信、コメントへのいいね (`POST /{comment-id}/likes`。失敗はエラーイベントとして記録)。Instagram のプロフィール取得では `is_user_follow_business` も読みます (相手が DM を送った後にだけ取得できます)。管理画面用に、ページアクセストークンの確認 (ページとリンクされた Instagram ビジネスアカウントの取得)、ページの購読 (`subscribed_apps`)、Messenger Profile API (`/me/messenger_profile`、Instagram は `platform=instagram` で会話スターターと固定メニューのみ) の設定と削除を実装しています。Graph API のバージョンは環境変数 `META_GRAPH_VERSION` (初期値 `v25.0`) です。
 
 Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:meta`) を共有し、ページにリンクされた Instagram アカウントがあれば Instagram も有効になります。
 
@@ -167,9 +168,9 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
-- **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger).
+- **Data**: D1 tables `settings` (incl. `profile:meta` and `richmenu:line`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
-- **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection and page subscription).
+- **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

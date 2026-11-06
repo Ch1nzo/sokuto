@@ -1,7 +1,8 @@
 import { hmacSha256, toHex, timingSafeEqual } from '../crypto'
 import type { ChannelAdapter, ParsedWebhook, SendOptions } from './adapter'
 import type { Channel, ChannelProfile, InboundEvent, OutboundButton, OutboundMessage, SendResult } from './types'
-import type { MetaConfig } from '../settings'
+import type { MetaConfig, MetaProfile } from '../settings'
+import { flowPayload } from '../flows/engine'
 
 export const DEFAULT_GRAPH_VERSION = 'v25.0'
 
@@ -222,4 +223,44 @@ export async function metaSubscribePage(token: string, pageId: string, version =
   const j = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { message?: string } }
   if (!res.ok || j.error) return { ok: false as const, error: j.error?.message ?? `HTTP ${res.status}` }
   return { ok: true as const }
+}
+
+/** Messenger Profile fields Sokuto manages. Order matters on DELETE: the menu must go before get_started. */
+export const PROFILE_FIELDS = ['persistent_menu', 'ice_breakers', 'greeting', 'get_started']
+/** Instagram (`platform=instagram`) only supports these. */
+export const IG_PROFILE_FIELDS = ['persistent_menu', 'ice_breakers']
+
+/** Messenger Profile API body for a saved profile. Empty settings are listed in `remove` (to DELETE). */
+export function buildMessengerProfile(p: MetaProfile): { set: Record<string, unknown>; remove: string[] } {
+  const set: Record<string, unknown> = {}
+  if (p.getStartedFlowId) set.get_started = { payload: flowPayload(p.getStartedFlowId) }
+  if (p.greeting) set.greeting = [{ locale: 'default', text: p.greeting.slice(0, 160) }]
+  if (p.menu.length > 0) {
+    const call_to_actions = p.menu.map((m) =>
+      m.url ? { type: 'web_url', title: m.label.slice(0, 30), url: m.url } : { type: 'postback', title: m.label.slice(0, 30), payload: flowPayload(m.flowId!) },
+    )
+    set.persistent_menu = [{ locale: 'default', composer_input_disabled: false, call_to_actions }]
+  }
+  if (p.iceBreakers.length > 0) {
+    set.ice_breakers = [{ locale: 'default', call_to_actions: p.iceBreakers.map((q) => ({ question: q.question.slice(0, 80), payload: flowPayload(q.flowId) })) }]
+  }
+  return { set, remove: PROFILE_FIELDS.filter((f) => !(f in set)) }
+}
+
+async function profileRequest(method: 'POST' | 'DELETE', token: string, version: string, body: unknown, platform?: 'instagram') {
+  const u = new URL(`https://graph.facebook.com/${version}/me/messenger_profile`)
+  u.searchParams.set('access_token', token)
+  if (platform) u.searchParams.set('platform', platform)
+  const res = await fetch(u, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+  if (!res.ok || j.error) return { ok: false as const, error: j.error?.message ?? `HTTP ${res.status}` }
+  return { ok: true as const }
+}
+
+export function metaSetProfile(token: string, version = DEFAULT_GRAPH_VERSION, fields: Record<string, unknown>, platform?: 'instagram') {
+  return profileRequest('POST', token, version, fields, platform)
+}
+
+export function metaDeleteProfile(token: string, version = DEFAULT_GRAPH_VERSION, fields: string[], platform?: 'instagram') {
+  return profileRequest('DELETE', token, version, { fields }, platform)
 }

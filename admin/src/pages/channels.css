@@ -7,6 +7,13 @@
 @media (max-width: 860px) { .ch-form-row { grid-template-columns: minmax(0, 1fr); } }
 .ch-result { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Profile / rich menu sections (pages/channels/*Section.tsx) */
+.ch-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ch-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8); }
+.ch-item > .ch-form-row { flex: 1; min-width: 0; }
+.ch-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ch-switch__label { min-width: 0; cursor: pointer; }
+
 .ch-guide { padding: 12px; border-radius: var(--radius-8); background: var(--bg-black-lightest); display: flex; flex-direction: column; gap: 8px; }
 .ch-guide__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .ch-guide__link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; }

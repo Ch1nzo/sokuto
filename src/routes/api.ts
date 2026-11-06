@@ -3,9 +3,34 @@ import { and, desc, eq, gte, like, or, sql } from 'drizzle-orm'
 import type { AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
-import { configuredChannels, deleteChannelConfig, getChannelConfig, getGeneral, getOrCreateSecret, putChannelConfig, putSetting, type GeneralSettings } from '../settings'
-import { lineBotInfo, lineSetWebhook, lineTestWebhook } from '../channels/line'
-import { metaInspectPageToken, metaSubscribePage } from '../channels/meta'
+import {
+  configuredChannels,
+  deleteChannelConfig,
+  deleteSetting,
+  getChannelConfig,
+  getGeneral,
+  getOrCreateSecret,
+  getSetting,
+  lineRichMenuSchema,
+  metaProfileSchema,
+  putChannelConfig,
+  putSetting,
+  type GeneralSettings,
+  type LineRichMenu,
+  type MetaProfile,
+} from '../settings'
+import {
+  buildRichMenu,
+  lineBotInfo,
+  lineClearDefaultRichMenu,
+  lineCreateRichMenu,
+  lineDeleteRichMenu,
+  lineSetDefaultRichMenu,
+  lineSetWebhook,
+  lineTestWebhook,
+  lineUploadRichMenuImage,
+} from '../channels/line'
+import { IG_PROFILE_FIELDS, PROFILE_FIELDS, buildMessengerProfile, metaDeleteProfile, metaInspectPageToken, metaSetProfile, metaSubscribePage } from '../channels/meta'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
@@ -66,6 +91,8 @@ apiRoutes.get('/channels', async (c) => {
     metaVerifyToken: await getOrCreateSecret(c.env.KV, 'meta_verify_token'),
     privacyUrl: `${origin}/privacy`,
     dataDeletionUrl: `${origin}/data-deletion`,
+    profile: await getSetting<MetaProfile>(d, 'profile:meta'),
+    richmenu: await getSetting<StoredRichMenu>(d, 'richmenu:line'),
   })
 })
 
@@ -121,6 +148,95 @@ apiRoutes.post('/channels/meta/test', async (c) => {
 
 apiRoutes.delete('/channels/meta', async (c) => {
   await deleteChannelConfig(db(c.env), 'meta')
+  return c.json({ ok: true })
+})
+
+/* ---------- Channel profile (Messenger / Instagram) and LINE rich menu ---------- */
+type StoredRichMenu = LineRichMenu & { richMenuId: string }
+const zodErrors = (e: { issues: { path: PropertyKey[]; message: string }[] }) => e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+
+/** DELETEs the emptied fields, then POSTs the rest. A failed DELETE is reported but does not fail the save. */
+async function applyMetaProfile(token: string, version: string | undefined, p: { set: Record<string, unknown>; remove: string[] }, platform?: 'instagram') {
+  const del = p.remove.length > 0 ? await metaDeleteProfile(token, version, p.remove, platform) : { ok: true as const }
+  const post = Object.keys(p.set).length > 0 ? await metaSetProfile(token, version, p.set, platform) : { ok: true as const }
+  return { ok: post.ok, error: post.ok ? (del.ok ? undefined : del.error) : post.error }
+}
+
+apiRoutes.put('/channels/meta/profile', async (c) => {
+  const d = db(c.env)
+  const cfg = await getChannelConfig(d, c.env.KV, 'meta')
+  if (!cfg) return c.json({ error: 'meta_not_configured' }, 404)
+  const parsed = metaProfileSchema.safeParse(await c.req.json())
+  if (!parsed.success) return c.json({ error: 'invalid_profile', errors: zodErrors(parsed.error) }, 400)
+  const profile = parsed.data
+  if (profile.menu.length > 0 && !profile.getStartedFlowId) return c.json({ error: 'get_started_required' }, 400)
+  const version = c.env.META_GRAPH_VERSION || undefined
+  const { set, remove } = buildMessengerProfile(profile)
+  const messenger = await applyMetaProfile(cfg.pageAccessToken, version, { set, remove })
+  // Instagram only when opted in, or to clear what an earlier save applied there.
+  const prev = await getSetting<MetaProfile>(d, 'profile:meta')
+  const ig = profile.applyToInstagram
+    ? { set: Object.fromEntries(Object.entries(set).filter(([k]) => IG_PROFILE_FIELDS.includes(k))), remove: remove.filter((f) => IG_PROFILE_FIELDS.includes(f)) }
+    : { set: {}, remove: IG_PROFILE_FIELDS }
+  const instagram = cfg.instagramAccountId && (profile.applyToInstagram || prev?.applyToInstagram) ? await applyMetaProfile(cfg.pageAccessToken, version, ig, 'instagram') : undefined
+  await putSetting(d, 'profile:meta', profile)
+  return c.json({ ok: messenger.ok && (instagram?.ok ?? true), results: { messenger, instagram }, profile })
+})
+
+apiRoutes.delete('/channels/meta/profile', async (c) => {
+  const d = db(c.env)
+  const cfg = await getChannelConfig(d, c.env.KV, 'meta')
+  if (!cfg) return c.json({ error: 'meta_not_configured' }, 404)
+  const version = c.env.META_GRAPH_VERSION || undefined
+  const prev = await getSetting<MetaProfile>(d, 'profile:meta')
+  const messenger = await metaDeleteProfile(cfg.pageAccessToken, version, PROFILE_FIELDS)
+  const instagram = cfg.instagramAccountId && prev?.applyToInstagram ? await metaDeleteProfile(cfg.pageAccessToken, version, IG_PROFILE_FIELDS, 'instagram') : undefined
+  await deleteSetting(d, 'profile:meta')
+  return c.json({ ok: messenger.ok && (instagram?.ok ?? true), results: { messenger, instagram } })
+})
+
+const MAX_RICHMENU_IMAGE = 1024 * 1024
+
+apiRoutes.put('/channels/line/richmenu', async (c) => {
+  const d = db(c.env)
+  const cfg = await getChannelConfig(d, c.env.KV, 'line')
+  if (!cfg) return c.json({ error: 'line_not_configured' }, 404)
+  const parsed = lineRichMenuSchema.safeParse(await c.req.json())
+  if (!parsed.success) return c.json({ error: 'invalid_richmenu', errors: zodErrors(parsed.error) }, 400)
+  const menu = parsed.data
+  const img = await fetch(menu.imageUrl).catch(() => null)
+  const contentType = img?.headers.get('content-type')?.split(';')[0]!.trim() ?? ''
+  if (!img?.ok || (contentType !== 'image/jpeg' && contentType !== 'image/png')) return c.json({ error: 'invalid_image' }, 400)
+  const bytes = await img.arrayBuffer()
+  if (bytes.byteLength > MAX_RICHMENU_IMAGE) return c.json({ error: 'image_too_large' }, 400)
+  const token = cfg.channelAccessToken
+  const created = await lineCreateRichMenu(token, buildRichMenu(menu))
+  if (!created.ok) return c.json({ error: 'line_error', detail: created.error }, 502)
+  const id = created.data.richMenuId
+  for (const step of [() => lineUploadRichMenuImage(token, id, bytes, contentType), () => lineSetDefaultRichMenu(token, id)]) {
+    const r = await step()
+    if (!r.ok) {
+      await lineDeleteRichMenu(token, id)
+      return c.json({ error: 'line_error', detail: r.error }, 502)
+    }
+  }
+  const prev = await getSetting<StoredRichMenu>(d, 'richmenu:line')
+  if (prev?.richMenuId) await lineDeleteRichMenu(token, prev.richMenuId)
+  await putSetting(d, 'richmenu:line', { ...menu, richMenuId: id } satisfies StoredRichMenu)
+  return c.json({ ok: true, richMenuId: id })
+})
+
+apiRoutes.delete('/channels/line/richmenu', async (c) => {
+  const d = db(c.env)
+  const cfg = await getChannelConfig(d, c.env.KV, 'line')
+  if (!cfg) return c.json({ error: 'line_not_configured' }, 404)
+  const prev = await getSetting<StoredRichMenu>(d, 'richmenu:line')
+  // Best effort: a menu already removed in LINE Official Account Manager must not block deleting the setting.
+  if (prev?.richMenuId) {
+    await lineClearDefaultRichMenu(cfg.channelAccessToken)
+    await lineDeleteRichMenu(cfg.channelAccessToken, prev.richMenuId)
+  }
+  await deleteSetting(d, 'richmenu:line')
   return c.json({ ok: true })
 })
 
