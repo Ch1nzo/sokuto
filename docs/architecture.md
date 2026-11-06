@@ -40,7 +40,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、種類 (`flow` / `sequence`。作成時にだけ決まる)、定義 (JSON) |
 | `sessions` | 連絡先ごとに 1 つの実行中セッション。どの自動化のどのステップで、何を待っているか (`input`/`button`/`delay`)、再開日時 |
 | `sequence_subscriptions` | シーケンスへの登録。連絡先とシーケンスの組で一意。次に実行するステップ (`step_id`) と実行日時 (`resume_at`) |
-| `broadcasts` | 一斉配信。対象チャネル・タグまたはセグメント (`segment_id`)、本文、予約日時、状態 (`scheduled`/`running`/`done`/`canceled`)、件数 |
+| `broadcasts` | 一斉配信。対象チャネル・タグまたはセグメント (`segment_id`)、本文、ボタン (`buttons`、JSON 最大 3 個: リンクか自動化)、Meta メッセージタグ (`message_tag`)、予約日時、状態 (`scheduled`/`running`/`done`/`canceled`)、件数 (送信・失敗・ボタンのクリック数 `clicked`) |
 | `broadcast_jobs` | 配信の宛先 1 件ごとの送信状態 (`pending`/`sent`/`failed`/`skipped`) |
 | `segments` | セグメント (保存した条件)。名前、条件 `rules` (条件分岐ステップと同じ形式の JSON)、`mode` (`all`/`any`)。連絡先一覧の絞り込み (`GET /api/contacts?segment=`) と一斉配信の対象に使います |
 | `events` | レポート用の記録。`trigger_fired`, `step_sent`, `button_clicked`, `input_saved`, `flow_completed`, `comment_replied`, `error` |
@@ -81,6 +81,7 @@ KV には次のキーが入ります。
 3. 設定でボット全体が停止中なら終了。
 4. **担当者呼び出しキーワード** (初期値: 担当者・オペレーター・human・agent) を含むメッセージなら、その連絡先のボットを停止し、セッションを消し、通知を作り、設定の返信文を送って終了。
 5. その連絡先のボットが停止中なら終了 (`bot_paused_until` を過ぎていれば自動で再開)。
+   - 5b. **一斉配信のボタン** (`sk-bc:<配信 ID>:<ボタン番号>`) なら、`events` に `button_clicked` (`meta: { broadcastId, index, label }`) を記録して配信の `clicked` を 1 増やし、ボタンの自動化が公開中なら最初から始めて終了。質問の答えを待っている途中のタップを答えとして扱わないよう、セッションより先に処理します。
 6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ。関係のない入力なら 7 へ進む。
 7. **ボタンの payload** (`sk:...`) なら、セッションがなくてもその自動化の続きを実行。
    - 7b. **`sk-flow:<自動化 ID>`** の postback (Messenger / Instagram の「はじめる」ボタン・固定メニュー・会話スターター、LINE リッチメニューの「自動化を始める」) なら、その自動化が公開中であればトリガーに関係なく最初から始める。公開中でなければ 8 へ。
@@ -108,7 +109,7 @@ KV には次のキーが入ります。
 
 ### ボタンの payload
 
-ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。チャネル設定 (Messenger / Instagram のプロフィール、LINE リッチメニュー) から自動化を始める項目には `sk-flow:<自動化 ID>` が付きます。
+ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。チャネル設定 (Messenger / Instagram のプロフィール、LINE リッチメニュー) から自動化を始める項目には `sk-flow:<自動化 ID>` が付きます。一斉配信のボタン (自動化を始めるもの) には `sk-bc:<配信 ID>:<ボタン番号>` が付きます (リンクのボタンは URL を開くだけで payload はありません)。
 
 payload に自動化とステップの情報が入っているので、**セッションがなくても続きを実行できます**。これは Facebook / Instagram のコメントからの流れで重要です。コメントで始まった自動化の最初のメッセージは、コメントへの「プライベート返信」として Messenger に届きます。コメントの投稿者の ID と Messenger の ID は別物として届くことがあり、セッションとはつながりませんが、お客さんが DM のボタンを押すと payload から自動化とステップがわかるので、Messenger 側で会話を続けられます。
 
@@ -157,7 +158,8 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 2. **シーケンスの配信**: `resume_at` を過ぎた `sequence_subscriptions` を最大 25 件、`step_id` のステップから実行します。シーケンスが公開中でない (または削除された) 場合は登録を削除します。 ボット全体が停止中、またはその連絡先のボットが停止中 (担当者対応中) のときは送らず、1 時間後に再試行します。
 3. **一斉配信**: 予約時刻を過ぎた配信の宛先 (`broadcast_jobs`) を作り、1 分あたり最大 30 件送信します。
    - セグメント指定の配信 (タグ指定より優先) は、全連絡先とタグを読み込み、条件分岐と同じ評価関数 (`src/flows/rules.ts` の `matchRules`) でメモリ上で宛先を決めます (D1 のバインド変数は 1 クエリ 100 個までのため)。宛先は予約時刻に決まり、削除されたセグメント宛ての配信は 0 件で完了します。
-   - Messenger / Instagram の宛先は、最後の受信から 24 時間を過ぎていれば送らずに「対象外 (skipped)」にします (Meta の 24 時間ルール)。
+   - Messenger / Instagram の宛先は、最後の受信から 24 時間を過ぎていれば送らずに「対象外 (skipped)」にします (Meta の 24 時間ルール)。配信に Meta メッセージタグ (`message_tag`: `CONFIRMED_EVENT_UPDATE` / `POST_PURCHASE_UPDATE` / `ACCOUNT_UPDATE`) があれば、24 時間を過ぎた人にもタグ付きで送ります (24 時間以内の人にはタグなし。LINE はタグを無視)。判定は `src/broadcasts.ts` の `broadcastSendPlan` です。
+   - ボタン付きの配信は、リンクは URL ボタン、自動化は `sk-bc:` payload の postback ボタンとして送ります (`buildBroadcastMessage`)。送信記録 (`messages.payload`) にもボタンが残るので、受信箱にボタンが表示されます。
    - LINE はプッシュ API で送ります (料金プランの通数に数えられます)。
 4. **掃除**: 2 日より古い `processed_events` を削除します。
 
@@ -182,9 +184,9 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
 - **Data**: D1 tables `settings` (incl. `profile:meta`, `richmenu:line` and `ai`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 9 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`).
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 9 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → broadcast button `sk-bc:<broadcast>:<i>` (logs `button_clicked`, increments `broadcasts.clicked`, starts the button's live flow; checked before the session so a tap is never taken as an answer) → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
 - **AI providers** (`src/ai.ts`): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db)` loads the `ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
-- **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped), and prunes dedupe records. Delay resumes do not check the 24 h window.
+- **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped unless the broadcast has a Meta message tag; up to 3 buttons, links or `sk-bc:` postbacks that start a flow, with tap counts), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

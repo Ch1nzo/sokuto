@@ -10,7 +10,7 @@ import { configuredChannels, getGeneral } from '../settings'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { FLOW_SCHEMA_DOC, flowChannelSchema, flowKindSchema, segmentInputSchema, validateFlow } from '../flows/validate'
+import { FLOW_SCHEMA_DOC, broadcastButtonsSchema, flowChannelSchema, flowKindSchema, messageTagSchema, segmentInputSchema, validateFlow } from '../flows/validate'
 import { simulateFlow } from '../flows/simulate'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
@@ -208,16 +208,29 @@ export function buildMcpServer(env: Env): McpServer {
     return json({ days, flows: perFlow, daily, recentErrors: errors.map((e) => ({ at: e.createdAt, flowId: e.flowId, stepId: e.stepId, meta: e.meta })) })
   })
 
-  server.registerTool('broadcast_reach', { title: 'Broadcast reach', description: 'How many contacts a broadcast would reach now (Meta: only people active in the last 24h). segmentId (from list_segments) replaces tag.', inputSchema: { channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional() } }, async ({ channel, tag, segmentId }) => {
+  server.registerTool('broadcast_reach', { title: 'Broadcast reach', description: 'How many contacts a broadcast would reach now (Meta: only people active in the last 24h, or everyone with messageTag: true). segmentId (from list_segments) replaces tag.', inputSchema: { channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional(), messageTag: z.boolean().optional() } }, async ({ channel, tag, segmentId, messageTag }) => {
     if (segmentId !== undefined && !(await loadSegment(d, segmentId))) return fail('invalid_segment')
-    return json(await broadcastReach(d, channel, tag ?? null, segmentId ?? null))
+    return json(await broadcastReach(d, channel, tag ?? null, segmentId ?? null, messageTag ?? false))
   })
 
-  server.registerTool('create_broadcast', { title: 'Create broadcast', description: 'Schedules a message to everyone with a tag, everyone in a segment (segmentId from list_segments; replaces tag), or everyone. Sent by the minute-ly scheduler.', inputSchema: { name: z.string().optional(), channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional(), text: z.string().min(1), scheduledAt: z.string().datetime().optional() } }, async ({ name, channel, tag, segmentId, text, scheduledAt }) => {
-    if (segmentId !== undefined && !(await loadSegment(d, segmentId))) return fail('invalid_segment')
-    const row = await d.insert(schema.broadcasts).values({ name: name ?? text.slice(0, 30), channel, tag: segmentId !== undefined ? null : tag ?? null, segmentId: segmentId ?? null, text, scheduledAt: scheduledAt ?? new Date().toISOString() }).returning().get()
-    return json(row)
-  })
+  server.registerTool(
+    'create_broadcast',
+    {
+      title: 'Create broadcast',
+      description:
+        'Schedules a message to everyone with a tag, everyone in a segment (segmentId from list_segments; replaces tag), or everyone. Sent by the minute-ly scheduler. Up to 3 buttons, each { label, url } or { label, flowId } (a live automation started on tap; taps are counted in "clicked"). messageTag lets Messenger / Instagram reach people outside the 24h window, but Meta only allows it for event confirmations, post-purchase updates and account updates, never promotions; LINE ignores it.',
+      inputSchema: { name: z.string().optional(), channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional(), text: z.string().min(1), imageUrl: z.string().url().optional(), buttons: broadcastButtonsSchema.optional(), messageTag: messageTagSchema.optional(), scheduledAt: z.string().datetime().optional() },
+    },
+    async ({ name, channel, tag, segmentId, text, imageUrl, buttons, messageTag, scheduledAt }) => {
+      if (segmentId !== undefined && !(await loadSegment(d, segmentId))) return fail('invalid_segment')
+      const row = await d
+        .insert(schema.broadcasts)
+        .values({ name: name ?? text.slice(0, 30), channel, tag: segmentId !== undefined ? null : tag ?? null, segmentId: segmentId ?? null, text, imageUrl: imageUrl ?? null, buttons: buttons?.length ? JSON.stringify(buttons) : null, messageTag: messageTag ?? null, scheduledAt: scheduledAt ?? new Date().toISOString() })
+        .returning()
+        .get()
+      return json(row)
+    },
+  )
 
   server.registerTool('list_segments', { title: 'List segments', description: 'Saved contact filters (condition rules + all/any mode). Use the id as segmentId in broadcast_reach / create_broadcast.' }, async () => {
     const rows = await d.select().from(schema.segments).orderBy(desc(schema.segments.id))

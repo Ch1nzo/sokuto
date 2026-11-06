@@ -9,6 +9,7 @@ import { dueSessions } from './inbound'
 import { parseFlow, runFrom, logMessage, type RunContext } from './flows/engine'
 import { getGeneral } from './settings'
 import { loadSegment, matchesSegment, tagsByContact } from './segments'
+import { broadcastSendPlan, buildBroadcastMessage } from './broadcasts'
 
 const BROADCAST_PER_TICK = 30
 
@@ -80,6 +81,7 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
       continue
     }
     const contacts = await db.select().from(schema.contacts).where(inArray(schema.contacts.id, jobs.map((j) => j.contactId)))
+    const msg = buildBroadcastMessage(b)
     for (const job of jobs) {
       budget--
       const contact = contacts.find((c) => c.id === job.contactId)
@@ -87,22 +89,20 @@ export async function processBroadcasts(env: Env, db: Db): Promise<number> {
         await db.update(schema.broadcastJobs).set({ status: 'skipped', error: 'contact missing' }).where(eq(schema.broadcastJobs.id, job.id))
         continue
       }
-      // Meta only allows ordinary messages within 24h of the person's last message.
-      if (contact.channel !== 'line') {
-        const last = contact.lastInboundAt ? new Date(contact.lastInboundAt).getTime() : 0
-        if (Date.now() - last > 24 * 3600 * 1000) {
-          await db.update(schema.broadcastJobs).set({ status: 'skipped', error: 'outside 24h window' }).where(eq(schema.broadcastJobs.id, job.id))
-          await db.update(schema.broadcasts).set({ failed: sql`${schema.broadcasts.failed} + 1` }).where(eq(schema.broadcasts.id, b.id))
-          continue
-        }
+      // Meta only allows ordinary messages within 24h of the person's last message (or with a message tag).
+      const plan = broadcastSendPlan(contact, b, Date.now())
+      if ('skip' in plan) {
+        await db.update(schema.broadcastJobs).set({ status: 'skipped', error: plan.skip }).where(eq(schema.broadcastJobs.id, job.id))
+        await db.update(schema.broadcasts).set({ failed: sql`${schema.broadcasts.failed} + 1` }).where(eq(schema.broadcasts.id, b.id))
+        continue
       }
       const adapter = await getAdapter(env, db, contact.channel as Channel)
       if (!adapter) {
         await db.update(schema.broadcastJobs).set({ status: 'failed', error: 'channel not configured' }).where(eq(schema.broadcastJobs.id, job.id))
         continue
       }
-      const res = await adapter.send(contact.channelUserId, { text: b.text, imageUrl: b.imageUrl ?? undefined })
-      await logMessage(db, { contactId: contact.id, direction: 'out', source: 'bot', kind: 'text', text: b.text, payload: { broadcastId: b.id }, error: res.ok ? undefined : res.error })
+      const res = await adapter.send(contact.channelUserId, msg, plan.tag ? { tag: plan.tag } : undefined)
+      await logMessage(db, { contactId: contact.id, direction: 'out', source: 'bot', kind: 'text', text: b.text, payload: { ...msg, broadcastId: b.id }, error: res.ok ? undefined : res.error })
       await db.update(schema.broadcastJobs).set({ status: res.ok ? 'sent' : 'failed', error: res.ok ? null : res.error }).where(eq(schema.broadcastJobs.id, job.id))
       await db
         .update(schema.broadcasts)
@@ -132,9 +132,9 @@ export async function broadcastTargets(db: Db, channel: Channel | 'any', tag: st
   return targets
 }
 
-/** Used by the admin to preview how many people a broadcast would reach right now. */
-export async function broadcastReach(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null) {
+/** Used by the admin to preview how many people a broadcast would reach right now. With a message tag every Meta contact is reachable. */
+export async function broadcastReach(db: Db, channel: Channel | 'any', tag: string | null, segmentId: number | null = null, withTag = false) {
   const targets = await broadcastTargets(db, channel, tag, segmentId)
-  const reachable = targets.filter((c) => c.channel === 'line' || (c.lastInboundAt && Date.now() - new Date(c.lastInboundAt).getTime() <= 24 * 3600 * 1000))
+  const reachable = targets.filter((c) => withTag || c.channel === 'line' || (c.lastInboundAt && Date.now() - new Date(c.lastInboundAt).getTime() <= 24 * 3600 * 1000))
   return { total: targets.length, reachable: reachable.length }
 }

@@ -26,7 +26,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - テンプレート (7 種類): あいさつ、コメント「価格」→ DM、コメント → フォロー確認してリンク送信、よくある質問、満足度アンケート、注文受付、ストーリーメンションのお礼
 - 受信箱: 全チャネルの会話を一か所で確認し、返信できます。人が返信するとその相手のボットは自動で停止します。「担当者」「オペレーター」などのキーワードでも停止できます。
 - 連絡先: タグ、カスタムフィールド (電話番号など)、検索、CSV エクスポート、セグメント (条件分岐と同じ条件を保存して絞り込みや配信先に使う)
-- 一斉配信: タグまたはセグメントで絞り込み、日時を予約して配信 (1 分ごとに最大 30 通ずつ送信)
+- 一斉配信: タグまたはセグメントで絞り込み、日時を予約して配信 (1 分ごとに最大 30 通ずつ送信)。ボタン (リンク / 自動化を始める) とクリック数、Meta のメッセージタグ (24 時間外への送信) に対応
 - レポート: 自動化ごとの起動数・送信数・ボタンクリック・回答数・完了数・エラー、日別メッセージ数
 - テスト: 実際には何も送らずに、お客さんの立場で自動化を試せます
 - チャネル設定: Messenger / Instagram の「はじめる」ボタン・あいさつ文・固定メニュー・会話スターター、LINE のリッチメニューを管理画面から設定 (押すと選んだ自動化が始まります)
@@ -79,7 +79,7 @@ Sokuto 自体に料金はありません。ただし、次の外部サービス�
 
 **Meta (Messenger / Instagram)**
 
-- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。Sokuto の一斉配信は 24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
+- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。Sokuto の一斉配信は 24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます。メッセージタグを付けた配信は例外ですが、Meta のポリシーでイベントの確認・購入後の連絡・アカウント更新に限られます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
 - コメントへのプライベート返信 (DM) は、1 つのコメントにつき 1 回だけです。
 
 ## 仕組み
@@ -138,7 +138,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 - 9 triggers (keyword, comment with exclude keywords and auto-like, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply)
 - 9 step types (message with image, buttons, carousel cards and video/audio/file attachments, question with input validation (email/phone/number/url/date) and skip, condition (fields, tags, hour, weekday, days since signup or last message, Instagram follow status), action, delay (≤10 s waits inline with a typing indicator), random, goto, public comment reply with random variants, external request (calls an HTTPS API and saves values from the JSON response to fields))
 - Sequences (drip campaigns): trigger-less flows that send their steps over time (delay steps between messages) to contacts enrolled with a "subscribe to sequence" action or over MCP; the inbox shows and removes enrollments.
-- 7 templates (including a comment → follow check → link gate), a unified inbox with human hand-over, contacts with tags/fields/CSV export and segments (saved condition rules), scheduled broadcasts to a tag or segment (30 messages per minute), per-flow reports, a dry-run tester and an MCP server with 25 tools.
+- 7 templates (including a comment → follow check → link gate), a unified inbox with human hand-over, contacts with tags/fields/CSV export and segments (saved condition rules), scheduled broadcasts to a tag or segment (30 messages per minute) with buttons (link / start a flow), click counts and Meta message tags, per-flow reports, a dry-run tester and an MCP server with 25 tools.
 - Channel settings: Messenger/Instagram Get Started, greeting, persistent menu and ice breakers, and the LINE rich menu, each item starting a flow.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
 - AI provider settings (Anthropic, OpenAI-compatible, or Workers AI) with a connection test; the API key is stored encrypted. Each call is billed by the provider; Workers AI runs within Cloudflare's free tier.
@@ -158,7 +158,7 @@ Forgot the password? Delete the `admin:password` key in the Worker's KV namespac
 
 - Cloudflare free plan: 100k Worker requests/day, D1 5M rows read / 100k rows written per day and 5 GB, KV 100k reads / 1k writes per day. When a limit is hit the Worker returns errors (the bot stops) until the reset at 00:00 UTC.
 - LINE: replies are free; push messages (broadcasts, messages after a delay, manual inbox replies, and the 2nd+ step sent for one incoming message) count against your Official Account plan's monthly quota (free plan: 200/month at the time of writing).
-- Meta: the 24-hour rule applies; broadcasts only go to people who messaged you in the last 24 hours, and delays longer than 24 hours will fail on Messenger/Instagram. One private reply per comment.
+- Meta: the 24-hour rule applies; broadcasts only go to people who messaged you in the last 24 hours (unless you set a message tag, which Meta allows only for event confirmations, post-purchase updates and account updates), and delays longer than 24 hours will fail on Messenger/Instagram. One private reply per comment.
 
 ### Architecture, development, license
 
