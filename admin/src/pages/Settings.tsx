@@ -590,6 +590,8 @@ export default function Settings() {
               </>
             )}
           </div>
+        </VStack>
+      </Card>
       <Card title={t('settings_snippets')}>
         <VStack spacing={16}>
           <Text as="p" typo="13" color="txt-black-dark">
