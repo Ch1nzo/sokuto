@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
 import type { Db } from './db'
 import { schema } from './db'
 import { decryptString, encryptString, randomToken } from './crypto'
@@ -61,6 +62,42 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   botFields: {},
 }
 
+const flowId = z.number().int().positive()
+
+/** Messenger / Instagram profile (`settings` row `profile:meta`). Menu items open a URL or start a flow. */
+export const metaProfileSchema = z.object({
+  greeting: z.string().trim().max(160).optional(),
+  getStartedFlowId: flowId.optional(),
+  menu: z
+    .array(
+      z
+        .object({ label: z.string().trim().min(1).max(30), url: z.string().url().regex(/^https?:\/\//).optional(), flowId: flowId.optional() })
+        .refine((m) => !m.url !== !m.flowId, 'needs either url or flowId'),
+    )
+    .max(3)
+    .default([]),
+  iceBreakers: z.array(z.object({ question: z.string().trim().min(1).max(80), flowId })).max(4).default([]),
+  applyToInstagram: z.boolean().default(false),
+})
+export type MetaProfile = z.infer<typeof metaProfileSchema>
+
+/** LINE default rich menu (`settings` row `richmenu:line`). `layout` is the number of areas. */
+export const lineRichMenuSchema = z
+  .object({
+    imageUrl: z.string().url().regex(/^https?:\/\//),
+    size: z.enum(['full', 'half']),
+    layout: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(6)]),
+    chatBarText: z.string().trim().min(1).max(14),
+    cells: z.array(
+      z
+        .object({ label: z.string().trim().max(20).optional(), type: z.enum(['flow', 'uri', 'message', 'postback']), value: z.string().trim().min(1).max(300) })
+        .refine((c) => c.type !== 'flow' || /^\d+$/.test(c.value), 'flow value must be a flow id')
+        .refine((c) => c.type !== 'uri' || /^(https?:\/\/|line:|tel:)/.test(c.value), 'uri must start with https://, line: or tel:'),
+    ),
+  })
+  .refine((m) => m.cells.length === m.layout, { message: 'cells must match the layout', path: ['cells'] })
+export type LineRichMenu = z.infer<typeof lineRichMenuSchema>
+
 const SECRET_FIELDS = new Set(['channelSecret', 'channelAccessToken', 'appSecret', 'pageAccessToken'])
 
 export async function getSetting<T>(db: Db, key: string): Promise<T | null> {
@@ -79,6 +116,10 @@ export async function putSetting(db: Db, key: string, value: unknown): Promise<v
     .insert(schema.settings)
     .values({ key, value: json, updatedAt: new Date().toISOString() })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: json, updatedAt: new Date().toISOString() } })
+}
+
+export async function deleteSetting(db: Db, key: string): Promise<void> {
+  await db.delete(schema.settings).where(eq(schema.settings.key, key))
 }
 
 export async function getGeneral(db: Db): Promise<GeneralSettings> {

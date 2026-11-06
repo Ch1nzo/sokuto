@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buttonPayload, matchTrigger, parseButtonPayload, renderText, startFlow } from '../src/flows/engine'
+import { buttonPayload, flowPayload, matchTrigger, parseButtonPayload, parseFlowPayload, renderText, startFlow } from '../src/flows/engine'
 import { RecordingAdapter } from '../src/channels/adapter'
 import type { Db } from '../src/db'
 import type { FlowRecord, Trigger } from '../src/flows/types'
@@ -209,6 +209,19 @@ describe('buttonPayload / parseButtonPayload', () => {
   it('rejects garbage', () => {
     for (const bad of [undefined, '', 'sk', 'sk:1:m1', 'sk:x:m1:0', 'sk:1:m1:y', 'sk:1::0', 'sk:1:a:b:0', 'xx:1:m1:0', 'sk-choice:yes', ' sk:1:m1:0']) {
       expect(parseButtonPayload(bad)).toBeNull()
+    }
+  })
+})
+
+describe('flowPayload / parseFlowPayload', () => {
+  it('round trips', () => {
+    expect(flowPayload(3)).toBe('sk-flow:3')
+    expect(parseFlowPayload(flowPayload(42))).toBe(42)
+  })
+
+  it('rejects other payloads', () => {
+    for (const bad of [undefined, '', 'sk-flow:', 'sk-flow:x', 'sk-flow:1:2', 'sk:1:m1:0', 'sk-choice:1', ' sk-flow:1']) {
+      expect(parseFlowPayload(bad)).toBeNull()
     }
   })
 })

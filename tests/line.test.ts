@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { lineLoadingSeconds, parseLineWebhook, renderLineMessages, verifyLineSignature } from '../src/channels/line'
+import { buildRichMenu, lineLoadingSeconds, parseLineWebhook, renderLineMessages, verifyLineSignature } from '../src/channels/line'
+import { lineRichMenuSchema, type LineRichMenu } from '../src/settings'
 
 describe('verifyLineSignature', () => {
   const secret = 'line-channel-secret'
@@ -142,5 +143,52 @@ describe('renderLineMessages altText limit', () => {
 describe('lineLoadingSeconds', () => {
   it('rounds up to a multiple of 5 within 5–60', () => {
     expect([1, 5, 7, 10, 61].map(lineLoadingSeconds)).toEqual([5, 5, 10, 10, 60])
+  })
+})
+
+describe('buildRichMenu', () => {
+  const menu = (over: Partial<LineRichMenu>): LineRichMenu => ({ imageUrl: 'https://example.com/m.png', size: 'full', layout: 1, chatBarText: 'Menu', cells: [{ type: 'message', value: 'hi' }], ...over })
+
+  it('splits a half-size menu into a 3×2 grid that covers the image exactly', () => {
+    const m = buildRichMenu(menu({ size: 'half', layout: 6, cells: Array.from({ length: 6 }, (_, i) => ({ type: 'message' as const, value: `m${i}` })) }))
+    expect(m.size).toEqual({ width: 2500, height: 843 })
+    expect(m.areas.map((a) => a.bounds)).toEqual([
+      { x: 0, y: 0, width: 833, height: 422 },
+      { x: 833, y: 0, width: 834, height: 422 },
+      { x: 1667, y: 0, width: 833, height: 422 },
+      { x: 0, y: 422, width: 833, height: 421 },
+      { x: 833, y: 422, width: 834, height: 421 },
+      { x: 1667, y: 422, width: 833, height: 421 },
+    ])
+  })
+
+  it('maps cell types to actions and cuts chatBarText to 14', () => {
+    const m = buildRichMenu(
+      menu({
+        layout: 4,
+        chatBarText: 'メニューはこちらからどうぞよろしく',
+        cells: [
+          { type: 'flow', value: '7', label: '予約する' },
+          { type: 'uri', value: 'https://example.com' },
+          { type: 'message', value: '営業時間' },
+          { type: 'postback', value: 'custom' },
+        ],
+      }),
+    )
+    expect(m.size).toEqual({ width: 2500, height: 1686 })
+    expect(m.chatBarText).toHaveLength(14)
+    expect(m.areas.map((a) => a.action)).toEqual([
+      { type: 'postback', label: '予約する', data: 'sk-flow:7', displayText: '予約する' },
+      { type: 'uri', uri: 'https://example.com' },
+      { type: 'message', text: '営業時間' },
+      { type: 'postback', data: 'custom' },
+    ])
+    expect(m.areas[3]!.bounds).toEqual({ x: 1250, y: 843, width: 1250, height: 843 })
+  })
+
+  it('schema needs one cell per area', () => {
+    expect(lineRichMenuSchema.safeParse(menu({ layout: 2 })).success).toBe(false)
+    expect(lineRichMenuSchema.safeParse(menu({ layout: 1, cells: [{ type: 'flow', value: 'abc' }] })).success).toBe(false)
+    expect(lineRichMenuSchema.safeParse(menu({})).success).toBe(true)
   })
 })

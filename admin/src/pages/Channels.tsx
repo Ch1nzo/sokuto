@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Badge, Banner, Button, Icon, Text, VStack, useToast } from '@channel.io/bezier-react'
+import { Badge, Banner, Button, Divider, Icon, Text, VStack, useToast } from '@channel.io/bezier-react'
 import {
   CancelSmallIcon,
   CheckCircleFilledIcon,
@@ -14,6 +14,8 @@ import { api, errorMessage } from '../lib/api'
 import { useLang, useT } from '../lib/i18n'
 import { Card, CopyBox, ErrorBanner, LoadingState, PageHeader, TextInputField, type TextInputFieldProps } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
+import { MetaProfileSection, type FlowOption, type MetaProfile } from './channels/MetaProfileSection'
+import { LineRichMenuSection, type LineRichMenu } from './channels/LineRichMenuSection'
 import './channels.css'
 
 type ChannelsInfo = {
@@ -23,6 +25,8 @@ type ChannelsInfo = {
   metaVerifyToken: string
   privacyUrl: string
   dataDeletionUrl: string
+  profile: MetaProfile | null
+  richmenu: LineRichMenu | null
 }
 
 type Kind = 'line' | 'meta'
@@ -130,6 +134,7 @@ export default function Channels() {
   const { lang } = useLang()
   const toast = useToast()
   const [info, setInfo] = useState<ChannelsInfo | null>(null)
+  const [flows, setFlows] = useState<FlowOption[]>([])
   const [loadError, setLoadError] = useState<unknown>(null)
   const [line, setLine] = useState({ channelSecret: '', channelAccessToken: '' })
   const [meta, setMeta] = useState({ appId: '', appSecret: '', pageAccessToken: '' })
@@ -150,6 +155,8 @@ export default function Channels() {
 
   useEffect(() => {
     void load()
+    // Flow pickers only; without flows the selects are just empty.
+    api.get<{ flows: FlowOption[] }>('/api/flows').then((r) => setFlows(r.flows), () => undefined)
   }, [load])
 
   if (!info) {
@@ -331,7 +338,11 @@ export default function Channels() {
                 </div>
               </VStack>
             ) : (
-              connectedActions('line', () => void testLine())
+              <>
+                {connectedActions('line', () => void testLine())}
+                <Divider withoutIndent />
+                <LineRichMenuSection initial={info.richmenu} flows={flows} onSaved={() => void load()} />
+              </>
             )}
           </VStack>
         </Card>
@@ -379,7 +390,11 @@ export default function Channels() {
                 </div>
               </VStack>
             ) : (
-              connectedActions('meta', () => void testMeta())
+              <>
+                {connectedActions('meta', () => void testMeta())}
+                <Divider withoutIndent />
+                <MetaProfileSection initial={info.profile} flows={flows} hasInstagram={!!info.meta.instagramAccountId} onSaved={() => void load()} />
+              </>
             )}
           </VStack>
         </Card>

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { parseMetaWebhook, renderMetaMessages, verifyMetaSignature } from '../src/channels/meta'
+import { buildMessengerProfile, parseMetaWebhook, renderMetaMessages, verifyMetaSignature } from '../src/channels/meta'
+import { metaProfileSchema } from '../src/settings'
 
 describe('verifyMetaSignature', () => {
   const secret = 'app-secret'
@@ -235,5 +236,48 @@ describe('renderMetaMessages URL quick replies', () => {
     const last = out[out.length - 1]!
     expect(last.quick_replies).toEqual([{ content_type: 'text', title: 'A', payload: 'a' }])
     expect(out.filter((m) => m.quick_replies)).toHaveLength(1)
+  })
+})
+
+describe('buildMessengerProfile', () => {
+  const base = { menu: [], iceBreakers: [], applyToInstagram: false }
+
+  it('builds every field with sk-flow payloads', () => {
+    const { set, remove } = buildMessengerProfile({
+      ...base,
+      greeting: 'こんにちは',
+      getStartedFlowId: 3,
+      menu: [{ label: 'Shop', url: 'https://example.com' }, { label: 'Order', flowId: 4 }],
+      iceBreakers: [{ question: 'Hours?', flowId: 5 }],
+    })
+    expect(remove).toEqual([])
+    expect(set.get_started).toEqual({ payload: 'sk-flow:3' })
+    expect(set.greeting).toEqual([{ locale: 'default', text: 'こんにちは' }])
+    expect(set.persistent_menu).toEqual([
+      {
+        locale: 'default',
+        composer_input_disabled: false,
+        call_to_actions: [
+          { type: 'web_url', title: 'Shop', url: 'https://example.com' },
+          { type: 'postback', title: 'Order', payload: 'sk-flow:4' },
+        ],
+      },
+    ])
+    expect(set.ice_breakers).toEqual([{ locale: 'default', call_to_actions: [{ question: 'Hours?', payload: 'sk-flow:5' }] }])
+  })
+
+  it('lists empty settings for removal (menu before get_started) and cuts the greeting to 160', () => {
+    const { set, remove } = buildMessengerProfile({ ...base, greeting: 'a'.repeat(200) })
+    expect(Object.keys(set)).toEqual(['greeting'])
+    expect((set.greeting as { text: string }[])[0]!.text).toHaveLength(160)
+    expect(remove).toEqual(['persistent_menu', 'ice_breakers', 'get_started'])
+  })
+
+  it('schema requires exactly one of url / flowId per menu item', () => {
+    const parse = (item: object) => metaProfileSchema.safeParse({ menu: [{ label: 'A', ...item }] }).success
+    expect(parse({ flowId: 1 })).toBe(true)
+    expect(parse({ url: 'https://example.com' })).toBe(true)
+    expect(parse({})).toBe(false)
+    expect(parse({ flowId: 1, url: 'https://example.com' })).toBe(false)
   })
 })

@@ -63,6 +63,16 @@ export function parseButtonPayload(payload: string | undefined): { flowId: numbe
   return { flowId: Number(m[1]), stepId: m[2]!, index: Number(m[3]) }
 }
 
+/** Payload of profile menus, ice breakers and rich menu areas that start a flow directly. */
+export function flowPayload(id: number): string {
+  return `sk-flow:${id}`
+}
+
+export function parseFlowPayload(payload: string | undefined): number | null {
+  const m = /^sk-flow:(\d+)$/.exec(payload ?? '')
+  return m ? Number(m[1]) : null
+}
+
 function keywordMatches(text: string | undefined, keywords: string[], mode: 'contains' | 'exact' | 'starts_with' = 'contains'): boolean {
   const t = normalize(text)
   if (!t) return false

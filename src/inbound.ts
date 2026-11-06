@@ -5,7 +5,7 @@ import type { ChannelAdapter } from './channels/adapter'
 import type { InboundEvent } from './channels/types'
 import { isBotPaused, setBotPaused, upsertContact, type ContactRow } from './contacts'
 import { getGeneral } from './settings'
-import { logMessage, matchTrigger, parseButtonPayload, parseFlow, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
+import { logMessage, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
 
 /** Remembers platform event ids so retried webhooks are not processed twice. */
 export async function markProcessed(db: Db, id: string): Promise<boolean> {
@@ -76,6 +76,14 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
       const ctx: RunContext = { ...base, contact, flow }
       if (await resumeFromButton(ctx, event.payload!)) return
     }
+  }
+
+  // 2b. Profile menus, ice breakers and LINE rich menu areas (`sk-flow:<id>`) start that flow directly.
+  const directId = event.type === 'postback' ? parseFlowPayload(event.payload) : null
+  const direct = flows.find((f) => f.id === directId)
+  if (direct) {
+    await startFlow({ ...base, contact, flow: direct }, null)
+    return
   }
 
   // 3. Match triggers. Specific triggers win over first_message / any_message.

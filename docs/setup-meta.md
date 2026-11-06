@@ -136,6 +136,22 @@ Meta から Sokuto にメッセージを届けるための設定です。
 
 > 自分のお店のページだけで使う場合でも、お客さんに返信するにはこの手順が必要です。これは Meta の仕組みによるもので、Sokuto 側では省略できません。
 
+## 9. はじめるボタン・あいさつ・固定メニュー・会話スターター
+
+接続後、**「チャネル接続」** の Facebook の枠の下にある **「プロフィール設定」** で、Messenger の次の項目を設定できます。
+
+- **あいさつ文**: 初めて会話を開いた人に、メッセージを送る前に表示される文 (160 文字まで)。
+- **「はじめる」ボタン**: 初めての人に表示されるボタン。押されると選んだ自動化が始まります。
+- **固定メニュー** (3 件まで): 入力欄の横のメニュー。項目ごとに「自動化を始める」か「リンクを開く」を選びます。Messenger では **固定メニューを使うには「はじめる」ボタンの設定が必要** です。
+- **会話スターター** (4 件まで): 会話の最初に表示される質問。押されると選んだ自動化が始まります。
+
+「Instagram にも適用」をオンにすると、会話スターターと固定メニューを Instagram の DM にも設定します (Instagram にはあいさつ文と「はじめる」ボタンはありません)。
+
+**「保存して適用」** を押すと、Sokuto に保存し、Meta の Messenger Profile API (`/me/messenger_profile`) にすぐ反映します。空にした項目は Meta 側からも削除されます。**「Meta 側の設定を削除」** は 4 項目をすべて削除します。
+
+- 項目を押したときは、選んだ自動化が (トリガーに関係なく) 始まります。自動化は **公開中** にしてください。下書きの自動化は動きません。
+- 表示が変わるまで時間がかかることがあります。Messenger アプリを再起動するか、別のアカウントで確認してください。
+
 ---
 
 ## うまくいかないとき
@@ -190,5 +206,6 @@ This is the hardest part of Sokuto: you must create your own Meta developer app,
 6. Instagram: professional account linked to the Page, "Allow access to messages" turned on in the Instagram app.
 7. Test with an account that has a role on the app (Development mode only answers app admins/developers/testers).
 8. Go Live and request Advanced Access (typically `pages_messaging`, `pages_manage_metadata`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`, `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`; Meta changes these names, follow the review screen). Expect a screencast and possibly Business Verification.
+9. Optional: under **Profile** in the Facebook card set the Messenger greeting (≤160), the Get Started flow, a persistent menu (≤3 items, a flow or a URL; Messenger requires Get Started for it) and ice breakers (≤4). "Save and apply" stores it and calls the Messenger Profile API (`/me/messenger_profile`, `platform=instagram` for Instagram's ice breakers and menu when enabled). Tapping an item starts the chosen live flow.
 
 Troubleshooting: verification failure = wrong callback URL or verify token; `(#10)`/`(#200)` = development mode or missing permission; the 24-hour rule blocks messages (broadcasts skip people outside the window, delays over 24 h fail); only one private reply per comment, so put a button in the first DM.
