@@ -1,0 +1,167 @@
+/* Dashboard. Prefix: dash- */
+
+/*
+ * Chart colors, one per entity and the same in every card (bot = purple, person = orange, …).
+ * Validated with the dataviz palette checks (OKLCH lightness band, chroma, CVD ΔE, contrast) against
+ * --bg-white-normal in both themes. Bezier's dark "normal" steps are a step too light for the dark band,
+ * so dark mode takes the 400 step (`--bgtxt-*-dark` in dark) and orange its 500 step. Sub-3:1 light
+ * fills (green, orange) are always paired with visible numbers and a table.
+ */
+.dash {
+  --dash-in: var(--bgtxt-blue-normal);
+  --dash-out: var(--bgtxt-green-normal);
+  --dash-new: var(--bgtxt-blue-normal);
+  --dash-bot: var(--bgtxt-purple-normal);
+  --dash-human: var(--bgtxt-orange-normal);
+  --dash-line: var(--bgtxt-green-normal);
+  --dash-messenger: var(--bgtxt-blue-normal);
+  --dash-instagram: var(--bgtxt-pink-normal);
+  --dash-sent: var(--bgtxt-blue-normal);
+  --dash-fail: var(--bgtxt-red-normal);
+  --dash-rest: var(--bg-black-darker); /* closed / not sent / other: de-emphasis grey */
+}
+:root[data-bezier-theme='dark'] .dash {
+  --dash-out: var(--bgtxt-green-dark);
+  --dash-bot: var(--bgtxt-purple-dark);
+  --dash-human: var(--orange-500);
+  --dash-line: var(--bgtxt-green-dark);
+  --dash-instagram: var(--bgtxt-pink-dark);
+  --dash-fail: var(--bgtxt-red-dark);
+}
+
+/* Period chips + the dates they cover: one row above everything they scope. */
+.dash-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.dash-period { display: flex; gap: 8px; }
+/* Refetch keeps the previous charts on screen, dimmed (no skeleton, no layout jump). */
+.dash-body.is-loading { opacity: 0.6; }
+
+.dash-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 860px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.dash-card { display: flex; flex-direction: column; gap: 16px; }
+.dash-card--wide { grid-column: 1 / -1; }
+.dash-card__head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.dash-card__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 240px; }
+.dash-card__aside { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+/* Legend item / figure in a card header: swatch carries the color, text stays in text colors. */
+.dash-key { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--txt-black-darker); white-space: nowrap; }
+.dash-key strong { font-size: 16px; font-weight: 700; color: var(--txt-black-darkest); }
+.dash-swatch { flex: none; display: inline-block; width: 10px; height: 10px; border-radius: 2px; align-self: center; }
+
+.dash-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- columns per day ---------- */
+.dash-cols {
+  --dash-plot-h: 200px;
+  margin: 0; padding-top: 8px; /* room for the top tick label */
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px;
+}
+.dash-cols__y { position: relative; height: var(--dash-plot-h); min-width: 24px; }
+.dash-cols__y span {
+  position: absolute; right: 0; transform: translateY(50%);
+  font-size: 11px; line-height: 1; color: var(--txt-black-dark); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.dash-cols__plot { position: relative; height: var(--dash-plot-h); }
+.dash-cols__rule { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--bdr-black-light); }
+.dash-cols__rule.is-base { border-top-color: var(--bdr-black-dark); }
+.dash-cols__bars { position: absolute; inset: 0; display: flex; align-items: flex-end; }
+.dash-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; }
+.dash-col__stack {
+  width: 100%; max-width: 24px; min-height: 2px;
+  display: flex; flex-direction: column-reverse; gap: 2px; /* surface gap between 受信 and 送信 */
+  border-radius: 4px 4px 0 0; overflow: hidden; /* rounded data end, square at the baseline */
+}
+.dash-col__seg { flex-basis: 0; min-height: 0; }
+.dash-cols__x { grid-column: 2; position: relative; height: 14px; margin-top: 6px; }
+.dash-cols__x span {
+  position: absolute; top: 0; transform: translateX(-50%);
+  font-size: 11px; line-height: 14px; color: var(--txt-black-dark); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+@media (hover: hover) {
+  .dash-col { transition: background-color 120ms ease; }
+  .dash-col:hover { background: var(--bg-black-lighter); }
+}
+
+/* Table view under a chart. */
+.dash-table summary {
+  width: max-content; cursor: pointer; border-radius: var(--radius-6);
+  font-size: 12px; color: var(--txt-black-darker);
+}
+.dash-table summary:focus-visible { outline: 2px solid var(--bgtxt-blue-normal); outline-offset: 2px; }
+.dash-table .data-table {
+  max-height: 320px; overflow: auto; margin-top: 8px;
+  border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
+}
+.dash-table th, .dash-table td { padding: 8px 12px; }
+
+/* ---------- donut ---------- */
+.dash-donut { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+.dash-donut__ring { position: relative; flex: none; width: 136px; }
+.dash-donut .dash-legend { flex: 1 1 240px; width: auto; min-width: 0; }
+.dash-donut__ring svg { display: block; width: 100%; height: auto; }
+.dash-donut__center {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none; text-align: center;
+}
+.dash-donut__center strong { font-size: 18px; font-weight: 700; line-height: 1.2; color: var(--txt-black-darkest); }
+.dash-donut__center span { font-size: 11px; color: var(--txt-black-dark); }
+@media (hover: hover) {
+  .dash-donut__arc { transition: opacity 120ms ease; }
+  .dash-donut__ring svg:hover .dash-donut__arc:not(:hover) { opacity: 0.45; }
+}
+
+/* ---------- legend table (also the text alternative) ---------- */
+.dash-legend { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--txt-black-darkest); }
+.dash-legend th, .dash-legend td { padding: 6px 0 6px 12px; border-top: 1px solid var(--bdr-black-light); text-align: left; vertical-align: middle; }
+.dash-legend th:first-child, .dash-legend td:first-child { padding-left: 0; }
+.dash-legend thead th { padding-top: 0; border-top: 0; font-size: 11px; font-weight: 400; color: var(--txt-black-dark); }
+.dash-legend tbody th { font-weight: 400; width: 100%; }
+.dash-legend .dash-num { text-align: right; }
+.dash-legend__name { display: inline-flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.dash-legend__value { font-weight: 700; }
+
+/* ---------- one whole split into parts ---------- */
+.dash-whole { display: flex; flex-direction: column; gap: 12px; }
+.dash-split { display: flex; gap: 2px; height: 8px; }
+.dash-split__seg { flex-basis: 0; min-width: 4px; border-radius: 4px; }
+@media (hover: hover) {
+  .dash-split__seg { transition: opacity 120ms ease; }
+  .dash-split:hover .dash-split__seg:not(:hover) { opacity: 0.45; }
+}
+
+.dash-fact {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: auto;
+  padding-top: 12px; border-top: 1px solid var(--bdr-black-light);
+  font-size: 13px; color: var(--txt-black-darker);
+}
+.dash-fact strong { font-size: 14px; color: var(--txt-black-darkest); font-variant-numeric: tabular-nums; }
+.dash-fact__hint { font-size: 12px; color: var(--txt-black-dark); }
+
+/* ---------- automation performance (DataTable inside the card, edge to edge) ---------- */
+.dash-flows { margin: 0 -16px -16px; border-top: 1px solid var(--bdr-black-light); }
+.dash-flows .empty-state { border-top: 0; }
+.dash-flow { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 160px; }
+.dash-flow__name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  overflow-wrap: anywhere; color: var(--txt-black-darkest); font-weight: 700;
+}
+.dash-flow__name:focus-visible { outline: 2px solid var(--bgtxt-blue-normal); outline-offset: 2px; border-radius: 2px; }
+.dash-flow__badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.dash-meter { display: flex; align-items: center; gap: 8px; min-width: 160px; }
+.dash-meter__track { flex: 1; height: 8px; border-radius: 4px; background: var(--bgtxt-blue-lightest); overflow: hidden; }
+.dash-meter__fill { display: block; height: 100%; border-radius: 4px; background: var(--bgtxt-blue-normal); }
+.dash-meter__value { flex: none; min-width: 5ch; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+.dash-error { display: inline-flex; align-items: center; gap: 4px; color: var(--bgtxt-red-normal); font-weight: 700; }
+
+@media (max-width: 480px) {
+  .dash-donut__ring { width: 112px; }
+  .dash-donut__center strong { font-size: 16px; }
+  /* Keep all four columns on a phone: the completion % stays, its bar goes. */
+  .dash-flow { min-width: 96px; }
+  .dash-meter { min-width: 0; justify-content: flex-end; }
+  .dash-meter__track { display: none; }
+  .dash-flows .data-table :is(th, td) { padding-left: 8px; padding-right: 8px; }
+  .dash-flows .data-table :is(th, td):first-child { padding-left: 16px; }
+  .dash-flows .data-table :is(th, td):last-child { padding-right: 16px; }
+}
