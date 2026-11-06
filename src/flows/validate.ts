@@ -127,7 +127,7 @@ Steps:
   ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name", "is_follower" ("true"/"false"; Instagram follow status, always "true" on other channels), "hour" ("0"–"23" in the bot time zone), "weekday" ("0" = Sunday … "6" = Saturday), "days_since_created", "days_since_last_inbound" (whole days; empty for a new contact). Any other field is a contact field; use "tag" with has_tag / not_has_tag.
   Compare numbers as strings: { "field": "hour", "op": "gte", "value": "9" }
 - { "id", "type": "action", "actions": [{ "type": "add_tag", "tag": "interested" }, { "type": "remove_tag", "tag": "x" }, { "type": "set_field", "field": "f", "value": "v" }, { "type": "notify", "text": "..." }, { "type": "pause_bot", "minutes"?: 60 }, { "type": "webhook", "url": "https://..." }], "next": stepId }
-- { "id", "type": "delay", "seconds": 3600, "next": stepId }
+- { "id", "type": "delay", "seconds": 3600, "next": stepId }  waits ≤10 s inline with a typing indicator (up to 20 s per run); longer waits resume from the scheduler, which runs every minute
 - { "id", "type": "random", "branches": [{ "weight": 1, "next": "a" }, { "weight": 1, "next": "b" }] }
 - { "id", "type": "goto", "flowId": 12 }
 - { "id", "type": "comment_reply", "text": "DMを送りました ✓", "texts"?: ["DM しました!", "DM をご確認ください"], "next": stepId }  public reply under the triggering comment (comment trigger only). One of text + texts (max 5 in total, up to 4 in texts; text may be "" when texts is set) is picked at random so replies do not all look the same

@@ -27,6 +27,8 @@ export const OPS_WITHOUT_VALUE: ConditionRule['op'][] = ['is_set', 'is_empty']
 export const FLOW_CHANNELS: FlowChannel[] = ['any', 'line', 'messenger', 'instagram']
 export const TEST_CHANNELS: Channel[] = ['line', 'messenger', 'instagram']
 export const DELAY_PRESETS: { seconds: number; label: string }[] = [
+  { seconds: 3, label: '3s' },
+  { seconds: 5, label: '5s' },
   { seconds: 60, label: '1m' },
   { seconds: 300, label: '5m' },
   { seconds: 3600, label: '1h' },

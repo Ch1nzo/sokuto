@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { parseLineWebhook, renderLineMessages, verifyLineSignature } from '../src/channels/line'
+import { lineLoadingSeconds, parseLineWebhook, renderLineMessages, verifyLineSignature } from '../src/channels/line'
 
 describe('verifyLineSignature', () => {
   const secret = 'line-channel-secret'
@@ -136,5 +136,11 @@ describe('renderLineMessages altText limit', () => {
     const tpl = out.find((m) => m.type === 'template')!
     expect(tpl.altText).toBeTypeOf('string')
     expect((tpl.altText as string).length).toBeLessThanOrEqual(400)
+  })
+})
+
+describe('lineLoadingSeconds', () => {
+  it('rounds up to a multiple of 5 within 5–60', () => {
+    expect([1, 5, 7, 10, 61].map(lineLoadingSeconds)).toEqual([5, 5, 10, 10, 60])
   })
 })

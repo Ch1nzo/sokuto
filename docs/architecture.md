@@ -88,7 +88,7 @@ KV には次のキーが入ります。
 
 - **`input`**: `question` ステップ。次のメッセージを答えとして指定のフィールドに保存します。選択肢 (`choices`) がある場合、選択肢以外の入力はトリガー照合に回されます。入力チェック (`validate`: email / phone / number / url / date) がある場合は答えを検証して正規化してから保存します (電話番号は記号を除いた数字、日付は `YYYY-MM-DD`)。形式が違えば `retryText` (未設定なら既定の文) を送り、そのまま待ち続けます。`skipLabel` があるとクイックリプライの末尾にスキップボタン (payload `sk-skip`) が付き、押されるとフィールドを保存せずに次のステップへ進みます。
 - **`button`**: `next` を持つボタン付きの `message` ステップ。ボタンが押されるのを待ちます。
-- **`delay`**: `delay` ステップ。`resume_at` を記録し、定期処理が時刻になったら再開します。
+- **`delay`**: `delay` ステップ。`resume_at` を記録し、定期処理が時刻になったら再開します。10 秒以下の待機は (1 回の実行で合計 20 秒まで) セッションを保存せず、相手に入力中の表示 (Meta `typing_on` / LINE ローディング) を出してその場で待ってから次へ進みます。
 
 1 回の実行で進むステップは最大 50 です (無限ループ防止)。送信に失敗するとセッションは終了します。
 
@@ -127,7 +127,7 @@ Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:met
 
 Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/run` で手動実行も可能)。
 
-1. **待機の再開**: `resume_at` を過ぎた `delay` セッションを最大 25 件、続きから実行します。自動化が下書きに戻っていたらセッションを消します。
+1. **待機の再開**: `resume_at` を過ぎた `delay` セッションを最大 25 件、続きから実行します。自動化が下書きに戻っていたらセッションを消します。10 秒以下の待機は 1 回の実行で合計 20 秒まではその場で待つため、ここに来るのはそれより長い待機だけです。
 2. **一斉配信**: 予約時刻を過ぎた配信の宛先 (`broadcast_jobs`) を作り、1 分あたり最大 30 件送信します。
    - Messenger / Instagram の宛先は、最後の受信から 24 時間を過ぎていれば送らずに「対象外 (skipped)」にします (Meta の 24 時間ルール)。
    - LINE はプッシュ API で送ります (料金プランの通数に数えられます)。
@@ -156,5 +156,5 @@ Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`,
 - **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows`, `sessions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
 - **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection and page subscription).
-- **Scheduler**: every minute, resumes up to 25 due delays, sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
+- **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline), sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

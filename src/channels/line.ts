@@ -94,6 +94,11 @@ export function renderLineMessages(msg: OutboundMessage): LineMessageObject[] {
   return out
 }
 
+/** LINE loading animation accepts 5–60 s in steps of 5. */
+export function lineLoadingSeconds(seconds: number): number {
+  return Math.min(60, Math.max(5, Math.ceil(seconds / 5) * 5))
+}
+
 export class LineAdapter implements ChannelAdapter {
   readonly channel = 'line' as const
   private usedReplyTokens = new Set<string>()
@@ -125,6 +130,10 @@ export class LineAdapter implements ChannelAdapter {
     if (!res.ok) return {}
     const p = (await res.json()) as { displayName?: string; pictureUrl?: string }
     return { displayName: p.displayName, avatarUrl: p.pictureUrl }
+  }
+
+  async typing(userId: string, seconds: number): Promise<void> {
+    await fetch(`${API}/v2/bot/chat/loading/start`, { method: 'POST', headers: this.headers(), body: JSON.stringify({ chatId: userId, loadingSeconds: lineLoadingSeconds(seconds) }) }).catch(() => undefined)
   }
 }
 

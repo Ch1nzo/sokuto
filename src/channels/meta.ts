@@ -182,6 +182,10 @@ export class MetaAdapter implements ChannelAdapter {
     return this.post(`${commentId}/likes`, {})
   }
 
+  async typing(userId: string): Promise<void> {
+    await this.post('me/messages', { recipient: { id: userId }, sender_action: 'typing_on' }).catch(() => undefined)
+  }
+
   async getProfile(userId: string): Promise<ChannelProfile> {
     const fields = this.channel === 'instagram' ? 'name,username,profile_pic,is_user_follow_business' : 'first_name,last_name,profile_pic'
     const res = await fetch(this.url(userId, { fields }))

@@ -254,6 +254,9 @@ function DelayBody({ step, onChange, steps, t }: BodyProps<'delay'>) {
             ))}
           </div>
         </div>
+        <Text typo="12" color="txt-black-dark" className="fe-wrap">
+          {t('editor_delay_help')}
+        </Text>
       </VStack>
       <NextField step={step} onChange={onChange} steps={steps} t={t} />
     </>

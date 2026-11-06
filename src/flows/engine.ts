@@ -33,9 +33,14 @@ export type RunContext = {
   now?: () => Date
   /** Instagram follow status, fetched once per run by the first is_follower condition. */
   followsBusiness?: boolean
+  /** Seconds already waited inline (short delays) in this run. */
+  inlineWaited?: number
 }
 
 const MAX_STEPS_PER_RUN = 50
+// ponytail: inline waits are capped at 10 s per step / 20 s per run so the webhook's waitUntil (~30 s) never expires; longer waits go through the scheduler.
+const INLINE_DELAY_MAX = 10
+const INLINE_DELAY_BUDGET = 20
 
 export function parseFlow(row: typeof schema.flows.$inferSelect): FlowRecord {
   let definition: FlowDefinition
@@ -313,6 +318,14 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         break
       case 'delay': {
         if (ctx.dryRun) {
+          current = step.next ?? null
+          break
+        }
+        const waited = ctx.inlineWaited ?? 0
+        if (step.seconds <= INLINE_DELAY_MAX && waited + step.seconds <= INLINE_DELAY_BUDGET) {
+          ctx.inlineWaited = waited + step.seconds
+          await ctx.adapter.typing?.(ctx.contact.channelUserId, step.seconds)
+          await new Promise((r) => setTimeout(r, step.seconds * 1000))
           current = step.next ?? null
           break
         }

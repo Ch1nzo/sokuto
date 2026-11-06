@@ -17,6 +17,8 @@ export interface ChannelAdapter {
   sendPrivateReply?(commentId: string, message: OutboundMessage): Promise<SendResult>
   /** Like a comment (Facebook / Instagram). */
   likeComment?(commentId: string): Promise<SendResult>
+  /** Typing / loading indicator shown while a short delay waits inline. Errors are swallowed. */
+  typing?(userId: string, seconds: number): Promise<void>
 }
 
 /** Adapter used by "Test" runs: records what the bot would send. */
