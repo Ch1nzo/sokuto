@@ -4,7 +4,8 @@ import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
 import type { InboundEvent, OutboundMessage } from '../channels/types'
 import { addTag, firstName, getTags, parseFields, removeTag, setBotPaused, setField, type ContactRow } from '../contacts'
-import type { ButtonDef, ConditionRule, FlowDefinition, FlowRecord, Step, Trigger } from './types'
+import { matchRules, normalize } from './rules'
+import type { ButtonDef, FlowDefinition, FlowRecord, Step, Trigger } from './types'
 
 export type SessionRow = typeof schema.sessions.$inferSelect
 
@@ -52,10 +53,6 @@ export function parseButtonPayload(payload: string | undefined): { flowId: numbe
   const m = /^sk:(\d+):([^:]+):(\d+)$/.exec(payload)
   if (!m) return null
   return { flowId: Number(m[1]), stepId: m[2]!, index: Number(m[3]) }
-}
-
-function normalize(s: string | undefined): string {
-  return (s ?? '').trim().toLowerCase()
 }
 
 function keywordMatches(text: string | undefined, keywords: string[], mode: 'contains' | 'exact' | 'starts_with' = 'contains'): boolean {
@@ -137,39 +134,6 @@ function render(ctx: RunContext, text: string, encode?: (v: string) => string): 
 async function contactTags(ctx: RunContext): Promise<string[]> {
   if (ctx.dryRun) return [...(ctx.dryRunTags ?? [])]
   return getTags(ctx.db, ctx.contact.id)
-}
-
-async function evalRule(ctx: RunContext, rule: ConditionRule): Promise<boolean> {
-  const fields = parseFields(ctx.contact)
-  const value = rule.field === 'channel' ? ctx.contact.channel : rule.field === 'last_input' ? (ctx.lastInput ?? '') : rule.field === 'name' ? (ctx.contact.displayName ?? '') : (fields[rule.field] ?? '')
-  const expected = rule.value ?? ''
-  switch (rule.op) {
-    case 'has_tag':
-      return (await contactTags(ctx)).includes(expected)
-    case 'not_has_tag':
-      return !(await contactTags(ctx)).includes(expected)
-    case 'equals':
-      return normalize(value) === normalize(expected)
-    case 'not_equals':
-      return normalize(value) !== normalize(expected)
-    case 'contains':
-      return normalize(value).includes(normalize(expected))
-    case 'is_set':
-      return value.trim() !== ''
-    case 'is_empty':
-      return value.trim() === ''
-    case 'gt':
-    case 'gte':
-    case 'lt':
-    case 'lte': {
-      // Number('') is 0, so treat blank values as non-numeric rather than as zero.
-      if (value.trim() === '' || expected.trim() === '') return false
-      const a = Number(value)
-      const b = Number(expected)
-      if (Number.isNaN(a) || Number.isNaN(b)) return false
-      return rule.op === 'gt' ? a > b : rule.op === 'gte' ? a >= b : rule.op === 'lt' ? a < b : a <= b
-    }
-  }
 }
 
 export async function logEvent(db: Db, ev: { type: string; channel?: string; flowId?: number; stepId?: string; contactId?: number; meta?: unknown }) {
@@ -317,10 +281,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         return
       }
       case 'condition': {
-        const results: boolean[] = []
-        for (const r of step.rules) results.push(await evalRule(ctx, r))
-        const pass = step.mode === 'any' ? results.some(Boolean) : results.every(Boolean)
-        current = (pass ? step.yes : step.no) ?? null
+        const needTags = step.rules.some((r) => r.op === 'has_tag' || r.op === 'not_has_tag')
+        const tags = needTags ? await contactTags(ctx) : []
+        const subject = { contact: ctx.contact, tags, lastInput: ctx.lastInput, timezone: ctx.timezone, now: ctx.now }
+        current = (matchRules(step.rules, step.mode, subject) ? step.yes : step.no) ?? null
         break
       }
       case 'action':

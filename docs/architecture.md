@@ -67,6 +67,7 @@ KV には次のキーが入ります。
 - トリガー 9 種類: `keyword`, `comment`, `first_message`, `follow`, `any_message`, `ref`, `postback`, `story_mention`, `story_reply`
 - ステップ 8 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`
 - 変数: `{{name}}`, `{{first_name}}`, `{{username}}`, `{{last_input}}`, `{{<フィールド名>}}` (例: `{{phone}}`), `{{bot.<キー>}}` (設定の「ボット変数」。例: `{{bot.hours}}`。未定義のものはそのまま残ります)
+- 条件の特殊項目: `channel`, `last_input`, `name`, `is_follower` (Instagram のフォロー状態。他のチャネルは常に `true`), `hour` (設定のタイムゾーンで 0〜23), `weekday` (0=日〜6=土), `days_since_created` (登録からの日数), `days_since_last_inbound` (前回受信からの日数。新規は空)。それ以外は連絡先のフィールド名で、`tag` は `has_tag` / `not_has_tag` と組み合わせます。判定は `src/flows/rules.ts` の純粋関数です。
 
 `src/flows/validate.ts` が Zod で構造を検証し、存在しないステップへの参照や ID の重複をエラーにします。AI 向けの説明文 `FLOW_SCHEMA_DOC` も同じファイルにあり、MCP の `get_flow_schema` で返されます。
 
@@ -79,7 +80,7 @@ KV には次のキーが入ります。
 5. その連絡先のボットが停止中なら終了 (`bot_paused_until` を過ぎていれば自動で再開)。
 6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ。関係のない入力なら 7 へ進む。
 7. **ボタンの payload** (`sk:...`) なら、セッションがなくてもその自動化の続きを実行。
-8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。
+8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。`any_message` に `cooldownHours` があり、その連絡先で同じ自動化が指定時間内に起動済み (`events` の `trigger_fired`) なら起動しない。
 
 ### セッションと待機
 

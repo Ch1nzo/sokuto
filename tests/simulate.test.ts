@@ -183,6 +183,50 @@ describe('simulateFlow', () => {
   })
 })
 
+describe('time and recency conditions', () => {
+  const branch = (rules: Array<{ field: string; op: 'equals' | 'gte' | 'lt' | 'is_empty'; value?: string }>) =>
+    flow({
+      triggers: [{ type: 'keyword', keywords: ['go'] }],
+      entry: 'c1',
+      steps: [
+        { id: 'c1', type: 'condition', rules, yes: 'y', no: 'n' },
+        { id: 'y', type: 'message', text: 'yes' },
+        { id: 'n', type: 'message', text: 'no' },
+      ],
+    })
+  const run = async (f: FlowRecord, timezone?: string, now?: () => Date) => (await simulateFlow(db, f, [{ type: 'message', text: 'go' }], 'line', true, { timezone, now })).steps[0]!.outputs.map((o) => o.text)
+  const at = (iso: string) => () => new Date(iso)
+
+  it('evaluates hour and weekday in the given timezone', async () => {
+    const officeHours = branch([
+      { field: 'hour', op: 'gte', value: '9' },
+      { field: 'hour', op: 'lt', value: '18' },
+      { field: 'weekday', op: 'equals', value: '1' },
+    ])
+    // Monday 12:00 in Tokyo, 03:00 in UTC.
+    expect(await run(officeHours, 'Asia/Tokyo', at('2025-01-06T03:00:00Z'))).toEqual(['yes'])
+    expect(await run(officeHours, 'UTC', at('2025-01-06T03:00:00Z'))).toEqual(['no'])
+    // Sunday 12:00 in Tokyo.
+    expect(await run(officeHours, 'Asia/Tokyo', at('2025-01-05T03:00:00Z'))).toEqual(['no'])
+  })
+
+  it('days_since_created counts whole days', async () => {
+    const f = branch([
+      { field: 'days_since_created', op: 'equals', value: '3' },
+      { field: 'days_since_last_inbound', op: 'is_empty' },
+    ])
+    const start = Date.now()
+    expect(await run(f, undefined, () => new Date(start + 3.5 * 86_400_000))).toEqual(['yes'])
+    expect(await run(f)).toEqual(['no'])
+  })
+
+  it('falls back to UTC for an invalid timezone', async () => {
+    const f = branch([{ field: 'hour', op: 'equals', value: '3' }])
+    expect(await run(f, 'Not/AZone', at('2025-01-06T03:00:00Z'))).toEqual(['yes'])
+    expect(await run(f, 'Asia/Tokyo', at('2025-01-06T03:00:00Z'))).toEqual(['no'])
+  })
+})
+
 describe('numeric conditions on unset fields', () => {
   it('takes the no branch when the contact field is unset (empty is not 0)', async () => {
     const f = flow({

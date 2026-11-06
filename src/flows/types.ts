@@ -6,14 +6,14 @@ export type Trigger =
   | { type: 'comment'; keywords?: string[]; postIds?: string[] }
   | { type: 'first_message' }
   | { type: 'follow' }
-  | { type: 'any_message' }
+  | { type: 'any_message'; cooldownHours?: number }
   | { type: 'ref'; ref: string }
   | { type: 'postback'; payload: string }
   | { type: 'story_mention' }
   | { type: 'story_reply' }
 
 export type ConditionRule = {
-  /** Field name on the contact, or the special values "tag" / "channel" / "last_input". */
+  /** Field name on the contact, "tag" (with has_tag), or a special field handled in rules.ts ruleValue. */
   field: string
   op: 'equals' | 'not_equals' | 'contains' | 'has_tag' | 'not_has_tag' | 'is_set' | 'is_empty' | 'gt' | 'gte' | 'lt' | 'lte'
   value?: string

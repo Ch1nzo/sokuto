@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, gte, isNotNull } from 'drizzle-orm'
 import type { Db } from './db'
 import { schema } from './db'
 import type { ChannelAdapter } from './channels/adapter'
@@ -91,6 +91,13 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
     if (!chosen || (chosen.trigger.type === 'any_message' && trigger.type === 'first_message')) chosen = { flow, trigger }
   }
   if (!chosen) return
+  // any_message with a cooldown starts at most once per contact within that window.
+  if (chosen.trigger.type === 'any_message' && chosen.trigger.cooldownHours) {
+    const since = new Date(Date.now() - chosen.trigger.cooldownHours * 3_600_000).toISOString()
+    const e = schema.events
+    const recent = await db.select({ id: e.id }).from(e).where(and(eq(e.type, 'trigger_fired'), eq(e.flowId, chosen.flow.id), eq(e.contactId, contact.id), gte(e.createdAt, since))).get()
+    if (recent) return
+  }
   const ctx: RunContext = { ...base, contact, flow: chosen.flow, commentId: event.type === 'comment' ? event.commentId : undefined, lastInput: event.text }
   await startFlow(ctx, chosen.trigger)
 }

@@ -141,6 +141,9 @@ function ConditionBody({ step, onChange, steps, t }: BodyProps<'condition'>) {
             <SegmentedControlItem value="any">{t('editor_mode_any')}</SegmentedControlItem>
           </SegmentedControl>
         </HStack>
+        <Text typo="12" color="txt-black-dark" className="fe-wrap">
+          {t('editor_rule_fields_help')}
+        </Text>
       </VStack>
       <div className="fe-grid-2">
         <StepPicker label={t('editor_yes')} value={step.yes} steps={steps} selfId={step.id} t={t} onChange={(yes) => onChange({ ...step, yes })} />

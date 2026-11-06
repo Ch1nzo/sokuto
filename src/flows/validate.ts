@@ -8,7 +8,7 @@ const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('comment'), keywords: z.array(z.string()).optional(), postIds: z.array(z.string()).optional() }),
   z.object({ type: z.literal('first_message') }),
   z.object({ type: z.literal('follow') }),
-  z.object({ type: z.literal('any_message') }),
+  z.object({ type: z.literal('any_message'), cooldownHours: z.number().positive().max(720).optional() }),
   z.object({ type: z.literal('ref'), ref: z.string().min(1) }),
   z.object({ type: z.literal('postback'), payload: z.string().min(1) }),
   z.object({ type: z.literal('story_mention') }),
@@ -107,7 +107,7 @@ Triggers (when the flow starts):
 - { "type": "comment", "keywords": [...]?, "postIds": [...]? }  a comment on a Facebook/Instagram post (optionally only with keywords / on given posts)
 - { "type": "first_message" }  the person's very first message
 - { "type": "follow" }  LINE follow (friend add)
-- { "type": "any_message" }  fallback for every message
+- { "type": "any_message", "cooldownHours"?: 24 }  fallback for every message; with cooldownHours it starts at most once per contact within that many hours (max 720)
 - { "type": "ref", "ref": "campaign1" }  referral link / QR (m.me/<page>?ref=campaign1, ig.me, LINE)
 - { "type": "postback", "payload": "..." }  a button payload
 - { "type": "story_mention" } / { "type": "story_reply" }  Instagram stories
@@ -117,7 +117,8 @@ Steps:
   Buttons with "next" wait for the tap. Without buttons the flow continues to "next" immediately.
 - { "id", "type": "question", "text": "電話番号は?", "field": "phone", "choices"?: ["1","2","3"], "next": stepId }  waits for the answer and saves it to the contact field
 - { "id", "type": "condition", "rules": [{ "field": "rating", "op": "lte", "value": "2" }], "mode"?: "all"|"any", "yes": stepId, "no": stepId }
-  ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name".
+  ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name", "is_follower" ("true"/"false"; Instagram follow status, always "true" on other channels), "hour" ("0"–"23" in the bot time zone), "weekday" ("0" = Sunday … "6" = Saturday), "days_since_created", "days_since_last_inbound" (whole days; empty for a new contact). Any other field is a contact field; use "tag" with has_tag / not_has_tag.
+  Compare numbers as strings: { "field": "hour", "op": "gte", "value": "9" }
 - { "id", "type": "action", "actions": [{ "type": "add_tag", "tag": "interested" }, { "type": "remove_tag", "tag": "x" }, { "type": "set_field", "field": "f", "value": "v" }, { "type": "notify", "text": "..." }, { "type": "pause_bot", "minutes"?: 60 }, { "type": "webhook", "url": "https://..." }], "next": stepId }
 - { "id", "type": "delay", "seconds": 3600, "next": stepId }
 - { "id", "type": "random", "branches": [{ "weight": 1, "next": "a" }, { "weight": 1, "next": "b" }] }

@@ -37,6 +37,21 @@ export function TriggerCard({ trigger, index, onChange, onRemove, t }: { trigger
           <ListInputField label={t('editor_post_ids')} value={trigger.postIds ?? []} onChange={(postIds) => onChange({ ...trigger, postIds })} />
         </div>
       )}
+      {trigger.type === 'any_message' && (
+        <TextInputField
+          label={t('editor_cooldown_hours')}
+          helperText={t('editor_cooldown_hours_help')}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={720}
+          value={trigger.cooldownHours ?? ''}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            onChange(e.target.value && n > 0 ? { type: 'any_message', cooldownHours: n } : { type: 'any_message' })
+          }}
+        />
+      )}
       {trigger.type === 'ref' && <TextInputField label={t('editor_ref')} value={trigger.ref} onChange={(e) => onChange({ ...trigger, ref: e.target.value })} />}
       {trigger.type === 'postback' && <TextInputField label={t('editor_payload')} value={trigger.payload} onChange={(e) => onChange({ ...trigger, payload: e.target.value })} />}
     </div>

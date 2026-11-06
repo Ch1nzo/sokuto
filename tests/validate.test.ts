@@ -103,6 +103,12 @@ describe('validateFlow', () => {
     expect(errors.some((e) => e.startsWith('triggers.0'))).toBe(true)
   })
 
+  it('limits any_message cooldownHours to more than 0 and at most 720', () => {
+    expect(errorsOf({ triggers: [{ type: 'any_message', cooldownHours: 0 }], entry: null, steps: [] }).length).toBeGreaterThan(0)
+    expect(errorsOf({ triggers: [{ type: 'any_message', cooldownHours: 721 }], entry: null, steps: [] }).length).toBeGreaterThan(0)
+    expect(validateFlow({ triggers: [{ type: 'any_message', cooldownHours: 24 }], entry: null, steps: [] }).ok).toBe(true)
+  })
+
   it('rejects invalid step shapes and non-objects', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'bad field!' }] }).length).toBeGreaterThan(0)
     expect(errorsOf({ triggers: [], entry: 'd', steps: [{ id: 'd', type: 'delay', seconds: 0 }] }).length).toBeGreaterThan(0)
