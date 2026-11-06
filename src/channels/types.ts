@@ -3,6 +3,9 @@ export type Channel = 'line' | 'messenger' | 'instagram'
 
 export const CHANNELS: Channel[] = ['line', 'messenger', 'instagram']
 
+/** Meta message tags that allow sending outside the 24h window. */
+export const MESSAGE_TAGS = ['CONFIRMED_EVENT_UPDATE', 'POST_PURCHASE_UPDATE', 'ACCOUNT_UPDATE'] as const
+
 /** A normalized inbound event, independent of the originating platform. */
 export type InboundEvent = {
   channel: Channel

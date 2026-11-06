@@ -95,6 +95,27 @@ const BROADCAST_AUTO_TEXT =
   '本日から3日間限定、全ドリンク20%オフ！ご予約はお早めにどうぞ'.slice(0, 29) + '🎃 ハロウィン当日は仮装でご来店のお客様にクッキーをプレゼント。'
 const BROADCAST_AUTO_NAME = BROADCAST_AUTO_TEXT.slice(0, 30)
 
+// Inbox notes: 1,500 characters with line breaks (the API caps notes at 5,000).
+const NOTES_1500 = (() => {
+  const para =
+    '2026/10/12 電話あり: 誕生日ディナーの予約を 11/3 19:00 に変更希望。窓際席、ケーキのプレート文字は「Happy Birthday Ola」。\nAllergies: shellfish, tree nuts — confirmed twice, kitchen informed.\n'
+  let s = ''
+  while (s.length < 1500) s += para
+  return s.slice(0, 1500)
+})()
+
+// Segment name at 80 characters (the API allows up to 100).
+const SEGMENT_NAME_80 = 'Stammkunden mit Newsletter-Abo, Herbstkampagne 2026 — 表参道店 来店予約済み・クーポン未使用・メール配信希望のお客様'.slice(0, 80)
+
+// Snippet body: 2,000 characters, the API maximum, with paragraphs.
+const SNIPPET_2000 = (() => {
+  const para =
+    'お問い合わせありがとうございます。Café Lumière 表参道店です。ご予約の変更・キャンセルは前日 18:00 まで https://example.com/reserve?store=omotesando から承ります。当日のご連絡はお電話 (03-1234-5678) でお願いいたします。\n\n'
+  let s = ''
+  while (s.length < 2000) s += para
+  return s.slice(0, 2000)
+})()
+
 const POOL_NAMES = [
   '佐藤 美咲',
   'Tanaka Hiroshi',
@@ -127,10 +148,16 @@ type ContactRow = {
   lastInboundAt: string | null
   lastOutboundAt: string | null
   unread: number
+  status: 'open' | 'closed'
+  notes: string | null
   createdAt: string
   updatedAt: string
   tags: string[]
 }
+
+type Rule = { field: string; op: string; value?: string }
+type Segment = { id: number; name: string; rules: Rule[]; mode: 'all' | 'any'; createdAt: string }
+type Snippet = { id: number; name: string; text: string; createdAt: string }
 
 type MessageRow = {
   id: number
@@ -164,6 +191,8 @@ function contact(id: number, p: Partial<ContactRow> & { channel: Channel }): Con
     lastInboundAt: ago(id * 37 * MIN),
     lastOutboundAt: null,
     unread: 0,
+    status: 'open',
+    notes: null,
     createdAt: ago(40 * DAY),
     updatedAt: ago(id * 37 * MIN),
     tags: [],
@@ -183,6 +212,7 @@ function poolContact(id: number): ContactRow {
     fields: id % 4 === 0 ? { phone: `090-${String(1000 + (id % 9000)).padStart(4, '0')}-${String(id).padStart(4, '0')}` } : {},
     tags: id % 5 === 0 ? ['newsletter'] : [],
     unread: id % 7 === 0 ? 2 : 0,
+    status: id % 4 === 3 && id % 7 !== 0 ? 'closed' : 'open',
   })
 }
 
@@ -205,6 +235,7 @@ function worstCrafted(): ContactRow[] {
       unread: 1,
       tags: TAGS_25,
       lastInboundAt: ago(5 * MIN),
+      notes: '常連さん。\nアレルギー: えび・かに\n担当: 田中',
       fields: { email: LONG_EMAIL, first_name: 'Aleksandra', company: 'Northwind Industries Holdings', plan: 'enterprise', lang: 'pl', city: 'Kraków', source: 'ad-1284', note: 'Prefers email' },
     }),
     contact(3, { channel: 'line', displayName: 'Jo', unread: 1, lastInboundAt: ago(2 * HOUR), tags: ['q3'] }),
@@ -217,7 +248,7 @@ function worstCrafted(): ContactRow[] {
       lastInboundAt: ago(3 * DAY),
       tags: ['instagram-dm'],
     }),
-    contact(6, { channel: 'messenger', displayName: 'Đặng Thị Ngọc Hân', lastInboundAt: ago(9 * DAY), fields: { phone: '+84 912 345 678' } }),
+    contact(6, { channel: 'messenger', displayName: 'Đặng Thị Ngọc Hân', lastInboundAt: ago(9 * DAY), status: 'closed', notes: NOTES_1500, fields: { phone: '+84 912 345 678' } }),
     contact(7, { channel: 'line', displayName: 'ปิ่นมณี ศรีสุวรรณ์', lastInboundAt: ago(40 * DAY), tags: ['リピーター'] }),
     contact(8, { channel: 'instagram', displayName: 'Christopher Alexander Montgomery III', username: 'chris.montgomery.iii.official', unread: 3 }),
     contact(9, { channel: 'messenger', displayName: 'Ólafur Darri Ólafsson', botPaused: 1 }),
@@ -319,13 +350,33 @@ function worstBroadcasts() {
     total: 0,
     sent: 0,
     failed: 0,
+    segmentId: null,
+    buttons: [],
+    messageTag: null,
+    clicked: 0,
     scheduledAt: ago(id * DAY),
     createdAt: ago(id * DAY),
     ...p,
   })
   return [
-    b(108, { name: BROADCAST_1000.slice(0, 30), text: BROADCAST_1000, tag: TAGS_25[0], status: 'scheduled', scheduledAt: new Date(Date.now() + 3 * DAY).toISOString(), total: 1284 }),
-    b(107, { name: 'Paramètres de confidentialité et de sécurité — rappel', channel: 'messenger', tag: TAGS_25[1], status: 'running', total: 1284, sent: 642, failed: 1 }),
+    b(108, { name: BROADCAST_1000.slice(0, 30), text: BROADCAST_1000, tag: TAGS_25[0], status: 'scheduled', scheduledAt: new Date(Date.now() + 3 * DAY).toISOString(), total: 1284, segmentId: 1 }),
+    b(107, {
+      name: 'Paramètres de confidentialité et de sécurité — rappel',
+      channel: 'messenger',
+      tag: TAGS_25[1],
+      status: 'running',
+      total: 1284,
+      sent: 642,
+      failed: 1,
+      clicked: 57,
+      messageTag: 'CONFIRMED_EVENT_UPDATE',
+      // labels up to 40, at most 3 (validate.ts broadcastButtonsSchema)
+      buttons: [
+        { label: 'Reservierungsänderung und Stornierungen', url: LONG_URL },
+        { label: 'メニューとアレルギー情報を確認する（英語メニューあり）', flowId: 12 },
+        { label: 'No', flowId: 3 },
+      ],
+    }),
     b(106, { name: BROADCAST_AUTO_NAME, text: BROADCAST_AUTO_TEXT, channel: 'line', status: 'done', total: 1, sent: 1, failed: 0 }),
     b(105, { name: 'Jo', channel: 'instagram', tag: 'vip', status: 'canceled', total: 0 }),
     b(104, { name: 'Benachrichtigungseinstellungen', text: LONG_URL.slice(0, 400), status: 'done', total: 1284, sent: 0, failed: 1284 }),
@@ -337,6 +388,45 @@ function worstTags() {
     { tag: 'newsletter', n: 1284 },
     ...TAGS_25.map((tag, i) => ({ tag, n: 1284 - i * 100 })),
     ...FOURTEEN_TAGS.filter((t) => !TAGS_25.includes(t) && t !== 'newsletter').map((tag) => ({ tag, n: 1 })),
+  ]
+}
+
+function worstSegments(): Segment[] {
+  const rules20: Rule[] = [
+    ...FOURTEEN_TAGS.slice(0, 10).map((value) => ({ field: 'tag', op: 'has_tag', value })),
+    { field: 'email', op: 'is_set' },
+    { field: 'phone', op: 'is_empty' },
+    { field: 'city', op: 'equals', value: 'Kraków' },
+    { field: 'company', op: 'contains', value: 'Northwind Industries Holdings' },
+    { field: 'days_since_last_inbound', op: 'lte', value: '30' },
+    { field: 'days_since_created', op: 'gte', value: '365' },
+    { field: 'channel', op: 'not_equals', value: 'line' },
+    { field: 'tag', op: 'not_has_tag', value: 'urgent' },
+    { field: 'source', op: 'not_equals', value: 'ad-1284' },
+    { field: 'last_input', op: 'contains', value: 'Stornierung' },
+  ]
+  return [
+    { id: 1, name: SEGMENT_NAME_80, rules: rules20, mode: 'any', createdAt: ago(30 * DAY) },
+    { id: 2, name: 'VIP', rules: [{ field: 'tag', op: 'has_tag', value: 'vip' }], mode: 'all', createdAt: ago(10 * DAY) },
+    { id: 3, name: '東京在住・未購入', rules: [{ field: 'city', op: 'equals', value: '東京' }, { field: 'purchased', op: 'is_empty' }], mode: 'all', createdAt: ago(DAY) },
+  ]
+}
+
+function worstSnippets(): Snippet[] {
+  return [
+    // name at the 60-character limit, body at the 2,000-character limit
+    { id: 1, name: 'ご予約の変更・キャンセル方法のご案内 (表参道店・渋谷店・オンライン予約共通、前日 18:00 まで受付、当日はお電話で)'.slice(0, 60), text: SNIPPET_2000, createdAt: ago(20 * DAY) },
+    { id: 2, name: '営業時間', text: '営業時間は 11:00〜22:00 (L.O. 21:30) です。\n定休日: 火曜日', createdAt: ago(5 * DAY) },
+    { id: 3, name: 'Link', text: LONG_URL.slice(0, 400), createdAt: ago(HOUR) },
+  ]
+}
+
+// Contact 1 is enrolled in two sequences: a long name due in days, a short one due in minutes.
+function worstSequences(contactId: number) {
+  if (contactId !== 1) return []
+  return [
+    { flowId: 21, name: 'Onboarding — 7-day welcome series for new LINE friends (Herbstkampagne 2026)', stepId: 'm3', resumeAt: new Date(Date.now() + 6 * DAY).toISOString() },
+    { flowId: 22, name: 'Jo', stepId: null, resumeAt: new Date(Date.now() + 5 * MIN).toISOString() },
   ]
 }
 
@@ -397,6 +487,9 @@ type Dataset = {
   overview: () => unknown
   broadcasts: () => unknown[]
   tags: () => { tag: string; n: number }[]
+  segments: () => Segment[]
+  snippets: () => Snippet[]
+  sequences: (contactId: number) => unknown[]
 }
 
 const genericLast = (c: ContactRow): Omit<MessageRow, 'id'> => ({
@@ -420,6 +513,9 @@ const DATASETS: Record<DataMode, Dataset> = {
     overview: worstOverview,
     broadcasts: worstBroadcasts,
     tags: worstTags,
+    segments: worstSegments,
+    snippets: worstSnippets,
+    sequences: worstSequences,
   },
   empty: {
     contacts: () => [],
@@ -433,6 +529,9 @@ const DATASETS: Record<DataMode, Dataset> = {
     }),
     broadcasts: () => [],
     tags: () => [],
+    segments: () => [],
+    snippets: () => [],
+    sequences: () => [],
   },
   one: {
     contacts: () => [oneContact()],
@@ -447,9 +546,12 @@ const DATASETS: Record<DataMode, Dataset> = {
       notifications: [{ id: 1, contactId: 1, text: '佐藤 美咲 が担当者を希望しています', read: 0, createdAt: ago(MIN) }],
     }),
     broadcasts: () => [
-      { id: 1, name: 'お知らせ', channel: 'line', tag: 'vip', text: '本日は臨時休業です。', imageUrl: null, status: 'done', total: 1, sent: 1, failed: 1, scheduledAt: ago(HOUR), createdAt: ago(HOUR) },
+      { id: 1, name: 'お知らせ', channel: 'line', tag: 'vip', text: '本日は臨時休業です。', imageUrl: null, status: 'done', total: 1, sent: 1, failed: 1, segmentId: null, buttons: [{ label: '予約する', url: 'https://example.com/reserve' }], messageTag: null, clicked: 1, scheduledAt: ago(HOUR), createdAt: ago(HOUR) },
     ],
     tags: () => [{ tag: 'vip', n: 1 }],
+    segments: () => [{ id: 1, name: 'VIP', rules: [{ field: 'tag', op: 'has_tag', value: 'vip' }], mode: 'all', createdAt: ago(DAY) }],
+    snippets: () => [{ id: 1, name: '営業時間', text: '営業時間は 11:00〜22:00 です。', createdAt: ago(DAY) }],
+    sequences: () => [],
   },
   huge: {
     contacts: hugeContacts,
@@ -473,10 +575,24 @@ const DATASETS: Record<DataMode, Dataset> = {
         total: 25_000,
         sent: 24_870,
         failed: 130,
+        segmentId: i % 4 === 1 ? (i % 200) + 1 : null,
+        buttons: [],
+        messageTag: null,
+        clicked: 3_210,
         scheduledAt: ago(i * 7 * DAY),
         createdAt: ago(i * 7 * DAY),
       })),
     tags: () => Array.from({ length: 1000 }, (_, i) => ({ tag: `segment-${String(i + 1).padStart(4, '0')}`, n: 1000 - i })),
+    segments: () =>
+      Array.from({ length: 200 }, (_, i) => ({
+        id: i + 1,
+        name: `セグメント ${i + 1}`,
+        rules: [{ field: 'tag', op: 'has_tag', value: i % 2 === 0 ? 'newsletter' : `segment-${String(i + 1).padStart(4, '0')}` }],
+        mode: 'all',
+        createdAt: ago(i * HOUR),
+      })),
+    snippets: () => Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `定型文 ${i + 1}`, text: `いつもありがとうございます。定型文 ${i + 1} の本文です。`, createdAt: ago(i * HOUR) })),
+    sequences: () => [],
   },
 }
 
@@ -512,7 +628,9 @@ export function devFixture(path: string): unknown {
   if (p === '/api/inbox') {
     const filter = q.get('filter') ?? 'all'
     const rows = contactsFor(mode)
-      .filter((c) => (filter === 'paused' ? c.botPaused === 1 : filter === 'unread' ? c.unread > 0 : true))
+      .filter((c) =>
+        filter === 'paused' ? c.botPaused === 1 : filter === 'unread' ? c.unread > 0 : filter === 'open' || filter === 'closed' ? c.status === filter : true,
+      )
       .slice(0, 100) // api.ts: .limit(100)
     return { conversations: rows.map((c) => ({ contact: withoutTags(c), lastMessage: lastMessageFor(ds, c) })) }
   }
@@ -526,11 +644,15 @@ export function devFixture(path: string): unknown {
     const term = q.get('q')?.toLowerCase()
     const tag = q.get('tag')
     const channel = q.get('channel')
+    // Visual stand-in for the server's matchRules scan: keeps contacts carrying any of the segment's has_tag values.
+    const segment = q.get('segment') ? ds.segments().find((s) => s.id === Number(q.get('segment'))) : undefined
+    const segmentTags = segment?.rules.filter((r) => r.op === 'has_tag').map((r) => r.value)
     const rows = contactsFor(mode).filter(
       (c) =>
         (!term || [c.displayName, c.username, JSON.stringify(c.fields)].some((v) => v?.toLowerCase().includes(term))) &&
         (!tag || c.tags.includes(tag)) &&
-        (!channel || c.channel === channel),
+        (!channel || c.channel === channel) &&
+        (!segmentTags || segmentTags.some((t) => t !== undefined && c.tags.includes(t))),
     )
     return { contacts: rows.slice((page - 1) * size, page * size), total: rows.length, page, size }
   }
@@ -539,12 +661,14 @@ export function devFixture(path: string): unknown {
   if (m) {
     const id = Number(m[1])
     const found = contactsFor(mode).find((c) => c.id === id) ?? contact(id, { channel: 'line', lastInboundAt: null })
-    return { contact: found, session: null }
+    return { contact: found, session: null, sequences: ds.sequences(id) }
   }
 
   if (p === '/api/overview') return ds.overview()
   if (p === '/api/broadcasts') return { broadcasts: ds.broadcasts() }
   if (p === '/api/tags') return { tags: ds.tags() }
+  if (p === '/api/segments') return { segments: ds.segments() }
+  if (p === '/api/snippets') return { snippets: ds.snippets() }
 
   return undefined
 }

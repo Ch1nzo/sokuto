@@ -27,6 +27,8 @@ export type Action =
   | { type: 'notify'; text?: string }
   | { type: 'pause_bot'; minutes?: number }
   | { type: 'webhook'; url: string }
+  | { type: 'subscribe'; flowId: number }
+  | { type: 'unsubscribe'; flowId: number }
 
 export type ButtonDef = { label: string; next?: string | null; url?: string }
 
@@ -52,6 +54,7 @@ export type FlowRecord = {
   name: string
   channel: Channel | 'any'
   status: 'draft' | 'live'
+  kind: 'flow' | 'sequence'
   definition: FlowDefinition
   createdAt: string
   updatedAt: string

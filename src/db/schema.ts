@@ -24,6 +24,8 @@ export const contacts = sqliteTable(
     lastInboundAt: text('last_inbound_at'),
     lastOutboundAt: text('last_outbound_at'),
     unread: integer('unread').notNull().default(0),
+    status: text('status').notNull().default('open'), // open | closed
+    notes: text('notes'),
     createdAt: text('created_at').notNull().$defaultFn(now),
     updatedAt: text('updated_at').notNull().$defaultFn(now),
   },
@@ -63,6 +65,7 @@ export const flows = sqliteTable('flows', {
   name: text('name').notNull(),
   channel: text('channel').notNull().default('any'),
   status: text('status').notNull().default('draft'),
+  kind: text('kind').notNull().default('flow'), // flow | sequence
   definition: text('definition').notNull(), // JSON FlowDefinition
   createdAt: text('created_at').notNull().$defaultFn(now),
   updatedAt: text('updated_at').notNull().$defaultFn(now),
@@ -95,6 +98,10 @@ export const broadcasts = sqliteTable('broadcasts', {
   total: integer('total').notNull().default(0),
   sent: integer('sent').notNull().default(0),
   failed: integer('failed').notNull().default(0),
+  segmentId: integer('segment_id'),
+  buttons: text('buttons'), // JSON BroadcastButton[]
+  messageTag: text('message_tag'),
+  clicked: integer('clicked').notNull().default(0),
   scheduledAt: text('scheduled_at').notNull().$defaultFn(now),
   createdAt: text('created_at').notNull().$defaultFn(now),
 })
@@ -143,3 +150,31 @@ export const notifications = sqliteTable(
   },
   (t) => [index('notifications_read').on(t.read, t.createdAt)],
 )
+
+export const sequenceSubscriptions = sqliteTable(
+  'sequence_subscriptions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    contactId: integer('contact_id').notNull(),
+    flowId: integer('flow_id').notNull(),
+    stepId: text('step_id'),
+    resumeAt: text('resume_at').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [uniqueIndex('sequence_subscriptions_unique').on(t.contactId, t.flowId), index('sequence_subscriptions_resume').on(t.resumeAt)],
+)
+
+export const segments = sqliteTable('segments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  rules: text('rules').notNull().default('[]'), // JSON ConditionRule[]
+  mode: text('mode').notNull().default('all'), // all | any
+  createdAt: text('created_at').notNull().$defaultFn(now),
+})
+
+export const snippets = sqliteTable('snippets', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  text: text('text').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(now),
+})

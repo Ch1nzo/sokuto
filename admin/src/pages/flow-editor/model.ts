@@ -83,6 +83,8 @@ export function defaultAction(type: ActionType): Action {
     case 'notify': return { type, text: '' }
     case 'pause_bot': return { type }
     case 'webhook': return { type, url: '' }
+    case 'subscribe':
+    case 'unsubscribe': return { type, flowId: 0 }
   }
 }
 

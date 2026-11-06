@@ -30,6 +30,8 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     lastInboundAt: null,
     lastOutboundAt: null,
     unread: 0,
+    status: 'open',
+    notes: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

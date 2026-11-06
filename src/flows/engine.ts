@@ -49,7 +49,7 @@ export function parseFlow(row: typeof schema.flows.$inferSelect): FlowRecord {
   } catch {
     definition = { triggers: [], entry: null, steps: [] }
   }
-  return { id: row.id, name: row.name, channel: row.channel as FlowRecord['channel'], status: row.status as FlowRecord['status'], definition, createdAt: row.createdAt, updatedAt: row.updatedAt }
+  return { id: row.id, name: row.name, channel: row.channel as FlowRecord['channel'], status: row.status as FlowRecord['status'], kind: row.kind as FlowRecord['kind'], definition, createdAt: row.createdAt, updatedAt: row.updatedAt }
 }
 
 export function buttonPayload(flowId: number, stepId: string, index: number): string {

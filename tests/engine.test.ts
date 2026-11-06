@@ -7,7 +7,7 @@ import type { InboundEvent } from '../src/channels/types'
 import type { ContactRow } from '../src/contacts'
 
 function flow(triggers: Trigger[], over: Partial<FlowRecord> = {}): FlowRecord {
-  return { id: 1, name: 'f', channel: 'any', status: 'live', definition: { triggers, entry: null, steps: [] }, createdAt: '', updatedAt: '', ...over }
+  return { id: 1, name: 'f', channel: 'any', status: 'live', kind: 'flow', definition: { triggers, entry: null, steps: [] }, createdAt: '', updatedAt: '', ...over }
 }
 
 function ev(over: Partial<InboundEvent>): InboundEvent {
@@ -28,6 +28,8 @@ function contact(over: Partial<ContactRow> = {}): ContactRow {
     lastInboundAt: null,
     lastOutboundAt: null,
     unread: 0,
+    status: 'open',
+    notes: null,
     createdAt: '',
     updatedAt: '',
     ...over,
