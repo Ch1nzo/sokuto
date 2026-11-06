@@ -205,6 +205,22 @@ describe('simulateFlow', () => {
     expect(r.completed).toBe(true)
   })
 
+  it('skips request steps in a dry run and records a note', async () => {
+    const f = flow({
+      triggers: [{ type: 'keyword', keywords: ['price'] }],
+      entry: 'rq1',
+      steps: [
+        { id: 'rq1', type: 'request', method: 'GET', url: 'https://api.example.com/price?q={{last_input}}', save: [{ field: 'price', path: 'data.price' }], next: 'm1' },
+        { id: 'm1', type: 'message', text: 'Price: {{price}}' },
+      ],
+    })
+    const r = await simulateFlow(db, f, [{ type: 'message', text: 'price tea' }])
+    expect(r.notes).toEqual(['request rq1: skipped GET https://api.example.com/price?q=price%20tea'])
+    expect(r.steps[0]!.outputs.map((o) => o.text)).toEqual(['Price: {{price}}'])
+    expect(r.fields).toEqual({})
+    expect(r.completed).toBe(true)
+  })
+
   it('treats draft flows as live and respects first_message', async () => {
     const f = flow({ triggers: [{ type: 'first_message' }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'First!' }] })
     const r = await simulateFlow(db, f, [{ type: 'message', text: 'a' }, { type: 'message', text: 'b' }])

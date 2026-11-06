@@ -65,7 +65,8 @@ KV には次のキーが入ります。
 自動化は `{ triggers, entry, steps }` という JSON です (`src/flows/types.ts`)。ステップはグラフになっていて、各ステップが次のステップの ID (`next`、条件分岐なら `yes`/`no`、ボタンならボタンごとの `next`) を持ちます。`null` で終了です。
 
 - トリガー 9 種類: `keyword`, `comment`, `first_message`, `follow`, `any_message`, `ref`, `postback`, `story_mention`, `story_reply`
-- ステップ 8 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`
+- ステップ 9 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`, `request`
+- 外部リクエスト (`request`): HTTPS の API を GET / POST で呼び、応答 JSON の値 (`data.price`、`items.0.name` のようなパス。空なら本文全体) を連絡先のフィールドに保存します (最大 10 件、各 2000 文字まで)。URL の変数は URL エンコード、JSON 本文の変数は JSON 文字列としてエスケープされます。タイムアウトは既定 8 秒 (最大 15 秒)。失敗 (HTTP エラー・タイムアウト) は `error` イベントを記録して `next` へ進むので、保存したフィールドを条件分岐 (`is_set`) で確認します。
 - 変数: `{{name}}`, `{{first_name}}`, `{{username}}`, `{{last_input}}`, `{{<フィールド名>}}` (例: `{{phone}}`), `{{bot.<キー>}}` (設定の「ボット変数」。例: `{{bot.hours}}`。未定義のものはそのまま残ります)
 - 条件の特殊項目: `channel`, `last_input`, `name`, `is_follower` (Instagram のフォロー状態。他のチャネルは常に `true`), `hour` (設定のタイムゾーンで 0〜23), `weekday` (0=日〜6=土), `days_since_created` (登録からの日数), `days_since_last_inbound` (前回受信からの日数。新規は空)。それ以外は連絡先のフィールド名で、`tag` は `has_tag` / `not_has_tag` と組み合わせます。判定は `src/flows/rules.ts` の純粋関数です。
 
@@ -111,7 +112,7 @@ payload に自動化とステップの情報が入っているので、**セッ�
 
 ### テスト実行
 
-`src/flows/simulate.ts` は、`RecordingAdapter` (送信内容を記録するだけのアダプター) を使い、仮の連絡先「テスト 太郎」で自動化を実行します。セッション・タグ・通知はメモリ上だけで扱い、D1 にも LINE / Meta にも何も書き込みません。待機ステップは待たずに次へ進みます。管理画面の「テスト」と MCP の `test_flow` が使います。
+`src/flows/simulate.ts` は、`RecordingAdapter` (送信内容を記録するだけのアダプター) を使い、仮の連絡先「テスト 太郎」で自動化を実行します。セッション・タグ・通知はメモリ上だけで扱い、D1 にも LINE / Meta にも何も書き込みません。待機ステップは待たずに次へ進みます。外部リクエストは呼ばずに飛ばし、結果の `notes` に記録します (例: `request rq1: skipped GET https://…`)。管理画面の「テスト」と MCP の `test_flow` が使います。
 
 ## チャネルアダプター
 
@@ -156,7 +157,7 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
 - **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows`, `sessions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 9 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (external `request` steps are skipped and listed in `notes`).
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection and page subscription).
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline), sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

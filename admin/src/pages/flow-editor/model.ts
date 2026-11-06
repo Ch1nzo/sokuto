@@ -6,7 +6,7 @@ import type { Channel, OutboundMessage } from '@shared/channels/types'
 
 export type SimulatedInput = { type: 'message' | 'comment' | 'follow' | 'postback' | 'ref' | 'story_mention' | 'story_reply'; text?: string; payload?: string; ref?: string; button?: string }
 export type SimulationStep = { input: SimulatedInput; triggered: boolean; outputs: OutboundMessage[]; commentReplies: string[]; waiting: string | null; stepId: string | null }
-export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; completed: boolean }
+export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; notes: string[]; completed: boolean }
 
 export type FlowChannel = FlowRecord['channel']
 export type StepType = Step['type']
@@ -17,7 +17,7 @@ export type ValidateType = NonNullable<Extract<Step, { type: 'question' }>['vali
 export type StepOf<T extends StepType> = Extract<Step, { type: T }>
 export type TFn = ReturnType<typeof useT>
 
-export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply']
+export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply', 'request']
 export const TRIGGER_TYPES: TriggerType[] = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply']
 export const ACTION_TYPES: ActionType[] = ['add_tag', 'remove_tag', 'set_field', 'notify', 'pause_bot', 'webhook']
 export const MATCH_TYPES: MatchType[] = ['contains', 'exact', 'starts_with']
@@ -38,13 +38,14 @@ export const MAX_BUTTONS = 13
 export const MAX_BUTTON_LABEL = 40
 export const MAX_CHOICE_LABEL = 20
 export const MAX_REPLY_VARIANTS = 4
+export const MAX_REQUEST_SAVES = 10
 export const MAX_CARDS = 10
 export const MAX_CARD_BUTTONS = 3
 export const MAX_CARD_TITLE = 40
 export const MAX_CARD_SUBTITLE = 60
 export const ATTACHMENT_TYPES: AttachmentDef['type'][] = ['video', 'audio', 'file']
 
-const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr' }
+const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr', request: 'rq' }
 
 /* ---------- Pure helpers ---------- */
 
@@ -67,6 +68,7 @@ export function defaultStep(type: StepType, id: string): Step {
     case 'random': return { id, type, branches: [{ weight: 50, next: null }, { weight: 50, next: null }] }
     case 'goto': return { id, type, flowId: 0 }
     case 'comment_reply': return { id, type, text: '', next: null }
+    case 'request': return { id, type, method: 'GET', url: '', next: null }
   }
 }
 
@@ -123,6 +125,6 @@ export function clearRefs(s: Step, removedId: string): Step {
 }
 
 export function stepSummary(s: Step): string {
-  const text = 'text' in s ? s.text : ''
+  const text = 'text' in s ? s.text : 'url' in s ? s.url : ''
   return text.length > 20 ? `${text.slice(0, 20)}…` : text
 }

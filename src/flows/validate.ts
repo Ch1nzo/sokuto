@@ -44,6 +44,17 @@ const stepSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string().min(1), type: z.literal('random'), branches: z.array(z.object({ weight: z.number().min(0), next })).min(1) }),
   z.object({ id: z.string().min(1), type: z.literal('goto'), flowId: z.number().int().positive() }),
   z.object({ id: z.string().min(1), type: z.literal('comment_reply'), text: z.string().max(1000).default(''), texts: z.array(z.string().max(1000)).max(4).optional(), next }),
+  z.object({
+    id: z.string().min(1),
+    type: z.literal('request'),
+    method: z.enum(['GET', 'POST']),
+    url: z.string().url().startsWith('https://'),
+    headers: z.record(z.string(), z.string()).refine((h) => Object.keys(h).length <= 10, 'at most 10 headers').optional(),
+    body: z.string().max(10000).optional(),
+    save: z.array(z.object({ field: z.string().min(1).regex(/^[\w.-]+$/), path: z.string().max(200) })).max(10).optional(),
+    timeoutMs: z.number().int().min(1000).max(15000).optional(),
+    next,
+  }),
 ])
 
 export const flowDefinitionSchema = z.object({
@@ -94,6 +105,7 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
         break
       case 'action':
       case 'delay':
+      case 'request':
         check(s.next, `step ${s.id}.next`)
         break
       case 'comment_reply':
@@ -141,6 +153,8 @@ Steps:
 - { "id", "type": "random", "branches": [{ "weight": 1, "next": "a" }, { "weight": 1, "next": "b" }] }
 - { "id", "type": "goto", "flowId": 12 }
 - { "id", "type": "comment_reply", "text": "DMを送りました ✓", "texts"?: ["DM しました!", "DM をご確認ください"], "next": stepId }  public reply under the triggering comment (comment trigger only). One of text + texts (max 5 in total, up to 4 in texts; text may be "" when texts is set) is picked at random so replies do not all look the same
+- { "id", "type": "request", "method": "GET"|"POST", "url": "https://api.example.com/price?item={{item}}", "headers"?: { "Authorization": "Bearer {{bot.api_key}}" } (≤10), "body"?: "{\\"phone\\": \\"{{phone}}\\"}" (POST, ≤10000 chars), "save"?: [{ "field": "price", "path": "data.price" }] (≤10), "timeoutMs"?: 8000 (1000–15000), "next": stepId }
+  Calls an external HTTPS API and saves values from the response to contact fields. Placeholders in "url" are URL-encoded; in a JSON body they are JSON-escaped (POST defaults to Content-Type: application/json). "path" is dotted ("data.price", "items.0.name"; "" = the whole body); objects are saved as JSON, values are cut at 2000 chars. On failure (HTTP error, timeout, non-https) an error event is logged and the flow still continues to "next": branch on the saved field with a condition (is_set / is_empty). test_flow never calls the API: it lists the skipped request in "notes".
 
 Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}, {{bot.<key>}} for bot variables set in Settings (keys listed in get_overview → general.botFields).
 Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.

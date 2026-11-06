@@ -46,6 +46,7 @@ export type Step =
   | { id: string; type: 'random'; branches: { weight: number; next?: string | null }[] }
   | { id: string; type: 'goto'; flowId: number }
   | { id: string; type: 'comment_reply'; text: string; texts?: string[]; next?: string | null }
+  | { id: string; type: 'request'; method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; body?: string; save?: { field: string; path: string }[]; timeoutMs?: number; next?: string | null }
 
 export type FlowDefinition = {
   triggers: Trigger[]
@@ -65,5 +66,5 @@ export type FlowRecord = {
   updatedAt: string
 }
 
-export const STEP_TYPES = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply'] as const
+export const STEP_TYPES = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply', 'request'] as const
 export const TRIGGER_TYPES = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply'] as const

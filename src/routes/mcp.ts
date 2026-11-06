@@ -116,7 +116,7 @@ export function buildMcpServer(env: Env): McpServer {
     'test_flow',
     {
       title: 'Test flow',
-      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label").',
+      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label"). External request steps are not called: they are listed in notes.',
       inputSchema: {
         id: z.number().int(),
         inputs: z.array(z.object({ type: z.enum(['message', 'comment', 'follow', 'postback', 'ref', 'story_mention', 'story_reply']).default('message'), text: z.string().optional(), button: z.string().optional(), payload: z.string().optional(), ref: z.string().optional() })),

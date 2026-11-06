@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Badge, Button, HStack, SegmentedControl, SegmentedControlItem, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
 import { ArrowDownIcon, ArrowUpIcon, CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { Action, AttachmentDef, ButtonDef, CardDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
@@ -16,6 +17,7 @@ import {
   MAX_CARD_TITLE,
   MAX_CHOICE_LABEL,
   MAX_REPLY_VARIANTS,
+  MAX_REQUEST_SAVES,
   OPS_WITHOUT_VALUE,
   RULE_OPS,
   STEP_TYPES,
@@ -413,6 +415,70 @@ function CommentReplyBody({ step, onChange, steps, t }: BodyProps<'comment_reply
   )
 }
 
+/** "Key: value" lines; the raw text stays in local state so half-typed lines are not lost. */
+function HeadersField({ headers, t, onChange }: { headers: Record<string, string> | undefined; t: TFn; onChange: (h: Record<string, string> | undefined) => void }) {
+  const [text, setText] = useState(() => Object.entries(headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n'))
+  return (
+    <TextAreaField
+      label={t('editor_headers')}
+      value={text}
+      placeholder="Authorization: Bearer {{bot.api_key}}"
+      onChange={(e) => {
+        setText(e.target.value)
+        const h: Record<string, string> = {}
+        for (const line of e.target.value.split('\n')) {
+          const i = line.indexOf(':')
+          const key = line.slice(0, i).trim()
+          if (i > 0 && key) h[key] = line.slice(i + 1).trim()
+        }
+        onChange(Object.keys(h).length ? h : undefined)
+      }}
+    />
+  )
+}
+
+function RequestBody({ step, onChange, steps, t }: BodyProps<'request'>) {
+  const save = step.save ?? []
+  const setSave = (rows: { field: string; path: string }[]) => onChange({ ...step, save: rows.length ? rows : undefined })
+  return (
+    <>
+      <div className="fe-grid-2">
+        <SelectField
+          label={t('editor_method')}
+          value={step.method}
+          options={(['GET', 'POST'] as const).map((m) => ({ value: m, label: m }))}
+          onChange={(method) => onChange(method === 'POST' ? { ...step, method } : { ...step, method, body: undefined })}
+        />
+        <TextInputField label="URL" type="url" value={step.url} placeholder="https://api.example.com/x?q={{last_input}}" onChange={(e) => onChange({ ...step, url: e.target.value })} />
+      </div>
+      <HeadersField headers={step.headers} t={t} onChange={(headers) => onChange({ ...step, headers })} />
+      {step.method === 'POST' && (
+        <TextAreaField label={t('editor_body')} value={step.body ?? ''} maxLength={10000} placeholder={'{"phone": "{{phone}}"}'} onChange={(e) => onChange({ ...step, body: e.target.value || undefined })} />
+      )}
+      <VStack spacing={8}>
+        <Text typo="13" bold color="txt-black-darker">
+          {t('editor_save_fields')} <span className="fe-count">({save.length}/{MAX_REQUEST_SAVES})</span>
+        </Text>
+        {save.map((r, i) => (
+          <div className="fe-subitem" key={i}>
+            <HStack spacing={8} align="end">
+              <div className="fe-grow fe-grid-2">
+                <TextInputField label={t('test_result_fields')} value={r.field} placeholder="price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, field: e.target.value.replace(/\s/g, '') } : x)))} />
+                <TextInputField label={t('editor_path')} value={r.path} maxLength={200} placeholder="data.price" onChange={(e) => setSave(save.map((x, j) => (j === i ? { ...r, path: e.target.value } : x)))} />
+              </div>
+              <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${r.field || t('editor_save_fields')}`} onClick={() => setSave(save.filter((_, j) => j !== i))} />
+            </HStack>
+          </div>
+        ))}
+        <div>
+          <AddButton text={t('editor_add_save')} disabled={save.length >= MAX_REQUEST_SAVES} onClick={() => setSave([...save, { field: '', path: '' }])} />
+        </div>
+      </VStack>
+      <NextField step={step} onChange={onChange} steps={steps} t={t} />
+    </>
+  )
+}
+
 function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; onChange: (s: Step) => void; steps: Step[]; t: TFn; flows: FlowRecord[]; currentId: number }) {
   switch (step.type) {
     case 'message': return <MessageBody step={step} onChange={onChange} steps={steps} t={t} />
@@ -423,6 +489,7 @@ function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; 
     case 'random': return <RandomBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'goto': return <GotoBody step={step} onChange={onChange} steps={steps} t={t} flows={flows} currentId={currentId} />
     case 'comment_reply': return <CommentReplyBody step={step} onChange={onChange} steps={steps} t={t} />
+    case 'request': return <RequestBody step={step} onChange={onChange} steps={steps} t={t} />
   }
 }
 
