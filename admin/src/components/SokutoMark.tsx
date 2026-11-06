@@ -1,9 +1,8 @@
-/** Sokutō brand mark: rounded speech bubble with a lightning bolt (docs/images/logo.svg, admin/public/favicon.svg). */
-export function SokutoMark({ size = 28 }: { size?: number }) {
+/** Sokutō brand mark "the instant macron": the ō of the name as a ring (a conversation closed) with a forward-reaching bar (the instant reply). Same geometry as admin/public/favicon.svg and docs/images/logo.svg. */
+export function SokutoMark({ size = 28, color = '#2468F2' }: { size?: number; color?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-      <path fill="#2468F2" d="M20 8H44A12 12 0 0 1 56 20V40A12 12 0 0 1 44 52H28L14 60V50A12 12 0 0 1 8 40V20A12 12 0 0 1 20 8Z" />
-      <path fill="#FFFFFF" d="M34 16 21 34H30L27 46 44 26H34L38 16Z" />
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false" fill={color}>
+      <path fillRule="evenodd" d="M14 4 H56 L52 12 H14 Z M50 40 A20 20 0 1 1 10 40 A20 20 0 1 1 50 40 Z M42 40 A12 12 0 1 1 18 40 A12 12 0 1 1 42 40 Z" />
     </svg>
   )
 }

@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-label="Sokutō">
-  <path fill="#2468F2" d="M20 8H44A12 12 0 0 1 56 20V40A12 12 0 0 1 44 52H28L14 60V50A12 12 0 0 1 8 40V20A12 12 0 0 1 20 8Z"/>
-  <path fill="#FFFFFF" d="M34 16 21 34H30L27 46 44 26H34L38 16Z"/>
-  <text x="76" y="46" fill="#1F1F1F" font-family="Inter, 'Noto Sans JP', system-ui, sans-serif" font-size="38" font-weight="700" letter-spacing="-0.02em">Sokutō</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64" viewBox="0 0 240 64" fill="#2468F2" role="img" aria-labelledby="title desc">
+  <title id="title">Sokutō</title>
+  <desc id="desc">Sokutō instant macron and blue wordmark for light surfaces.</desc>
+  <path fill-rule="evenodd" d="M14 4 H56 L52 12 H14 Z M50 40 A20 20 0 1 1 10 40 A20 20 0 1 1 50 40 Z M42 40 A12 12 0 1 1 18 40 A12 12 0 1 1 42 40 Z"/>
+  <text x="76" y="46" font-family="Inter, 'Noto Sans JP', system-ui, sans-serif" font-size="40" font-weight="700" letter-spacing="-0.02em">Sokutō</text>
 </svg>
