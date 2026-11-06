@@ -37,8 +37,9 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | `contacts` | 連絡先。`channel` + `channel_user_id` で一意。表示名、ユーザー名、カスタムフィールド (JSON)、`bot_paused` / `bot_paused_until`、最終受信・送信日時、未読数 |
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
-| `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、定義 (JSON) |
+| `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、種類 (`flow` / `sequence`。作成時にだけ決まる)、定義 (JSON) |
 | `sessions` | 連絡先ごとに 1 つの実行中セッション。どの自動化のどのステップで、何を待っているか (`input`/`button`/`delay`)、再開日時 |
+| `sequence_subscriptions` | シーケンスへの登録。連絡先とシーケンスの組で一意。次に実行するステップ (`step_id`) と実行日時 (`resume_at`) |
 | `broadcasts` | 一斉配信。対象チャネル・タグ、本文、予約日時、状態 (`scheduled`/`running`/`done`/`canceled`)、件数 |
 | `broadcast_jobs` | 配信の宛先 1 件ごとの送信状態 (`pending`/`sent`/`failed`/`skipped`) |
 | `events` | レポート用の記録。`trigger_fired`, `step_sent`, `button_clicked`, `input_saved`, `flow_completed`, `comment_replied`, `error` |
@@ -92,6 +93,16 @@ KV には次のキーが入ります。
 
 1 回の実行で進むステップは最大 50 です (無限ループ防止)。送信に失敗するとセッションは終了します。
 
+### シーケンス
+
+`flows.kind = 'sequence'` の自動化はステップ配信 (ドリップ) です。トリガーを持たず、使えるステップは `message` / `condition` / `action` / `delay` / `random` だけです (`validateFlow(definition, kind)` が検証します)。種類は作成時にだけ指定できます。
+
+- **登録**: アクション `{ "type": "subscribe", "flowId": … }`、`POST /api/contacts/:id/sequences`、MCP の `subscribe_sequence`。公開中のシーケンスだけに登録でき、同じシーケンスへの二重登録はできません。登録すると `sequence_subscriptions` に行を作り (`step_id` = 最初のステップ、`resume_at` = 今)、`events` に `trigger_fired` (`meta: { trigger: "subscribe" }`) を記録します。最初のステップは次の定期処理 (1 分以内) で実行されます。
+- **実行**: 会話の `sessions` は使わず、`RunContext.sequence` に登録行の ID を入れて実行します。`delay` ステップでは登録行の `step_id` を次のステップに、`resume_at` を再開日時に更新して止まります (10 秒以下の待機は通常どおりその場で待ちます)。最後まで進むと登録行を削除し、`flow_completed` を記録します。
+- **ボタン**: シーケンス内のボタンは押されるのを待たずに `next` へ進みます。あとで押されたボタンは通常の `sk:` payload の経路 (受信手順 7) で、そのボタンの `next` から普通の自動化として実行されます。
+- **解除**: アクション `unsubscribe`、`DELETE /api/contacts/:id/sequences/:flowId`、`subscribe_sequence` の `remove: true`。シーケンスを下書きに戻したとき・削除したとき、連絡先を削除したとき、LINE でブロック (unfollow) されたときも登録を削除します。
+- 定期処理はボットの一時停止 (`bot_paused`) を確認しません (待機の再開と同じ)。
+
 ### ボタンの payload
 
 ボタンには `sk:<自動化 ID>:<ステップ ID>:<ボタン番号>` という payload が付きます (例: `sk:12:m1:0`)。質問の選択肢には `sk-choice:<選択肢>` が付きます。
@@ -130,10 +141,11 @@ Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:met
 Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/run` で手動実行も可能)。
 
 1. **待機の再開**: `resume_at` を過ぎた `delay` セッションを最大 25 件、続きから実行します。自動化が下書きに戻っていたらセッションを消します。10 秒以下の待機は 1 回の実行で合計 20 秒まではその場で待つため、ここに来るのはそれより長い待機だけです。
-2. **一斉配信**: 予約時刻を過ぎた配信の宛先 (`broadcast_jobs`) を作り、1 分あたり最大 30 件送信します。
+2. **シーケンスの配信**: `resume_at` を過ぎた `sequence_subscriptions` を最大 25 件、`step_id` のステップから実行します。シーケンスが公開中でない (または削除された) 場合は登録を削除します。
+3. **一斉配信**: 予約時刻を過ぎた配信の宛先 (`broadcast_jobs`) を作り、1 分あたり最大 30 件送信します。
    - Messenger / Instagram の宛先は、最後の受信から 24 時間を過ぎていれば送らずに「対象外 (skipped)」にします (Meta の 24 時間ルール)。
    - LINE はプッシュ API で送ります (料金プランの通数に数えられます)。
-3. **掃除**: 2 日より古い `processed_events` を削除します。
+4. **掃除**: 2 日より古い `processed_events` を削除します。
 
 注意: 待機の再開時には 24 時間ルールを確認していません。Messenger / Instagram で 24 時間を超える待機のあとに送るメッセージは、Meta 側でエラーになります。
 
@@ -155,8 +167,9 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
-- **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows`, `sessions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
+- **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger).
+- **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection and page subscription).
-- **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline), sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
+- **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

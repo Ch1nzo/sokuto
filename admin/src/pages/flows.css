@@ -11,4 +11,5 @@
 .fl-template__head > :last-child { flex: none; }
 .fl-template__desc { flex: 1; overflow-wrap: anywhere; }
 .fl-inline { display: inline-flex; max-width: 100%; }
+.fl-kind { margin-top: 4px; }
 @media (max-width: 860px) { .fl-name { min-width: 96px; } }

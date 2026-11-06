@@ -4,7 +4,7 @@ import type { Channel, OutboundMessage } from '@shared/channels/types'
 
 /* ---------- Local mirrors of server-only types (src/flows/simulate.ts pulls runtime deps) ---------- */
 
-export type SimulatedInput = { type: 'message' | 'comment' | 'follow' | 'postback' | 'ref' | 'story_mention' | 'story_reply'; text?: string; payload?: string; ref?: string; button?: string }
+export type SimulatedInput = { type: 'start' | 'message' | 'comment' | 'follow' | 'postback' | 'ref' | 'story_mention' | 'story_reply'; text?: string; payload?: string; ref?: string; button?: string }
 export type SimulationStep = { input: SimulatedInput; triggered: boolean; outputs: OutboundMessage[]; commentReplies: string[]; waiting: string | null; stepId: string | null }
 export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; completed: boolean }
 
@@ -18,8 +18,9 @@ export type StepOf<T extends StepType> = Extract<Step, { type: T }>
 export type TFn = ReturnType<typeof useT>
 
 export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply']
+export const SEQUENCE_STEP_TYPES: StepType[] = ['message', 'condition', 'action', 'delay', 'random']
 export const TRIGGER_TYPES: TriggerType[] = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply']
-export const ACTION_TYPES: ActionType[] = ['add_tag', 'remove_tag', 'set_field', 'notify', 'pause_bot', 'webhook']
+export const ACTION_TYPES: ActionType[] = ['add_tag', 'remove_tag', 'set_field', 'notify', 'pause_bot', 'webhook', 'subscribe', 'unsubscribe']
 export const MATCH_TYPES: MatchType[] = ['contains', 'exact', 'starts_with']
 export const VALIDATE_TYPES: ValidateType[] = ['email', 'phone', 'number', 'url', 'date']
 export const RULE_OPS: ConditionRule['op'][] = ['equals', 'not_equals', 'contains', 'has_tag', 'not_has_tag', 'is_set', 'is_empty', 'gt', 'gte', 'lt', 'lte']

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Divider, HStack, Icon, KeyValueItem, SegmentedControl, SegmentedControlItem, Spinner, Tag, Text, TextField, VStack } from '@channel.io/bezier-react'
-import { CancelIcon, ChatBubbleIcon, CommentIcon, NotificationIcon, PersonAddIcon, RefreshIcon, SendIcon, ArrowRightUpSmallIcon } from '@channel.io/bezier-icons'
-import type { FlowDefinition } from '@shared/flows/types'
+import { CancelIcon, ChatBubbleIcon, CommentIcon, NotificationIcon, PersonAddIcon, PlayIcon, RefreshIcon, SendIcon, ArrowRightUpSmallIcon } from '@channel.io/bezier-icons'
+import type { FlowDefinition, FlowRecord } from '@shared/flows/types'
 import type { Channel, OutboundButton } from '@shared/channels/types'
 import { api } from '../../lib/api'
 import type { Key } from '../../lib/i18n'
@@ -13,6 +13,7 @@ import { formatFlowError } from './errors'
 function inputLabel(input: SimulatedInput, t: TFn): string {
   if (input.button) return input.button
   if (input.type === 'follow') return t('test_follow')
+  if (input.type === 'start') return t('test_start')
   return input.text ?? input.payload ?? input.ref ?? input.type
 }
 
@@ -27,7 +28,7 @@ function waitingLabel(waiting: string, t: TFn): string {
  * input history to POST /api/flows/:id/test with `newContact: true`, so the transcript is always
  * the server's replay of all inputs so far.
  */
-export function TestPanel({ flowId, definition, defaultChannel, onClose, t }: { flowId: string; definition: FlowDefinition; defaultChannel: Channel; onClose?: () => void; t: TFn }) {
+export function TestPanel({ flowId, definition, kind, defaultChannel, onClose, t }: { flowId: string; definition: FlowDefinition; kind: FlowRecord['kind']; defaultChannel: Channel; onClose?: () => void; t: TFn }) {
   const [inputs, setInputs] = useState<SimulatedInput[]>([])
   const [result, setResult] = useState<SimulationResult | null>(null)
   const [text, setText] = useState('')
@@ -196,22 +197,33 @@ export function TestPanel({ flowId, definition, defaultChannel, onClose, t }: { 
 
       {error && <ErrorBanner error={error} />}
 
-      <VStack spacing={8}>
-        <TextField
-          value={text}
-          placeholder={t('test_placeholder')}
-          aria-label={t('test_placeholder')}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.nativeEvent.isComposing && trimmed && !busy) send({ type: 'message', text: trimmed })
-          }}
-        />
-        <div className="fe-test__sends">
-          <Button size="s" leftContent={SendIcon} text={t('test_message')} disabled={busy || !trimmed} onClick={() => send({ type: 'message', text: trimmed })} />
-          <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={CommentIcon} text={t('test_comment')} disabled={busy || !trimmed} onClick={() => send({ type: 'comment', text: trimmed })} />
-          <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={PersonAddIcon} text={t('test_follow')} disabled={busy} onClick={() => send({ type: 'follow' })} />
-        </div>
-      </VStack>
+      {kind === 'sequence' ? (
+        <VStack spacing={8}>
+          <Text typo="12" color="txt-black-dark" className="fe-wrap">
+            {t('test_sequence_hint')}
+          </Text>
+          <div className="fe-test__sends">
+            <Button size="s" leftContent={PlayIcon} text={t('test_start')} disabled={busy} onClick={() => send({ type: 'start' })} />
+          </div>
+        </VStack>
+      ) : (
+        <VStack spacing={8}>
+          <TextField
+            value={text}
+            placeholder={t('test_placeholder')}
+            aria-label={t('test_placeholder')}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing && trimmed && !busy) send({ type: 'message', text: trimmed })
+            }}
+          />
+          <div className="fe-test__sends">
+            <Button size="s" leftContent={SendIcon} text={t('test_message')} disabled={busy || !trimmed} onClick={() => send({ type: 'message', text: trimmed })} />
+            <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={CommentIcon} text={t('test_comment')} disabled={busy || !trimmed} onClick={() => send({ type: 'comment', text: trimmed })} />
+            <Button size="s" styleVariant="secondary" colorVariant="monochrome-dark" leftContent={PersonAddIcon} text={t('test_follow')} disabled={busy} onClick={() => send({ type: 'follow' })} />
+          </div>
+        </VStack>
+      )}
 
       {result && (
         <>

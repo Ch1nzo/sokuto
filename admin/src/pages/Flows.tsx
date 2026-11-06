@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, Text } from '@channel.io/bezier-react'
-import { CancelIcon, FlowIcon, PlusIcon, TemplateIcon } from '@channel.io/bezier-icons'
+import { CalendarIcon, CancelIcon, FlowIcon, PlusIcon, TemplateIcon } from '@channel.io/bezier-icons'
 import { api } from '../lib/api'
 import { useLang, useT, type Key } from '../lib/i18n'
 import {
@@ -32,7 +32,7 @@ export default function Flows() {
   const [templatesError, setTemplatesError] = useState<unknown>(null)
   const [showTemplates, setShowTemplates] = useState(false)
   const [createError, setCreateError] = useState<unknown>(null)
-  /** 'blank' or a template slug while its POST is in flight. */
+  /** 'blank', 'sequence' or a template slug while its POST is in flight. */
   const [creating, setCreating] = useState<string | null>(null)
 
   const loadFlows = useCallback(async () => {
@@ -79,9 +79,18 @@ export default function Flows() {
       key: 'name',
       header: t('editor_name'),
       render: (f) => (
-        <Text typo="14" bold color="txt-black-darkest" className="fl-name">
-          {f.name}
-        </Text>
+        <>
+          <Text typo="14" bold color="txt-black-darkest" className="fl-name">
+            {f.name}
+          </Text>
+          {f.kind === 'sequence' && (
+            <span className="fl-inline fl-kind">
+              <Badge size="s" variant="purple">
+                {t('flows_kind_sequence')}
+              </Badge>
+            </span>
+          )}
+        </>
       ),
     },
     { key: 'channel', header: t('editor_channel'), nowrap: true, render: (f) => (
@@ -131,6 +140,15 @@ export default function Flows() {
             text={t('flows_from_template')}
             aria-expanded={showTemplates}
             onClick={() => setShowTemplates((s) => !s)}
+          />
+          <Button
+            styleVariant="secondary"
+            colorVariant="monochrome-dark"
+            leftContent={CalendarIcon}
+            text={t('flows_new_sequence')}
+            loading={creating === 'sequence'}
+            disabled={creating !== null && creating !== 'sequence'}
+            onClick={() => void create('sequence', { name: t('flows_blank_sequence'), kind: 'sequence' })}
           />
           <Button
             leftContent={PlusIcon}

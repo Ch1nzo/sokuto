@@ -2,11 +2,12 @@ import { RecordingAdapter } from '../channels/adapter'
 import type { Channel, InboundEvent, OutboundMessage } from '../channels/types'
 import type { Db } from '../db'
 import type { ContactRow } from '../contacts'
-import { flattenButtons, matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
+import { buttonPayload, flattenButtons, matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
 import { SKIP_PAYLOAD } from './inputs'
 import type { FlowRecord } from './types'
 
-export type SimulatedInput = { type: 'message' | 'comment' | 'follow' | 'postback' | 'ref' | 'story_mention' | 'story_reply'; text?: string; payload?: string; ref?: string; button?: string }
+/** "start" runs the flow from its entry without a trigger (how a sequence enrollment starts). */
+export type SimulatedInput = { type: 'start' | 'message' | 'comment' | 'follow' | 'postback' | 'ref' | 'story_mention' | 'story_reply'; text?: string; payload?: string; ref?: string; button?: string }
 
 export type SimulationStep = { input: SimulatedInput; triggered: boolean; outputs: OutboundMessage[]; commentReplies: string[]; waiting: string | null; stepId: string | null }
 
@@ -50,13 +51,25 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
         const idx = flattenButtons(step).findIndex((b) => b.label === input.button)
         if (idx >= 0) payload = `sk:${liveFlow.id}:${step.id}:${idx}`
       } else if (step && step.type === 'question') payload = input.button === step.skipLabel ? SKIP_PAYLOAD : `sk-choice:${input.button}`
+    } else if (input.button && !ctx.dryRunSession) {
+      // No session (e.g. a sequence moved on without waiting): tap the first button with that label anywhere in the flow.
+      for (const s of liveFlow.definition.steps) {
+        const idx = s.type === 'message' ? flattenButtons(s).findIndex((b) => b.label === input.button) : -1
+        if (idx >= 0) {
+          payload = buttonPayload(liveFlow.id, s.id, idx)
+          break
+        }
+      }
     }
-    const event: InboundEvent = { channel, channelUserId: 'test-user', eventId: `sim-${steps.length}`, type: payload && input.type === 'message' ? 'postback' : input.type, text: input.text, payload, ref: input.ref, commentId: input.type === 'comment' ? 'sim-comment' : undefined, timestamp: Date.now() }
+    const event: InboundEvent = { channel, channelUserId: 'test-user', eventId: `sim-${steps.length}`, type: payload && input.type === 'message' ? 'postback' : input.type === 'start' ? 'message' : input.type, text: input.text, payload, ref: input.ref, commentId: input.type === 'comment' ? 'sim-comment' : undefined, timestamp: Date.now() }
     ctx.lastInput = input.text
     ctx.commentId = event.commentId
     ctx.flow = liveFlow
-    let triggered = false
-    if (ctx.dryRunSession && ctx.dryRunSession.waiting !== 'delay') {
+    // Only the enrollment run is in sequence mode; later taps continue as a normal flow (as in production).
+    ctx.sequence = input.type === 'start' && liveFlow.kind === 'sequence' ? { id: -1 } : undefined
+    let triggered = input.type === 'start'
+    if (triggered) await startFlow(ctx, null)
+    else if (ctx.dryRunSession && ctx.dryRunSession.waiting !== 'delay') {
       triggered = await resumeSession(ctx, ctx.dryRunSession, event)
     }
     if (!triggered && parseButtonPayload(event.payload)) triggered = await resumeFromButton(ctx, event.payload!)

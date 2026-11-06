@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { FlowDefinition } from './types'
+import type { FlowDefinition, FlowRecord } from './types'
 import { INPUT_VALIDATIONS } from './inputs'
 
 const next = z.string().nullable().optional()
@@ -29,6 +29,8 @@ const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('notify'), text: z.string().optional() }),
   z.object({ type: z.literal('pause_bot'), minutes: z.number().int().positive().optional() }),
   z.object({ type: z.literal('webhook'), url: z.string().url() }),
+  z.object({ type: z.literal('subscribe'), flowId: z.number().int().positive() }),
+  z.object({ type: z.literal('unsubscribe'), flowId: z.number().int().positive() }),
 ])
 
 const buttonSchema = z.object({ label: z.string().min(1).max(40), next, url: z.string().url().optional() })
@@ -53,9 +55,12 @@ export const flowDefinitionSchema = z.object({
 })
 
 export const flowChannelSchema = z.enum(['any', 'line', 'messenger', 'instagram'])
+export const flowKindSchema = z.enum(['flow', 'sequence'])
+
+const SEQUENCE_STEP_TYPES = new Set(['message', 'condition', 'action', 'delay', 'random'])
 
 /** Validates structure and referential integrity. Returns the parsed definition or a list of problems. */
-export function validateFlow(input: unknown): { ok: true; definition: FlowDefinition; warnings: string[] } | { ok: false; errors: string[] } {
+export function validateFlow(input: unknown, kind: FlowRecord['kind'] = 'flow'): { ok: true; definition: FlowDefinition; warnings: string[] } | { ok: false; errors: string[] } {
   const parsed = flowDefinitionSchema.safeParse(input)
   if (!parsed.success) return { ok: false, errors: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`) }
   const def = parsed.data as FlowDefinition
@@ -72,6 +77,7 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
   if (def.entry) check(def.entry, 'entry')
   else if (def.steps.length > 0) errors.push('entry must name the first step')
   for (const s of def.steps) {
+    if (kind === 'sequence' && !SEQUENCE_STEP_TYPES.has(s.type)) errors.push(`step ${s.id}: ${s.type} steps are not allowed in a sequence`)
     switch (s.type) {
       case 'message':
         check(s.next, `step ${s.id}.next`)
@@ -105,7 +111,9 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
         break
     }
   }
-  if (def.triggers.length === 0) warnings.push('no triggers: the flow can only be started by a button or goto')
+  if (kind === 'sequence') {
+    if (def.triggers.length > 0) errors.push('sequences have no triggers: remove them and enroll contacts with a subscribe action')
+  } else if (def.triggers.length === 0) warnings.push('no triggers: the flow can only be started by a button or goto')
   if (def.triggers.some((t) => t.type === 'comment') && !def.steps.some((s) => s.type === 'comment_reply')) warnings.push('comment trigger without a comment_reply step: consider a public reply')
   if (errors.length > 0) return { ok: false, errors }
   return { ok: true, definition: def, warnings }
@@ -136,7 +144,8 @@ Steps:
 - { "id", "type": "condition", "rules": [{ "field": "rating", "op": "lte", "value": "2" }], "mode"?: "all"|"any", "yes": stepId, "no": stepId }
   ops: equals, not_equals, contains, has_tag, not_has_tag, is_set, is_empty, gt, gte, lt, lte. Special fields: "channel", "last_input", "name", "is_follower" ("true"/"false"; Instagram follow status, always "true" on other channels), "hour" ("0"–"23" in the bot time zone), "weekday" ("0" = Sunday … "6" = Saturday), "days_since_created", "days_since_last_inbound" (whole days; empty for a new contact). Any other field is a contact field; use "tag" with has_tag / not_has_tag.
   Compare numbers as strings: { "field": "hour", "op": "gte", "value": "9" }
-- { "id", "type": "action", "actions": [{ "type": "add_tag", "tag": "interested" }, { "type": "remove_tag", "tag": "x" }, { "type": "set_field", "field": "f", "value": "v" }, { "type": "notify", "text": "..." }, { "type": "pause_bot", "minutes"?: 60 }, { "type": "webhook", "url": "https://..." }], "next": stepId }
+- { "id", "type": "action", "actions": [{ "type": "add_tag", "tag": "interested" }, { "type": "remove_tag", "tag": "x" }, { "type": "set_field", "field": "f", "value": "v" }, { "type": "notify", "text": "..." }, { "type": "pause_bot", "minutes"?: 60 }, { "type": "webhook", "url": "https://..." }, { "type": "subscribe", "flowId": 5 }, { "type": "unsubscribe", "flowId": 5 }], "next": stepId }
+  subscribe / unsubscribe enroll the contact in / remove them from a live sequence (see Sequences below).
 - { "id", "type": "delay", "seconds": 3600, "next": stepId }  waits ≤10 s inline with a typing indicator (up to 20 s per run); longer waits resume from the scheduler, which runs every minute
 - { "id", "type": "random", "branches": [{ "weight": 1, "next": "a" }, { "weight": 1, "next": "b" }] }
 - { "id", "type": "goto", "flowId": 12 }
@@ -144,4 +153,6 @@ Steps:
 
 Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}, {{bot.<key>}} for bot variables set in Settings (keys listed in get_overview → general.botFields).
 Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.
-On Instagram, is_follower can only be checked after the person has sent a DM or tapped a button: put the condition behind a button such as "フォローしました", not right after the comment.`
+On Instagram, is_follower can only be checked after the person has sent a DM or tapped a button: put the condition behind a button such as "フォローしました", not right after the comment.
+
+Sequences (drip campaigns): a flow created with kind "sequence" has no triggers ("triggers": []) and only message, condition, action, delay and random steps. Contacts are enrolled with a subscribe action, POST /api/contacts/:id/sequences or the MCP tool subscribe_sequence (live sequences only, once per contact); the first step runs within a minute, and each delay step schedules the next part (e.g. message → delay 86400 → message → delay 172800 → message). Buttons do not pause a sequence: it moves on to "next" right away, and a later tap runs that button's branch like a normal flow. The enrollment ends at the last step, on unsubscribe, when the sequence is unpublished or deleted, or when the contact unfollows. test_flow plays a sequence with the input { "type": "start" } (delays are skipped).`

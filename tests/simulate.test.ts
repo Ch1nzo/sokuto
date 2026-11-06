@@ -281,6 +281,44 @@ describe('simulateFlow', () => {
   })
 })
 
+describe('sequences', () => {
+  const seq = flow(
+    {
+      triggers: [],
+      entry: 'm1',
+      steps: [
+        { id: 'm1', type: 'message', text: 'Day 1', buttons: [{ label: 'A', next: 'm3' }], next: 'd1' },
+        { id: 'd1', type: 'delay', seconds: 86400, next: 'm2' },
+        { id: 'm2', type: 'message', text: 'Day 2' },
+        { id: 'm3', type: 'message', text: 'Picked A' },
+      ],
+    },
+    { kind: 'sequence' },
+  )
+
+  it('plays a sequence from start without waiting for buttons or delays', async () => {
+    const r = await simulateFlow(db, seq, [{ type: 'start' }])
+    const s0 = r.steps[0]!
+    expect(s0.triggered).toBe(true)
+    expect(s0.outputs.map((o) => o.text)).toEqual(['Day 1', 'Day 2'])
+    expect(s0.waiting).toBeNull()
+    expect(r.completed).toBe(true)
+  })
+
+  it('runs a button branch tapped after the sequence moved on', async () => {
+    const r = await simulateFlow(db, seq, [{ type: 'start' }, { type: 'message', button: 'A' }])
+    expect(r.steps[1]!.triggered).toBe(true)
+    expect(r.steps[1]!.outputs.map((o) => o.text)).toEqual(['Picked A'])
+  })
+
+  it('start runs a normal flow from its entry without a trigger', async () => {
+    const f = flow({ triggers: [{ type: 'keyword', keywords: ['x'] }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'Hello', buttons: [{ label: 'Go', next: 'm2' }] }, { id: 'm2', type: 'message', text: 'Gone' }] })
+    const r = await simulateFlow(db, f, [{ type: 'start' }])
+    expect(r.steps[0]!.outputs.map((o) => o.text)).toEqual(['Hello'])
+    expect(r.steps[0]!.waiting).toBe('button')
+  })
+})
+
 describe('time and recency conditions', () => {
   const branch = (rules: Array<{ field: string; op: 'equals' | 'gte' | 'lt' | 'is_empty'; value?: string }>) =>
     flow({

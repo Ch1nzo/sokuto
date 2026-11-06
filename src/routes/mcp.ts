@@ -8,9 +8,9 @@ import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
 import { configuredChannels, getGeneral } from '../settings'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
-import { logMessage, parseFlow } from '../flows/engine'
+import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { FLOW_SCHEMA_DOC, flowChannelSchema, validateFlow } from '../flows/validate'
+import { FLOW_SCHEMA_DOC, flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
 import { simulateFlow } from '../flows/simulate'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
@@ -46,9 +46,9 @@ export function buildMcpServer(env: Env): McpServer {
 
   server.registerTool('list_templates', { title: 'List templates', description: 'Ready-made flow definitions you can copy or adapt.' }, async () => json(TEMPLATES))
 
-  server.registerTool('list_flows', { title: 'List flows', description: 'All automations with status (draft/live), channel and trigger summary.' }, async () => {
+  server.registerTool('list_flows', { title: 'List flows', description: 'All automations and sequences with kind (flow/sequence), status (draft/live), channel and trigger summary.' }, async () => {
     const rows = await d.select().from(schema.flows).orderBy(desc(schema.flows.updatedAt))
-    return json(rows.map(parseFlow).map((f) => ({ id: f.id, name: f.name, channel: f.channel, status: f.status, triggers: f.definition.triggers, steps: f.definition.steps.length, updatedAt: f.updatedAt })))
+    return json(rows.map(parseFlow).map((f) => ({ id: f.id, name: f.name, kind: f.kind, channel: f.channel, status: f.status, triggers: f.definition.triggers, steps: f.definition.steps.length, updatedAt: f.updatedAt })))
   })
 
   server.registerTool('get_flow', { title: 'Get flow', description: 'Full definition of one flow.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
@@ -60,13 +60,13 @@ export function buildMcpServer(env: Env): McpServer {
     'create_flow',
     {
       title: 'Create flow',
-      description: 'Creates a flow as a DRAFT. Validate mentally against get_flow_schema first; then call test_flow, and publish_flow when it works.',
-      inputSchema: { name: z.string().min(1), channel: flowChannelSchema.default('any'), definition: z.unknown() },
+      description: 'Creates a flow as a DRAFT. Validate mentally against get_flow_schema first; then call test_flow, and publish_flow when it works. kind "sequence" makes a drip sequence (no triggers; see Sequences in get_flow_schema); the kind cannot be changed later.',
+      inputSchema: { name: z.string().min(1), channel: flowChannelSchema.default('any'), kind: flowKindSchema.default('flow'), definition: z.unknown() },
     },
-    async ({ name, channel, definition }) => {
-      const v = validateFlow(definition)
+    async ({ name, channel, kind, definition }) => {
+      const v = validateFlow(definition, kind)
       if (!v.ok) return fail('invalid_definition', v.errors)
-      const row = await d.insert(schema.flows).values({ name, channel, definition: JSON.stringify(v.definition) }).returning().get()
+      const row = await d.insert(schema.flows).values({ name, channel, kind, definition: JSON.stringify(v.definition) }).returning().get()
       return json({ flow: parseFlow(row!), warnings: v.warnings })
     },
   )
@@ -82,7 +82,7 @@ export function buildMcpServer(env: Env): McpServer {
       if (name) patch.name = name
       if (channel) patch.channel = channel
       if (definition !== undefined) {
-        const v = validateFlow(definition)
+        const v = validateFlow(definition, flow.kind)
         if (!v.ok) return fail('invalid_definition', v.errors)
         patch.definition = JSON.stringify(v.definition)
         warnings = v.warnings
@@ -95,20 +95,22 @@ export function buildMcpServer(env: Env): McpServer {
   server.registerTool('publish_flow', { title: 'Publish flow', description: 'Makes a flow live so it answers real customers.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
     const flow = await flowById(d, id)
     if (!flow) return fail('not_found')
-    const v = validateFlow(flow.definition)
+    const v = validateFlow(flow.definition, flow.kind)
     if (!v.ok) return fail('invalid_definition', v.errors)
     await d.update(schema.flows).set({ status: 'live', updatedAt: new Date().toISOString() }).where(eq(schema.flows.id, id))
     return json({ ok: true, warnings: v.warnings })
   })
 
-  server.registerTool('unpublish_flow', { title: 'Unpublish flow', description: 'Turns a flow back into a draft.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
+  server.registerTool('unpublish_flow', { title: 'Unpublish flow', description: 'Turns a flow back into a draft. For a sequence this also removes everyone enrolled.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
     await d.update(schema.flows).set({ status: 'draft', updatedAt: new Date().toISOString() }).where(eq(schema.flows.id, id))
+    await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, id))
     return json({ ok: true })
   })
 
   server.registerTool('delete_flow', { title: 'Delete flow', description: 'Deletes a flow permanently.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
     await d.delete(schema.flows).where(eq(schema.flows.id, id))
     await d.delete(schema.sessions).where(eq(schema.sessions.flowId, id))
+    await d.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.flowId, id))
     return json({ ok: true })
   })
 
@@ -116,10 +118,10 @@ export function buildMcpServer(env: Env): McpServer {
     'test_flow',
     {
       title: 'Test flow',
-      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label").',
+      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label"), and { type: "start" } to run from the entry without a trigger (use it to play a sequence; delays are skipped).',
       inputSchema: {
         id: z.number().int(),
-        inputs: z.array(z.object({ type: z.enum(['message', 'comment', 'follow', 'postback', 'ref', 'story_mention', 'story_reply']).default('message'), text: z.string().optional(), button: z.string().optional(), payload: z.string().optional(), ref: z.string().optional() })),
+        inputs: z.array(z.object({ type: z.enum(['start', 'message', 'comment', 'follow', 'postback', 'ref', 'story_mention', 'story_reply']).default('message'), text: z.string().optional(), button: z.string().optional(), payload: z.string().optional(), ref: z.string().optional() })),
         channel: z.enum(['line', 'messenger', 'instagram']).optional(),
         newContact: z.boolean().default(true),
       },
@@ -147,11 +149,11 @@ export function buildMcpServer(env: Env): McpServer {
     },
   )
 
-  server.registerTool('get_contact', { title: 'Get contact', description: 'One contact with fields, tags and recent messages.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
+  server.registerTool('get_contact', { title: 'Get contact', description: 'One contact with fields, tags, sequence enrollments and recent messages.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
     const r = await d.select().from(schema.contacts).where(eq(schema.contacts.id, id)).get()
     if (!r) return fail('not_found')
     const messages = await d.select().from(schema.messages).where(eq(schema.messages.contactId, id)).orderBy(desc(schema.messages.id)).limit(30)
-    return json({ id: r.id, channel: r.channel, name: r.displayName, username: r.username, fields: parseFields(r), tags: await getTags(d, r.id), botPaused: Boolean(r.botPaused), messages: messages.reverse().map((m) => ({ at: m.createdAt, direction: m.direction, source: m.source, kind: m.kind, text: m.text, error: m.error })) })
+    return json({ id: r.id, channel: r.channel, name: r.displayName, username: r.username, fields: parseFields(r), tags: await getTags(d, r.id), botPaused: Boolean(r.botPaused), sequences: await contactSequences(d, r.id), messages: messages.reverse().map((m) => ({ at: m.createdAt, direction: m.direction, source: m.source, kind: m.kind, text: m.text, error: m.error })) })
   })
 
   server.registerTool('tag_contact', { title: 'Add / remove tag', description: 'Adds or removes a tag on a contact.', inputSchema: { id: z.number().int(), tag: z.string().min(1), remove: z.boolean().default(false) } }, async ({ id, tag, remove }) => {
@@ -211,6 +213,21 @@ export function buildMcpServer(env: Env): McpServer {
     const row = await d.insert(schema.broadcasts).values({ name: name ?? text.slice(0, 30), channel, tag: tag ?? null, text, scheduledAt: scheduledAt ?? new Date().toISOString() }).returning().get()
     return json(row)
   })
+
+  server.registerTool(
+    'subscribe_sequence',
+    { title: 'Subscribe to / unsubscribe from a sequence', description: 'Enrolls a contact in a live sequence (the first step runs within a minute) or removes them with remove: true. A contact can be enrolled in a sequence only once at a time.', inputSchema: { contactId: z.number().int(), flowId: z.number().int(), remove: z.boolean().default(false) } },
+    async ({ contactId, flowId, remove }) => {
+      const contact = await d.select().from(schema.contacts).where(eq(schema.contacts.id, contactId)).get()
+      if (!contact) return fail('not_found')
+      if (remove) await unsubscribeSequence(d, contactId, flowId)
+      else {
+        const res = await subscribeSequence(d, contact, flowId)
+        if (res !== 'ok') return fail(res)
+      }
+      return json({ sequences: await contactSequences(d, contactId) })
+    },
+  )
 
   server.registerTool('list_notifications', { title: 'Notifications', description: 'Recent notifications created by "notify" actions and hand-over requests.', inputSchema: { unreadOnly: z.boolean().default(true) } }, async ({ unreadOnly }) => {
     const rows = await d.select().from(schema.notifications).where(unreadOnly ? eq(schema.notifications.read, 0) : undefined).orderBy(desc(schema.notifications.id)).limit(50)

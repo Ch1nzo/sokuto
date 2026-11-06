@@ -425,8 +425,8 @@ function worstSnippets(): Snippet[] {
 function worstSequences(contactId: number) {
   if (contactId !== 1) return []
   return [
-    { flowId: 21, name: 'Onboarding — 7-day welcome series for new LINE friends (Herbstkampagne 2026)', stepId: 'm3', resumeAt: new Date(Date.now() + 6 * DAY).toISOString() },
-    { flowId: 22, name: 'Jo', stepId: null, resumeAt: new Date(Date.now() + 5 * MIN).toISOString() },
+    { id: 1, flowId: 21, name: 'Onboarding — 7-day welcome series for new LINE friends (Herbstkampagne 2026)', stepId: 'm3', resumeAt: new Date(Date.now() + 6 * DAY).toISOString() },
+    { id: 2, flowId: 22, name: 'Jo', stepId: null, resumeAt: new Date(Date.now() + 5 * MIN).toISOString() },
   ]
 }
 

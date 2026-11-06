@@ -174,3 +174,36 @@ describe('validateFlow', () => {
     expect(errorsOf(null)[0]).toMatch(/^\(root\)/)
   })
 })
+
+describe('validateFlow (sequences)', () => {
+  const seq = {
+    triggers: [],
+    entry: 'm1',
+    steps: [
+      { id: 'm1', type: 'message', text: 'Day 1', next: 'd1' },
+      { id: 'd1', type: 'delay', seconds: 86400, next: 'm2' },
+      { id: 'm2', type: 'message', text: 'Day 2' },
+    ],
+  }
+
+  it('accepts a sequence without the no-triggers warning', () => {
+    const r = validateFlow(seq, 'sequence')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.warnings).toEqual([])
+  })
+
+  it('rejects triggers and question steps in a sequence', () => {
+    expect(validateFlow({ ...seq, triggers: [{ type: 'follow' }] }, 'sequence').ok).toBe(false)
+    const r = validateFlow({ ...seq, steps: [...seq.steps, { id: 'q1', type: 'question', text: 'x', field: 'f' }] }, 'sequence')
+    expect(r.ok ? [] : r.errors).toContain('step q1: question steps are not allowed in a sequence')
+    // The same steps are fine in a normal flow.
+    expect(validateFlow({ ...seq, steps: [...seq.steps, { id: 'q1', type: 'question', text: 'x', field: 'f' }] }).ok).toBe(true)
+  })
+
+  it('accepts subscribe / unsubscribe actions and requires a flowId', () => {
+    const def = (action: unknown) => ({ triggers: [{ type: 'follow' }], entry: 'a1', steps: [{ id: 'a1', type: 'action', actions: [action] }] })
+    expect(validateFlow(def({ type: 'subscribe', flowId: 3 })).ok).toBe(true)
+    expect(validateFlow(def({ type: 'unsubscribe', flowId: 3 })).ok).toBe(true)
+    expect(errorsOf(def({ type: 'subscribe' })).length).toBeGreaterThan(0)
+  })
+})
