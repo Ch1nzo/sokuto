@@ -510,6 +510,141 @@ function hugeMessages(contactId: number): MessageRow[] {
   }))
 }
 
+/* ---------- dashboard (GET /api/dashboard?days=) ---------- */
+
+type DashPoint = { day: string; in: number; out: number; bot: number; human: number; newContacts: number }
+type DashFlow = { id: number; name: string; kind: string; status: string; started: number; completed: number; errors: number; buttonClicks: number }
+type DashRest = {
+  channels: { channel: string; contacts: number; messagesIn: number }[]
+  conversations: { open: number; closed: number; paused: number; unread: number }
+  flows: DashFlow[]
+  broadcasts: { count: number; total: number; sent: number; failed: number; clicked: number }
+  handoffs: number
+}
+
+/** 90 UTC days ending today (index 89), oldest first, like the API's buckets. */
+function dashSeries(point: (i: number) => Omit<DashPoint, 'day'>): DashPoint[] {
+  const now = new Date()
+  return Array.from({ length: 90 }, (_, i) => ({
+    day: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 89 + i)).toISOString().slice(0, 10),
+    ...point(i),
+  }))
+}
+
+/** The last `days` of a 90-day series plus the rest; `rest` gets the series and the period's share of 90 days. */
+function dashboardFixture(days: number, full: DashPoint[], rest: (series: DashPoint[], share: number) => DashRest) {
+  const series = full.slice(-days)
+  const sum = (k: 'bot' | 'human') => series.reduce((s, p) => s + p[k], 0)
+  return { days, series, replies: { bot: sum('bot'), human: sum('human') }, ...rest(series, days / 90) }
+}
+
+const sumIn = (series: DashPoint[]) => series.reduce((s, p) => s + p.in, 0)
+const ZERO_DAY = { in: 0, out: 0, bot: 0, human: 0, newContacts: 0 }
+
+// Spiky: whole days at zero, one 48,213-message day two days ago (inside every period), a single human reply.
+const WORST_SERIES = dashSeries((i) => {
+  if (i === 87) return { in: 48_213, out: 0, bot: 0, human: 0, newContacts: 1 }
+  if (i % 7 === 3 || i % 11 === 0) return ZERO_DAY
+  const out = (i * 53) % 90
+  const human = i === 60 ? 1 : 0
+  return { in: (i * 37) % 140, out: out + human, bot: out, human, newContacts: (i * 11) % 7 }
+})
+
+function worstDashboard(days: number) {
+  return dashboardFixture(days, WORST_SERIES, (series) => ({
+    // One channel dwarfs another; Messenger has no contacts (the API omits it).
+    channels: [
+      { channel: 'line', contacts: 1283, messagesIn: Math.max(0, sumIn(series) - 2) },
+      { channel: 'instagram', contacts: 1, messagesIn: Math.min(2, sumIn(series)) },
+    ],
+    conversations: { open: 0, closed: 0, paused: 1284, unread: 999 },
+    flows: [
+      { id: 21, name: 'Onboarding — 7-day welcome series for new LINE friends (Herbstkampagne 2026)', kind: 'sequence', status: 'live', started: 48_213, completed: 48_213, errors: 0, buttonClicks: 0 },
+      {
+        id: 12,
+        name: 'Reservierungsänderung und Stornierungen — Herbstkampagne 2026 表参道店・渋谷店・オンライン予約 共通の受付フロー (2026年10月改訂版)',
+        kind: 'flow',
+        status: 'live',
+        started: 1284,
+        completed: 3,
+        errors: 999,
+        buttonClicks: 1284,
+      },
+      { id: 3, name: 'Jo', kind: 'flow', status: 'draft', started: 1, completed: 4, errors: 0, buttonClicks: 0 }, // completed > started
+      { id: 4, name: '🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣🍣', kind: 'flow', status: 'live', started: 7, completed: 0, errors: 7, buttonClicks: 0 },
+      { id: 5, name: 'ปิ่นมณี สาขาสยาม — ตอบกลับอัตโนมัติ', kind: 'flow', status: 'live', started: 0, completed: 0, errors: 3, buttonClicks: 0 }, // started 0
+      { id: 6, name: LONG_URL.slice(0, 120), kind: 'flow', status: 'draft', started: 0, completed: 0, errors: 0, buttonClicks: 5 },
+    ],
+    // Sums of worstBroadcasts(): mostly failed.
+    broadcasts: { count: 5, total: 3853, sent: 643, failed: 1285, clicked: 57 },
+    handoffs: 1284,
+  }))
+}
+
+function emptyDashboard(days: number) {
+  return dashboardFixture(days, dashSeries(() => ZERO_DAY), () => ({
+    channels: [],
+    conversations: { open: 0, closed: 0, paused: 0, unread: 0 },
+    flows: [],
+    broadcasts: { count: 0, total: 0, sent: 0, failed: 0, clicked: 0 },
+    handoffs: 0,
+  }))
+}
+
+function oneDashboard(days: number) {
+  return dashboardFixture(days, dashSeries((i) => (i === 89 ? { in: 1, out: 1, bot: 1, human: 0, newContacts: 1 } : ZERO_DAY)), () => ({
+    channels: [{ channel: 'line', contacts: 1, messagesIn: 1 }],
+    conversations: { open: 1, closed: 0, paused: 0, unread: 1 },
+    flows: [{ id: 1, name: 'ようこそ', kind: 'flow', status: 'live', started: 1, completed: 1, errors: 0, buttonClicks: 0 }],
+    // Same numbers as the `one` broadcast (sent + failed exceed total).
+    broadcasts: { count: 1, total: 1, sent: 1, failed: 1, clicked: 1 },
+    handoffs: 1,
+  }))
+}
+
+// Weekly rhythm (quiet weekends) on a slow wave, ~2,600 messages in per day, 12 % of replies by a person.
+const HUGE_SERIES = dashSeries((i) => {
+  const wave = 1 + 0.25 * Math.sin(i / 9)
+  const week = (i + 4) % 7 >= 5 ? 0.7 : 1
+  const inn = Math.round(2600 * wave * week + ((i * 97) % 400))
+  const out = Math.round(inn * 1.35)
+  const human = Math.round(out * 0.12)
+  return { in: inn, out, bot: out - human, human, newContacts: Math.round(180 * wave * week + ((i * 31) % 60)) }
+})
+
+const HUGE_FLOWS: [string, string, number, number, number][] = [
+  // name, kind, started in 90 days, completion rate, errors in 90 days
+  ['ようこそ (友だち追加)', 'flow', 41_200, 0.82, 12],
+  ['予約の受付', 'flow', 18_400, 0.64, 0],
+  ['営業時間・アクセス', 'flow', 9_850, 0.91, 85],
+  ['Instagram コメント自動返信', 'flow', 6_120, 0.47, 3],
+  ['クーポン配布', 'flow', 3_400, 0.73, 0],
+  ['新規のお客様 7 日間フォロー', 'sequence', 1_980, 0.88, 1],
+  ['アンケート (来店後)', 'flow', 870, 0.35, 40],
+  ['FAQ: 配送について', 'flow', 240, 0.96, 0],
+]
+
+function hugeDashboard(days: number) {
+  return dashboardFixture(days, HUGE_SERIES, (series, share) => {
+    const received = sumIn(series)
+    const n = Math.max(1, Math.round(13 * share)) // weekly broadcasts
+    return {
+      channels: [
+        { channel: 'line', contacts: 15_250, messagesIn: Math.round(received * 0.61) },
+        { channel: 'messenger', contacts: 6_120, messagesIn: Math.round(received * 0.24) },
+        { channel: 'instagram', contacts: 3_630, messagesIn: received - Math.round(received * 0.61) - Math.round(received * 0.24) },
+      ],
+      conversations: { open: 2_431, closed: 22_257, paused: 312, unread: 1_284 },
+      flows: HUGE_FLOWS.map(([name, kind, started, rate, errors], i) => {
+        const s = Math.round(started * share)
+        return { id: 100 + i, name, kind, status: 'live', started: s, completed: Math.round(s * rate), errors: Math.round(errors * share), buttonClicks: Math.round(s * 0.4) }
+      }),
+      broadcasts: { count: n, total: n * 25_000, sent: n * 24_870, failed: n * 130, clicked: n * 3_210 },
+      handoffs: Math.round(980 * share),
+    }
+  })
+}
+
 /* ---------- routing ---------- */
 
 type Dataset = {
@@ -522,6 +657,7 @@ type Dataset = {
   segments: () => Segment[]
   snippets: () => Snippet[]
   sequences: (contactId: number) => unknown[]
+  dashboard: (days: number) => unknown
 }
 
 const genericLast = (c: ContactRow): Omit<MessageRow, 'id'> => ({
@@ -548,6 +684,7 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: worstSegments,
     snippets: worstSnippets,
     sequences: worstSequences,
+    dashboard: worstDashboard,
   },
   empty: {
     contacts: () => [],
@@ -564,6 +701,7 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: () => [],
     snippets: () => [],
     sequences: () => [],
+    dashboard: emptyDashboard,
   },
   one: {
     contacts: () => [oneContact()],
@@ -584,6 +722,7 @@ const DATASETS: Record<DataMode, Dataset> = {
     segments: () => [{ id: 1, name: 'VIP', rules: [{ field: 'tag', op: 'has_tag', value: 'vip' }], mode: 'all', createdAt: ago(DAY) }],
     snippets: () => [{ id: 1, name: '営業時間', text: '営業時間は 11:00〜22:00 です。', createdAt: ago(DAY) }],
     sequences: () => [],
+    dashboard: oneDashboard,
   },
   huge: {
     contacts: hugeContacts,
@@ -625,6 +764,7 @@ const DATASETS: Record<DataMode, Dataset> = {
       })),
     snippets: () => Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `定型文 ${i + 1}`, text: `いつもありがとうございます。定型文 ${i + 1} の本文です。`, createdAt: ago(i * HOUR) })),
     sequences: () => [],
+    dashboard: hugeDashboard,
   },
 }
 
@@ -698,6 +838,7 @@ export function devFixture(path: string): unknown {
 
   if (p === '/api/workspaces') return mode === 'huge' ? undefined : workspacesFixture(mode)
   if (p === '/api/overview') return ds.overview()
+  if (p === '/api/dashboard') return ds.dashboard(Math.min(90, Math.max(1, Math.trunc(Number(q.get('days'))) || 30))) // api.ts clamp
   if (p === '/api/broadcasts') return { broadcasts: ds.broadcasts() }
   if (p === '/api/tags') return { tags: ds.tags() }
   if (p === '/api/segments') return { segments: ds.segments() }

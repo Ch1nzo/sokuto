@@ -723,6 +723,119 @@ apiRoutes.get('/reports', async (c) => {
   return c.json({ days, flows: perFlow, series })
 })
 
+/** Admin dashboard charts: whole UTC days, today included (`days` buckets). Shape: admin/src/pages/dashboard/charts.ts. */
+apiRoutes.get('/dashboard', async (c) => {
+  const d = db(c.env)
+  const ws = c.get('ws')
+  const days = Math.min(90, Math.max(1, Math.trunc(Number(c.req.query('days'))) || 30))
+  const now = new Date()
+  const first = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1))
+  const since = new Date(first).toISOString()
+  const m = schema.messages
+  const ct = schema.contacts
+  const e = schema.events
+  const b = schema.broadcasts
+  const msgDay = sql<string>`substr(${m.createdAt}, 1, 10)`
+  const contactDay = sql<string>`substr(${ct.createdAt}, 1, 10)`
+  const countIf = (cond: SQL) => sql<number>`coalesce(sum(case when ${cond} then 1 else 0 end), 0)`
+  const eventCount = (type: string) => countIf(sql`${e.type} = ${type}`)
+  const started = eventCount('trigger_fired')
+  const [messages, newContacts, contactsByChannel, inByChannel, conversations, flows, broadcasts, handoffs] = await Promise.all([
+    d
+      .select({ day: msgDay, direction: m.direction, source: m.source, n: sql<number>`count(*)` })
+      .from(m)
+      .where(and(ofWorkspace(m.contactId, ws), gte(m.createdAt, since)))
+      .groupBy(msgDay, m.direction, m.source),
+    d
+      .select({ day: contactDay, n: sql<number>`count(*)` })
+      .from(ct)
+      .where(and(eq(ct.workspaceId, ws), gte(ct.createdAt, since)))
+      .groupBy(contactDay),
+    d.select({ channel: ct.channel, n: sql<number>`count(*)` }).from(ct).where(eq(ct.workspaceId, ws)).groupBy(ct.channel),
+    d
+      .select({ channel: ct.channel, n: sql<number>`count(*)` })
+      .from(m)
+      .innerJoin(ct, eq(ct.id, m.contactId))
+      .where(and(eq(ct.workspaceId, ws), eq(m.direction, 'in'), gte(m.createdAt, since)))
+      .groupBy(ct.channel),
+    // Disjoint, so the three add up to all contacts: "paused" = open with the bot paused (the inbox's 担当者対応中).
+    d
+      .select({
+        open: countIf(sql`${ct.status} = 'open' and ${ct.botPaused} = 0`),
+        closed: countIf(sql`${ct.status} = 'closed'`),
+        paused: countIf(sql`${ct.status} = 'open' and ${ct.botPaused} = 1`),
+        unread: countIf(sql`${ct.unread} > 0`),
+      })
+      .from(ct)
+      .where(eq(ct.workspaceId, ws))
+      .get(),
+    d
+      .select({
+        id: schema.flows.id,
+        name: schema.flows.name,
+        kind: schema.flows.kind,
+        status: schema.flows.status,
+        started,
+        completed: eventCount('flow_completed'),
+        errors: eventCount('error'),
+        buttonClicks: eventCount('button_clicked'),
+      })
+      .from(e)
+      .innerJoin(schema.flows, eq(schema.flows.id, e.flowId))
+      .where(and(eq(e.workspaceId, ws), gte(e.createdAt, since)))
+      .groupBy(schema.flows.id)
+      .orderBy(desc(started), schema.flows.name)
+      .limit(8),
+    d
+      .select({
+        count: sql<number>`count(*)`,
+        total: sql<number>`coalesce(sum(${b.total}), 0)`,
+        sent: sql<number>`coalesce(sum(${b.sent}), 0)`,
+        failed: sql<number>`coalesce(sum(${b.failed}), 0)`,
+        clicked: sql<number>`coalesce(sum(${b.clicked}), 0)`,
+      })
+      .from(b)
+      .where(and(eq(b.workspaceId, ws), gte(b.createdAt, since)))
+      .get(),
+    // Hand-over requests: src/inbound.ts writes "<name> が担当者を希望しています".
+    d
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.notifications)
+      .where(and(eq(schema.notifications.workspaceId, ws), gte(schema.notifications.createdAt, since), like(schema.notifications.text, '%担当者を希望%')))
+      .get(),
+  ])
+  const series = Array.from({ length: days }, (_, i) => ({ day: new Date(first + i * 86400_000).toISOString().slice(0, 10), in: 0, out: 0, bot: 0, human: 0, newContacts: 0 }))
+  const byDay = new Map(series.map((p) => [p.day, p]))
+  const replies = { bot: 0, human: 0 }
+  for (const r of messages) {
+    const p = byDay.get(r.day)
+    if (!p) continue
+    if (r.direction === 'in') p.in += r.n
+    else {
+      p.out += r.n
+      if (r.source === 'bot' || r.source === 'human') {
+        p[r.source] += r.n
+        replies[r.source] += r.n
+      }
+    }
+  }
+  for (const r of newContacts) {
+    const p = byDay.get(r.day)
+    if (p) p.newContacts = r.n
+  }
+  const inMap = new Map(inByChannel.map((r) => [r.channel, r.n]))
+  return c.json({
+    days,
+    series,
+    channels: contactsByChannel.map((r) => ({ channel: r.channel, contacts: r.n, messagesIn: inMap.get(r.channel) ?? 0 })),
+    conversations: conversations ?? { open: 0, closed: 0, paused: 0, unread: 0 },
+    replies,
+    flows,
+    broadcasts: broadcasts ?? { count: 0, total: 0, sent: 0, failed: 0, clicked: 0 },
+    handoffs: handoffs?.n ?? 0,
+  })
+})
+
 /* ---------- Settings ---------- */
 /** AI settings without the API key. */
 const aiInfo = (cfg: AiConfig | null) => (cfg ? { configured: true, provider: cfg.provider, model: cfg.model, baseUrl: cfg.baseUrl } : { configured: false })
