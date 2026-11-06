@@ -15,12 +15,12 @@ import { defined, getBotConfig, type BotConfig, type GeneralSettings } from './s
  * knowledge (approved FAQs, documents, products). Pure helpers first (tests/bot.test.ts), then the DB side.
  */
 
-export type FaqRow = typeof schema.faqs.$inferSelect
+export type FaqRow = Omit<typeof schema.faqs.$inferSelect, 'variants'> & { variants: string[] }
 type ProductRow = typeof schema.products.$inferSelect
 export type Product = Omit<ProductRow, 'tags' | 'inStock'> & { tags: string[]; inStock: boolean }
 export type HandoffReason = 'customer_request' | 'missing_knowledge' | 'policy' | 'max_turns' | 'ai_error' | 'other'
 type AiReason = Extract<HandoffReason, 'customer_request' | 'missing_knowledge' | 'policy' | 'other'>
-export type KnowledgeFaq = Pick<FaqRow, 'id' | 'question' | 'answer'>
+export type KnowledgeFaq = Pick<FaqRow, 'id' | 'question' | 'variants' | 'answer'>
 export type KnowledgeDocument = { id: number; name: string; content: string }
 export type Chunk = { documentId: number; name: string; text: string }
 /** What one reply sees: the retrieved part of the workspace's knowledge. */
@@ -40,6 +40,20 @@ export function publicHttpsUrl(url: string): URL | null {
 }
 const isHttps = (url: string) => publicHttpsUrl(url) !== null
 const now = () => new Date().toISOString()
+/** A JSON string[] column (corrupt JSON or non-strings are dropped). */
+function strings(json: string): string[] {
+  try {
+    const v: unknown = JSON.parse(json)
+    return Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+const parseFaq = <T extends { variants: string }>(row: T): Omit<T, 'variants'> & { variants: string[] } => ({ ...row, variants: strings(row.variants) })
+/** Every phrasing of a FAQ, the primary question first. */
+const phrasings = (f: Pick<KnowledgeFaq, 'question' | 'variants'>) => [f.question, ...f.variants]
+/** Phrasings that differ only in case or surrounding spaces are the same question. */
+const sameKey = (s: string) => s.trim().toLowerCase()
 
 /* ---------- Search ---------- */
 
@@ -97,10 +111,10 @@ function top<T>(items: T[], text: (x: T) => string, q: string[], limit: number):
 /** The knowledge for one message: items ranked by how many query terms they contain (0 = left out). */
 export function retrieve(query: string, k: { faqs: KnowledgeFaq[]; documents: KnowledgeDocument[]; products: Product[] }, limits = { faqs: 6, chunks: 4, products: 5 }): Knowledge {
   const q = [...terms(query)]
-  const small = k.faqs.reduce((n, f) => n + f.question.length + f.answer.length, 0) <= SMALL_FAQS
+  const small = k.faqs.reduce((n, f) => n + phrasings(f).join('').length + f.answer.length, 0) <= SMALL_FAQS
   const chunks = k.documents.flatMap((doc) => chunk(doc.content).map((text) => ({ documentId: doc.id, name: doc.name, text })))
   return {
-    faqs: small ? k.faqs : top(k.faqs, (f) => `${f.question}\n${f.answer}`, q, limits.faqs),
+    faqs: small ? k.faqs : top(k.faqs, (f) => `${phrasings(f).join('\n')}\n${f.answer}`, q, limits.faqs),
     chunks: top(chunks, (c) => c.text, q, limits.chunks),
     products: top(k.products, (p) => `${p.name}\n${p.description}\n${p.tags.join(' ')}`, q, limits.products),
   }
@@ -126,7 +140,7 @@ export const botLang = (cfg: BotConfig, general: Pick<GeneralSettings, 'language
 
 function knowledgeText(k: Knowledge): string {
   const items = [
-    ...k.faqs.map((f) => `[F${f.id}] Q: ${f.question} A: ${f.answer}`),
+    ...k.faqs.map((f) => `[F${f.id}] Q: ${phrasings(f).join(' / ')} A: ${f.answer}`),
     ...k.chunks.map((c) => `[D${c.documentId} ${c.name}] ${c.text}`),
     ...k.products.map((p) => `[P${p.id}] ${[p.name, priceLabel(p), p.description, p.tags.join(', ')].filter(Boolean).join(' — ')}`),
   ]
@@ -358,14 +372,7 @@ export type ProductInput = z.infer<typeof productInputSchema>
 export const DEFAULT_PRODUCT: Omit<ProductInput, 'name'> = { description: '', price: null, currency: 'JPY', url: null, imageUrl: null, tags: [], sku: null, inStock: true }
 
 export function parseProduct(row: ProductRow): Product {
-  let tags: string[] = []
-  try {
-    const v: unknown = JSON.parse(row.tags)
-    if (Array.isArray(v)) tags = v.filter((t): t is string => typeof t === 'string')
-  } catch {
-    // corrupt JSON: no tags
-  }
-  return { ...row, tags, inStock: Boolean(row.inStock) }
+  return { ...row, tags: strings(row.tags), inStock: Boolean(row.inStock) }
 }
 
 const productValues = (p: ProductInput) => ({ ...p, currency: p.currency.toUpperCase(), url: p.url || null, imageUrl: p.imageUrl || null, sku: p.sku || null, tags: JSON.stringify(p.tags), inStock: p.inStock ? 1 : 0 })
@@ -453,7 +460,7 @@ export function parseProductsCsv(csv: string): { rows: ProductInput[]; errors: {
 /* ---------- FAQ suggestions ---------- */
 
 const SUGGEST_RULES =
-  'Each answer must state only facts given by the business, never guesses. Leave out personal data (names, phone numbers, addresses, order numbers). Write in the language of the source. Answer with a JSON array only: [{"question": string, "answer": string}] ([] when there is nothing worth saving).'
+  'Each answer must state only facts given by the business, never guesses. Leave out personal data (names, phone numbers, addresses, order numbers). Write in the language of the source. For each question also give up to 3 other ways a customer might ask it ("variants"). Answer with a JSON array only: [{"question": string, "variants": string[], "answer": string}] ([] when there is nothing worth saving).'
 
 /** FAQ candidates from a finished conversation (up to 3). */
 export function faqSuggestPrompt(transcript: string): AiRequest {
@@ -473,8 +480,8 @@ export function documentFaqPrompt(text: string): AiRequest {
   }
 }
 
-/** `[{"question","answer"}]` from a model reply (fences and surrounding prose allowed). */
-export function parseFaqSuggestions(raw: string, max = 3): { question: string; answer: string }[] {
+/** `[{"question","variants","answer"}]` from a model reply (fences and surrounding prose allowed; ≤ 3 distinct variants, missing ones are fine). */
+export function parseFaqSuggestions(raw: string, max = 3): { question: string; variants: string[]; answer: string }[] {
   const start = raw.indexOf('[')
   const end = raw.lastIndexOf(']')
   if (start < 0 || end < start) return []
@@ -487,22 +494,30 @@ export function parseFaqSuggestions(raw: string, max = 3): { question: string; a
   if (!Array.isArray(v)) return []
   const str = (x: unknown) => (typeof x === 'string' ? x.trim() : '')
   return v
-    .flatMap((x: { question?: unknown; answer?: unknown } | null) => {
+    .flatMap((x: { question?: unknown; variants?: unknown; answer?: unknown } | null) => {
       const question = str(x?.question).slice(0, 500)
       const answer = str(x?.answer).slice(0, 4000)
-      return question && answer ? [{ question, answer }] : []
+      const seen = new Set([sameKey(question)])
+      const variants = (Array.isArray(x?.variants) ? x.variants : [])
+        .map((v) => str(v).slice(0, 500))
+        .filter((v) => v && !seen.has(sameKey(v)) && seen.add(sameKey(v)))
+        .slice(0, 3)
+      return question && answer ? [{ question, variants, answer }] : []
     })
     .slice(0, max)
 }
 
 /* ---------- Knowledge storage (shared by the API and MCP; every query is scoped to the workspace) ---------- */
 
-const faqInputSchema = z.object({ question: z.string().trim().min(1).max(500), answer: z.string().trim().min(1).max(4000), status: z.enum(['approved', 'suggested']) })
+const phrase = z.string().trim().min(1).max(500)
+export const faqInputSchema = z
+  .object({ question: phrase, variants: z.array(phrase).max(10), answer: z.string().trim().min(1).max(4000), status: z.enum(['approved', 'suggested']) })
+  .refine((f) => new Set(phrasings(f).map(sameKey)).size === f.variants.length + 1, { message: 'repeats the question or another variant', path: ['variants'] })
 
 export async function listFaqs(db: Db, ws: number, status?: string) {
   const f = schema.faqs
   const only = status === 'approved' || status === 'suggested' ? eq(f.status, status) : undefined
-  return db.select().from(f).where(and(eq(f.workspaceId, ws), only)).orderBy(desc(f.updatedAt), desc(f.id))
+  return (await db.select().from(f).where(and(eq(f.workspaceId, ws), only)).orderBy(desc(f.updatedAt), desc(f.id))).map(parseFaq)
 }
 
 /** Creates (`id` null) or updates a FAQ from a partial body. Approving a suggestion = setting status "approved". */
@@ -510,10 +525,11 @@ export async function saveFaq(db: Db, ws: number, id: number | null, body: objec
   const f = schema.faqs
   const row = id === null ? undefined : await db.select().from(f).where(and(eq(f.id, id), eq(f.workspaceId, ws))).get()
   if (id !== null && !row) return { error: 'not_found' }
-  const v = faqInputSchema.safeParse({ ...(row ?? { status: 'approved' }), ...defined(body) })
+  const v = faqInputSchema.safeParse({ ...(row ? parseFaq(row) : { status: 'approved', variants: [] }), ...defined(body) })
   if (!v.success) return { error: 'invalid_faq', errors: issues(v.error) }
-  const faq = row ? await db.update(f).set({ ...v.data, updatedAt: now() }).where(eq(f.id, row.id)).returning().get() : await db.insert(f).values({ workspaceId: ws, ...v.data }).returning().get()
-  return { faq: faq! }
+  const values = { ...v.data, variants: JSON.stringify(v.data.variants) }
+  const faq = row ? await db.update(f).set({ ...values, updatedAt: now() }).where(eq(f.id, row.id)).returning().get() : await db.insert(f).values({ workspaceId: ws, ...values }).returning().get()
+  return { faq: parseFaq(faq!) }
 }
 
 export async function deleteFaq(db: Db, ws: number, id: number): Promise<boolean> {
@@ -637,14 +653,20 @@ export async function deleteDocument(db: Db, ws: number, id: number): Promise<bo
   return Boolean(gone)
 }
 
-/** Inserts AI suggestions whose question is not already a FAQ (case-insensitive). */
-async function addSuggestions(db: Db, ws: number, items: { question: string; answer: string }[], from: { source: 'conversation' | 'document'; contactId?: number; documentId?: number }) {
+/** Inserts AI suggestions none of whose phrasings is already a FAQ question or variant (case-insensitive). */
+async function addSuggestions(db: Db, ws: number, items: { question: string; variants: string[]; answer: string }[], from: { source: 'conversation' | 'document'; contactId?: number; documentId?: number }) {
   if (!items.length) return 0
   const f = schema.faqs
-  const seen = new Set((await db.select({ q: f.question }).from(f).where(eq(f.workspaceId, ws))).map((r) => r.q.trim().toLowerCase()))
-  const fresh = items.filter((i) => !seen.has(i.question.toLowerCase()) && seen.add(i.question.toLowerCase()))
-  // At most 10 rows × 9 values: within D1's 100 bound parameters per query.
-  if (fresh.length) await db.insert(f).values(fresh.map((i) => ({ workspaceId: ws, ...i, status: 'suggested', source: from.source, contactId: from.contactId ?? null, documentId: from.documentId ?? null })))
+  const seen = new Set((await db.select({ q: f.question, v: f.variants }).from(f).where(eq(f.workspaceId, ws))).flatMap((r) => [r.q, ...strings(r.v)].map(sameKey)))
+  const fresh = items.filter((i) => {
+    const keys = phrasings(i).map(sameKey)
+    if (keys.some((k) => seen.has(k))) return false
+    keys.forEach((k) => seen.add(k))
+    return true
+  })
+  // One statement per row: 10 rows × 11 values in one insert would pass D1's 100 bound parameters per query.
+  const stmts = fresh.map((i) => db.insert(f).values({ workspaceId: ws, ...i, variants: JSON.stringify(i.variants), status: 'suggested', source: from.source, contactId: from.contactId ?? null, documentId: from.documentId ?? null }))
+  if (stmts.length) await db.batch(stmts as unknown as Parameters<Db['batch']>[0])
   return fresh.length
 }
 
@@ -682,11 +704,11 @@ export async function loadKnowledge(db: Db, ws: number) {
   const f = schema.faqs
   const p = schema.products
   const [faqs, documents, products] = await Promise.all([
-    db.select({ id: f.id, question: f.question, answer: f.answer }).from(f).where(and(eq(f.workspaceId, ws), eq(f.status, 'approved'))).orderBy(f.id),
+    db.select({ id: f.id, question: f.question, variants: f.variants, answer: f.answer }).from(f).where(and(eq(f.workspaceId, ws), eq(f.status, 'approved'))).orderBy(f.id),
     db.select({ id: d.id, name: d.name, content: d.content }).from(d).where(and(eq(d.workspaceId, ws), eq(d.status, 'ready'))).orderBy(d.id),
     db.select().from(p).where(and(eq(p.workspaceId, ws), eq(p.inStock, 1))).orderBy(p.id),
   ])
-  return { faqs, documents, products: products.map(parseProduct) }
+  return { faqs: faqs.map(parseFaq), documents, products: products.map(parseProduct) }
 }
 
 /** Products of the workspace by id, in the order asked (unknown ids are skipped). */

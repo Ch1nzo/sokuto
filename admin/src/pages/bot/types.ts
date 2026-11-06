@@ -30,6 +30,8 @@ export type HandoffReason = 'customer_request' | 'missing_knowledge' | 'policy' 
 export type Faq = {
   id: number
   question: string
+  /** Other phrasings of `question` (≤ 10), answered the same way. */
+  variants: string[]
   answer: string
   status: 'approved' | 'suggested'
   source: 'manual' | 'conversation' | 'document'

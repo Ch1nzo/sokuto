@@ -330,7 +330,7 @@ export function buildMcpServer(env: Env, ws: number): McpServer {
 
   server.registerTool(
     'upsert_faq',
-    { title: 'Create / update FAQ', description: 'Creates a FAQ, or updates one with id. Set status "approved" to approve a suggestion. question ≤ 500, answer ≤ 4000 characters.', inputSchema: { id: z.number().int().optional(), question: z.string(), answer: z.string(), status: z.enum(['approved', 'suggested']).optional() } },
+    { title: 'Create / update FAQ', description: 'Creates a FAQ, or updates one with id. Set status "approved" to approve a suggestion. question ≤ 500, answer ≤ 4000 characters. variants: up to 10 other phrasings of the question (≤ 500 characters each, no repeats), answered the same way; given on update, they replace the stored list.', inputSchema: { id: z.number().int().optional(), question: z.string(), variants: z.array(z.string()).optional(), answer: z.string(), status: z.enum(['approved', 'suggested']).optional() } },
     async ({ id, ...body }) => {
       const r = await saveFaq(d, ws, id ?? null, body)
       return 'faq' in r ? json(r.faq) : fail(r.error, r.errors)

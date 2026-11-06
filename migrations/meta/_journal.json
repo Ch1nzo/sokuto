@@ -29,6 +29,13 @@
       "when": 1793951964685,
       "tag": "0003_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793954128037,
+      "tag": "0004_faq_variants",
+      "breakpoints": true
     }
   ]
 }

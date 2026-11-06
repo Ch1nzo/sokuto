@@ -207,6 +207,7 @@ export const faqs = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     workspaceId: workspaceId(),
     question: text('question').notNull(),
+    variants: text('variants').notNull().default('[]'), // JSON string[]: other phrasings of `question`
     answer: text('answer').notNull(),
     status: text('status').notNull().default('approved'), // approved | suggested
     source: text('source').notNull().default('manual'), // manual | conversation | document

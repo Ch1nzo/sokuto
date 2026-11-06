@@ -3,6 +3,7 @@ import {
   buildBotPrompt,
   chunk,
   documentFaqPrompt,
+  faqInputSchema,
   faqSuggestPrompt,
   htmlToText,
   MAX_CSV_ROWS,
@@ -71,12 +72,12 @@ describe('chunk', () => {
 })
 
 describe('retrieve', () => {
-  const big = (id: number, question: string) => ({ id, question, answer: 'x'.repeat(1500) })
+  const big = (id: number, question: string, variants: string[] = []) => ({ id, question, variants, answer: 'x'.repeat(1500) })
 
   it('keeps every approved FAQ while they are small', () => {
     const faqs = [
-      { id: 1, question: '営業時間は?', answer: '10 時から 19 時です' },
-      { id: 2, question: '駐車場はありますか', answer: 'ありません' },
+      { id: 1, question: '営業時間は?', variants: [], answer: '10 時から 19 時です' },
+      { id: 2, question: '駐車場はありますか', variants: [], answer: 'ありません' },
     ]
     expect(retrieve('送料はいくら', { faqs, documents: [], products: [] }).faqs).toEqual(faqs)
   })
@@ -85,6 +86,11 @@ describe('retrieve', () => {
     const faqs = [big(1, '駐車場はありますか'), big(2, '営業時間を教えて'), big(3, '営業日と営業時間'), big(4, 'Wi-Fi はありますか'), big(5, 'Pet friendly?')]
     const out = retrieve('営業時間は何時から?', { faqs, documents: [], products: [] }, { faqs: 6, chunks: 4, products: 5 })
     expect(out.faqs.map((f) => f.id)).toEqual([2, 3])
+  })
+
+  it('matches a FAQ by any of its phrasings', () => {
+    const faqs = [big(1, '営業時間は?', ['何時まで開いてますか']), big(2, '駐車場はありますか'), big(3, 'Wi-Fi はありますか'), big(4, 'Pet friendly?'), big(5, '予約できますか')]
+    expect(retrieve('何時まで開いてる?', { faqs, documents: [], products: [] }).faqs.map((f) => f.id)).toEqual([1])
   })
 
   it('returns document chunks with their document', () => {
@@ -104,7 +110,10 @@ describe('retrieve', () => {
 
 describe('buildBotPrompt', () => {
   const knowledge: Knowledge = {
-    faqs: [{ id: 1, question: '営業時間は?', answer: '10 時〜19 時' }],
+    faqs: [
+      { id: 1, question: '営業時間は?', variants: [], answer: '10 時〜19 時' },
+      { id: 12, question: '定休日は?', variants: ['何曜日が休み?', 'Closed on?'], answer: '火曜日' },
+    ],
     chunks: [{ documentId: 4, name: 'ガイド', text: '返品は 7 日以内' }],
     products: [product(2, { name: 'ブレンド', price: 1200, description: '定番', tags: ['coffee', 'beans'] })],
   }
@@ -118,6 +127,7 @@ describe('buildBotPrompt', () => {
     expect(req.system).toContain('## Rules\n- 返金の約束をしない')
     expect(req.system).toContain('use action "unknown"')
     expect(req.system).toContain('[F1] Q: 営業時間は? A: 10 時〜19 時')
+    expect(req.system).toContain('[F12] Q: 定休日は? / 何曜日が休み? / Closed on? A: 火曜日')
     expect(req.system).toContain('[D4 ガイド] 返品は 7 日以内')
     expect(req.system).toMatch(/\[P2\] ブレンド — .1,200 — 定番 — coffee, beans/)
     expect(req.system).toContain('Name: "山田"')
@@ -284,11 +294,23 @@ describe('FAQ suggestions', () => {
   it('parses a fenced JSON array, skips incomplete items and caps the count', () => {
     const raw = 'Here you go:\n```json\n[{"question":"駐車場は?","answer":"ありません"},{"question":"","answer":"x"},{"question":"Q2","answer":"A2"},{"question":"Q3","answer":"A3"},{"question":"Q4","answer":"A4"}]\n```'
     expect(parseFaqSuggestions(raw)).toEqual([
-      { question: '駐車場は?', answer: 'ありません' },
-      { question: 'Q2', answer: 'A2' },
-      { question: 'Q3', answer: 'A3' },
+      { question: '駐車場は?', variants: [], answer: 'ありません' },
+      { question: 'Q2', variants: [], answer: 'A2' },
+      { question: 'Q3', variants: [], answer: 'A3' },
     ])
     expect(parseFaqSuggestions(raw, 10)).toHaveLength(4)
+  })
+
+  it('keeps up to 3 distinct variants per item', () => {
+    const raw = JSON.stringify([
+      { question: '駐車場は?', variants: [' 車で行けますか ', '駐車場は?', 'Parking?', 'parking?', 7, '', 'P はある?', '5 個目'], answer: 'ありません' },
+      { question: 'Q2', variants: 'not a list', answer: 'A2' },
+    ])
+    expect(parseFaqSuggestions(raw)).toEqual([
+      { question: '駐車場は?', variants: ['車で行けますか', 'Parking?', 'P はある?'], answer: 'ありません' },
+      { question: 'Q2', variants: [], answer: 'A2' },
+    ])
+    expect(faqSuggestPrompt('Customer: hi').system).toContain('"variants": string[]')
   })
 
   it('returns nothing for non-arrays', () => {
@@ -300,6 +322,24 @@ describe('FAQ suggestions', () => {
   it('asks for at most 3 (conversation) or 10 (document) pairs', () => {
     expect(faqSuggestPrompt('Customer: hi').system).toContain('up to 3')
     expect(documentFaqPrompt('text').system).toContain('up to 10')
+  })
+})
+
+describe('faqInputSchema', () => {
+  const faq = (variants: string[]) => faqInputSchema.safeParse({ question: '営業時間は?', variants, answer: '10 時から', status: 'approved' })
+
+  it('accepts up to 10 trimmed variants of ≤ 500 characters', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `${i} ${'x'.repeat(498)}`)
+    expect(faq(ten).success).toBe(true)
+    expect(faq([' 何時まで? ']).data?.variants).toEqual(['何時まで?'])
+  })
+
+  it('rejects 11 variants, empty or long ones and repeats', () => {
+    expect(faq(Array.from({ length: 11 }, (_, i) => `q${i}`)).success).toBe(false)
+    expect(faq(['  ']).success).toBe(false)
+    expect(faq(['x'.repeat(501)]).success).toBe(false)
+    expect(faq(['営業時間は?']).success).toBe(false)
+    expect(faq(['Open?', ' open? ']).success).toBe(false)
   })
 })
 

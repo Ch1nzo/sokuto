@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Badge, Button, SegmentedControl, SegmentedControlItem, Spinner, Text, TextField, Tooltip, VStack, useToast } from '@channel.io/bezier-react'
 import {
@@ -21,6 +21,7 @@ import { ApiError, api, errorMessage } from '../../lib/api'
 import { useLang, useT, type Key } from '../../lib/i18n'
 import { Card, DataTable, Drawer, EmptyState, ErrorBanner, LoadingState, RelativeTime, RowMenu, TextAreaField, TextInputField, formatNumber, middleTruncate, type Column } from '../../components'
 import { ConfirmAction } from '../../components/ConfirmAction'
+import { AddButton, IconBtn } from '../flow-editor/fields'
 import { BotFrame, useBot } from './shared'
 import type { BotDocument, Faq } from './types'
 
@@ -37,6 +38,7 @@ const SOURCES: Record<Faq['source'], [Key, BezierIcon]> = {
   document: ['bot_source_document', PageIcon],
 }
 const MAX_DOC_CHARS = 200_000
+const MAX_VARIANTS = 10
 
 /** Case- and width-insensitive search ("ＦＡＱ" finds "faq"). */
 const normalize = (s: string) => s.normalize('NFKC').toLowerCase()
@@ -56,7 +58,8 @@ export default function Knowledge() {
   const [query, setQuery] = useState('')
   // FAQ drawer: an existing FAQ, 'new', or closed.
   const [editing, setEditing] = useState<Faq | 'new' | null>(null)
-  const [faqForm, setFaqForm] = useState({ question: '', answer: '' })
+  const [faqForm, setFaqForm] = useState({ question: '', variants: [] as string[], answer: '' })
+  const questionLabel = useId()
   const [faqBusy, setFaqBusy] = useState(false)
   const [faqError, setFaqError] = useState<unknown>(null)
   const [deleting, setDeleting] = useState<Faq | null>(null)
@@ -103,7 +106,7 @@ export default function Knowledge() {
 
   const openFaq = (f: Faq | 'new') => {
     setEditing(f)
-    setFaqForm(f === 'new' ? { question: '', answer: '' } : { question: f.question, answer: f.answer })
+    setFaqForm(f === 'new' ? { question: '', variants: [], answer: '' } : { question: f.question, variants: f.variants, answer: f.answer })
     setFaqError(null)
   }
 
@@ -113,7 +116,11 @@ export default function Knowledge() {
     setFaqBusy(true)
     setFaqError(null)
     try {
-      const body = { question: faqForm.question.trim(), answer: faqForm.answer.trim() }
+      const question = faqForm.question.trim()
+      // Blank rows and repeated phrasings are dropped here rather than rejected by the API.
+      const seen = new Set([question.toLowerCase()])
+      const variants = faqForm.variants.map((v) => v.trim()).filter((v) => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase()))
+      const body = { question, variants, answer: faqForm.answer.trim() }
       if (editing === 'new') await api.post('/api/bot/faqs', body)
       else await api.put(`/api/bot/faqs/${editing.id}`, { ...body, status: 'approved' })
       toast.addToast(editing === 'new' ? t('bot_faq_added') : editing.status === 'suggested' ? t('bot_faq_approved_toast') : t('saved'), { preset: 'success' })
@@ -212,7 +219,7 @@ export default function Knowledge() {
     all: faqs?.length ?? 0,
   }
   const needle = normalize(query.trim())
-  const shownFaqs = (faqs ?? []).filter((f) => (status === 'all' || f.status === status) && (!needle || normalize(`${f.question}\n${f.answer}`).includes(needle)))
+  const shownFaqs = (faqs ?? []).filter((f) => (status === 'all' || f.status === status) && (!needle || normalize([f.question, ...f.variants, f.answer].join('\n')).includes(needle)))
 
   const faqColumns: Column<Faq>[] = [
     {
@@ -223,6 +230,11 @@ export default function Knowledge() {
           <span className="bot-clamp2 bot-faq__q" title={f.question}>
             {f.question}
           </span>
+          {f.variants.length > 0 && (
+            <Text typo="12" color="txt-black-dark">
+              {t('bot_faq_variants_count').replace('{n}', fmt(f.variants.length))}
+            </Text>
+          )}
           <span className="bot-trunc bot-faq__a" title={f.answer}>
             {f.answer}
           </span>
@@ -435,16 +447,38 @@ export default function Knowledge() {
         }
       >
         <VStack as="form" id="bot-faq-form" spacing={16} onSubmit={saveFaq}>
-          <TextAreaField
-            label={t('bot_col_question')}
-            value={faqForm.question}
-            maxLength={500}
-            minRows={3}
-            maxRows={6}
-            required
-            helperText={`${fmt(faqForm.question.length)} / ${fmt(500)}`}
-            onChange={(e) => setFaqForm({ ...faqForm, question: e.target.value })}
-          />
+          <div className="bot-field" role="group" aria-labelledby={questionLabel}>
+            <Text as="div" id={questionLabel} typo="13" bold color="txt-black-darker">
+              {t('bot_col_question')}
+            </Text>
+            <Text as="p" typo="12" color="txt-black-dark">
+              {t('bot_faq_variants_help')}
+            </Text>
+            <TextField size="m" value={faqForm.question} maxLength={500} required aria-label={t('bot_col_question')} onChange={(e) => setFaqForm({ ...faqForm, question: e.target.value })} />
+            {faqForm.variants.map((v, i) => (
+              <div key={i} className="bot-line">
+                <TextField
+                  size="m"
+                  value={v}
+                  maxLength={500}
+                  aria-label={`${t('bot_faq_variant')} ${i + 1}`}
+                  onChange={(e) => setFaqForm({ ...faqForm, variants: faqForm.variants.map((x, j) => (j === i ? e.target.value : x)) })}
+                />
+                <IconBtn
+                  icon={TrashIcon}
+                  danger
+                  label={`${t('delete')}: ${t('bot_faq_variant')} ${i + 1}`}
+                  onClick={() => setFaqForm({ ...faqForm, variants: faqForm.variants.filter((_, j) => j !== i) })}
+                />
+              </div>
+            ))}
+            <div className="bot-line__foot">
+              <AddButton text={t('bot_faq_add_variant')} disabled={faqForm.variants.length >= MAX_VARIANTS} onClick={() => setFaqForm({ ...faqForm, variants: [...faqForm.variants, ''] })} />
+              <Text typo="12" color="txt-black-dark" className="tabular">
+                {`${fmt(faqForm.variants.length)} / ${fmt(MAX_VARIANTS)}`}
+              </Text>
+            </div>
+          </div>
           <TextAreaField
             label={t('bot_col_answer')}
             value={faqForm.answer}

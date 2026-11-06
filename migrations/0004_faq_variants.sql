@@ -1,0 +1,1 @@
+ALTER TABLE `faqs` ADD `variants` text DEFAULT '[]' NOT NULL;

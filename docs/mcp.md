@@ -130,7 +130,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 | `get_bot` | 返信ボット Soku ([bot.md](bot.md)) の返信ルールと、直近 30 日の概要 (対応した会話・返信数・担当者に渡した数と理由・解決率・よく使われた FAQ と商品・ナレッジの件数) |
 | `update_bot` | Soku の返信ルールのうち指定した項目だけを変更 (`enabled`、`name`、`channels`、`persona`、`guidelines`、`guardrails`、`unknownAction`、`handoffMessage`、`fallbackMessage`、`maxTurns`、`autoClose`、`resolveMessage`、`recommendProducts`、`segmentId`、`suggestFaqs`、`language`)。`enabled: true` で実際のお客さんに返信し始めます (返信ごとに AI の料金がかかります) |
 | `list_faqs` | FAQ の一覧。`status`: `approved` (返信に使う) / `suggested` (承認待ちの提案) / `all` |
-| `upsert_faq` | FAQ を作成、`id` があれば更新。`status: "approved"` で提案を承認 |
+| `upsert_faq` | FAQ を作成、`id` があれば更新。`variants` に同じ回答で答える別の言い方の質問を最大 10 個 (各 500 文字、重複不可。渡すと置き換え)。`status: "approved"` で提案を承認 |
 | `delete_faq` | FAQ を削除 (提案の却下もこれ) |
 | `list_products` | 商品の一覧 (`q` で名前・SKU・タグを検索) |
 | `upsert_product` | 商品を作成 (`name` 必須)、`id` があれば指定した項目だけ更新。カードで送るには `url` が必要 |

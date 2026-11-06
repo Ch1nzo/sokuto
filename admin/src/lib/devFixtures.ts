@@ -788,13 +788,14 @@ const BOT_DEFAULTS = {
   language: 'auto',
 }
 
-type BotFaq = { id: number; question: string; answer: string; status: 'approved' | 'suggested'; source: 'manual' | 'conversation' | 'document'; documentId: number | null; contactId: number | null; uses: number; createdAt: string; updatedAt: string }
+type BotFaq = { id: number; question: string; variants: string[]; answer: string; status: 'approved' | 'suggested'; source: 'manual' | 'conversation' | 'document'; documentId: number | null; contactId: number | null; uses: number; createdAt: string; updatedAt: string }
 type BotDoc = { id: number; name: string; url: string | null; status: 'ready' | 'failed'; error: string | null; chars: number; fetchedAt: string | null; createdAt: string }
 type BotProduct = { id: number; name: string; description: string; price: number | null; currency: string; url: string | null; imageUrl: string | null; tags: string[]; sku: string | null; inStock: boolean; createdAt: string; updatedAt: string }
 
 const faq = (id: number, p: Partial<BotFaq>): BotFaq => ({
   id,
   question: '営業時間を教えてください',
+  variants: [],
   answer: '11:00〜22:00 (L.O. 21:30) です。火曜日は定休日です。',
   status: 'approved',
   source: 'manual',
@@ -825,22 +826,24 @@ const product = (id: number, p: Partial<BotProduct>): BotProduct => ({
 })
 
 const QUESTION_500 = fill('ハロウィン期間中 (10/24〜10/31) の予約で、4 名以上・アレルギー対応 (えび・かに・ナッツ) ・個室希望・キャンセル料の扱い・駐車場の有無について、Reservierungsänderung und Stornierungen も含めて教えてください。🎃 ', 500)
+/** The maximum: 10 other phrasings of 500 characters each. */
+const VARIANTS_10x500 = Array.from({ length: 10 }, (_, i) => fill(`言い換え ${i + 1}: ${QUESTION_500}`, 500))
 const ANSWER_4000 = fill('ご予約ありがとうございます。4 名以上のご予約は https://example.com/reserve?store=omotesando&party=4 から承ります。アレルギー対応はスタッフにお申し付けください。個室は 6 名まで、キャンセル料は前日 50%・当日 100% です。駐車場はございませんので近隣のコインパーキングをご利用ください。\n\n', 4000)
 
 function worstFaqs(): BotFaq[] {
   const crafted = [
-    faq(1, { question: QUESTION_500, answer: ANSWER_4000, uses: 48_213, updatedAt: ago(20 * 1000) }),
-    faq(2, { question: '🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰？', answer: '🎂', source: 'conversation', contactId: 1, uses: 1 }),
+    faq(1, { question: QUESTION_500, variants: VARIANTS_10x500, answer: ANSWER_4000, uses: 48_213, updatedAt: ago(20 * 1000) }),
+    faq(2, { question: '🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰🍰？', variants: ['🎂？', '🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁🧁？'], answer: '🎂', source: 'conversation', contactId: 1, uses: 1 }),
     faq(3, { question: 'Link?', answer: LONG_URL.slice(0, 2000), source: 'document', documentId: 1, uses: 999 }),
-    faq(4, { question: '?', answer: '—', uses: 0 }),
+    faq(4, { question: '?', variants: ['??'], answer: '—', uses: 0 }),
     faq(5, { question: 'Đặng Thị Ngọc Hân hỏi: cửa hàng có chỗ đậu xe không ạ? ปิ่นมณี ก็อยากรู้เหมือนกัน', answer: 'Không có chỗ đậu xe. ไม่มีที่จอดรถค่ะ', source: 'conversation', uses: 12 }),
   ]
   const approved = Array.from({ length: 30 - crafted.length }, (_, i) =>
     faq(crafted.length + 1 + i, { question: `${POOL_NAMES[i % POOL_NAMES.length]} さんからのよくある質問 #${i + 1}: テイクアウトはできますか？`, answer: 'はい、全メニューでテイクアウトできます。', uses: (i * 37) % 200, source: (['manual', 'conversation', 'document'] as const)[i % 3] }),
   )
   const suggested = [
-    faq(101, { status: 'suggested', source: 'conversation', contactId: 2, question: QUESTION_500, answer: ANSWER_4000.slice(0, 1200), updatedAt: ago(5 * MIN) }),
-    faq(102, { status: 'suggested', source: 'document', documentId: 1, question: 'Wi-Fi はありますか？', answer: 'はい、無料 Wi-Fi をご利用いただけます。パスワードは店内に掲示しています。', updatedAt: ago(HOUR) }),
+    faq(101, { status: 'suggested', source: 'conversation', contactId: 2, question: QUESTION_500, variants: VARIANTS_10x500, answer: ANSWER_4000.slice(0, 1200), updatedAt: ago(5 * MIN) }),
+    faq(102, { status: 'suggested', source: 'document', documentId: 1, question: 'Wi-Fi はありますか？', variants: ['ネットは使えますか？', 'Do you have Wi-Fi?', 'Wi-Fi のパスワードは？'], answer: 'はい、無料 Wi-Fi をご利用いただけます。パスワードは店内に掲示しています。', updatedAt: ago(HOUR) }),
     faq(103, { status: 'suggested', source: 'document', documentId: 1, question: 'ペット同伴は可能ですか？', answer: 'テラス席のみ小型犬の同伴が可能です。', updatedAt: ago(HOUR) }),
     faq(104, { status: 'suggested', source: 'conversation', contactId: 3, question: 'Jo', answer: LONG_URL.slice(0, 600), updatedAt: ago(DAY) }),
     faq(105, { status: 'suggested', source: 'conversation', contactId: 6, question: 'Cho mình hỏi cửa hàng mở cửa lúc mấy giờ ạ?', answer: '11:00〜22:00 です。', updatedAt: ago(2 * DAY) }),

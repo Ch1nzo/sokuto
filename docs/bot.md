@@ -56,10 +56,11 @@
 ### FAQ
 
 - 質問 500 文字・回答 4,000 文字まで。状態は **承認済み** (`approved`、返信に使う) と **提案** (`suggested`、承認するまで使わない) の 2 つです。
-- 承認済み FAQ の合計が **6,000 文字以下なら毎回すべて** を AI に渡します。それより多いときは、メッセージとの一致が多い順に 6 件を渡します。
+- **言い換え** (`variants`): 1 つの回答に、最初の質問とは別の言い方の質問を 10 個 (各 500 文字) まで登録できます。検索ではどの質問も回答と一緒に数え、AI には `[F12] Q: 営業時間は? / 何時まで開いてますか A: …` のようにすべての質問を渡します。最初の質問と同じものや、言い換えどうしで同じもの (大文字小文字と前後の空白は区別しない) は登録できません。一覧・概要・MCP の要約には最初の質問だけを出します。
+- 承認済み FAQ の合計 (言い換えを含む) が **6,000 文字以下なら毎回すべて** を AI に渡します。それより多いときは、メッセージとの一致が多い順に 6 件を渡します。
 - 一致の数え方: メッセージを NFKC で正規化して小文字にし、英数字の語 (2 文字以上) と、漢字・ひらがな・カタカナの連続から作った 2 文字の組 (2-gram) を取り出します。FAQ・ドキュメントの段落・商品に、そのうちいくつが含まれるかを数えます (0 のものは渡しません)。
 - 返信に使われた FAQ は「使用回数」(`uses`) が 1 増えます。
-- **FAQ の提案**: (1) 返信ルールの「会話から FAQ を提案」がオンのとき、Soku が解決した会話や、受信箱で「完了」にした会話から最大 3 件、(2) ドキュメントの「FAQ を生成」で、ドキュメントの先頭 12,000 文字から最大 10 件を AI が作ります。既存の FAQ と質問が同じ (大文字小文字を区別しない) ものは作りません。提案は「承認」(状態を `approved` に変更) するか「却下」(削除) します。
+- **FAQ の提案**: (1) 返信ルールの「会話から FAQ を提案」がオンのとき、Soku が解決した会話や、受信箱で「完了」にした会話から最大 3 件、(2) ドキュメントの「FAQ を生成」で、ドキュメントの先頭 12,000 文字から最大 10 件を AI が作ります。それぞれに言い換えを最大 3 個付けます。質問か言い換えのどれかが既存の FAQ の質問・言い換えと同じ (大文字小文字を区別しない) ものは作りません。提案は「承認」(状態を `approved` に変更) するか「却下」(削除) します。
 
 ### ドキュメント
 
@@ -129,8 +130,8 @@
 | `PUT /api/bot` | 返信ルールの一部を変更 → `{ config }` (400 `invalid_bot_config` + `errors`) |
 | `GET /api/bot/overview?days=30` | 概要の指標 (6 章) |
 | `GET /api/bot/faqs?status=approved\|suggested\|all` | `{ faqs }` (更新日時の新しい順) |
-| `POST /api/bot/faqs` | `{ question, answer, status? }` → 201 `{ faq }` (400 `invalid_faq`) |
-| `PUT /api/bot/faqs/:id` | `{ question?, answer?, status? }` → `{ faq }` |
+| `POST /api/bot/faqs` | `{ question, variants?, answer, status? }` → 201 `{ faq }` (400 `invalid_faq`) |
+| `PUT /api/bot/faqs/:id` | `{ question?, variants?, answer?, status? }` → `{ faq }` (`variants` を渡すと一覧ごと置き換え) |
 | `DELETE /api/bot/faqs/:id` | `{ ok }` |
 | `GET /api/bot/documents` | `{ documents }` (本文は返さず、文字数 `chars`) |
 | `POST /api/bot/documents` | `{ name?, url?, text? }` (URL か文章のどちらかが必須) → 201 `{ document }` (400 `invalid_document`。URL の取得失敗は `status: "failed"` で 201) |
@@ -150,11 +151,11 @@
 
 ## 10. MCP
 
-`get_bot` (設定と直近 30 日の概要)、`update_bot` (返信ルールの一部を変更)、`list_faqs`、`upsert_faq` (`id` があれば更新。`status: "approved"` で提案を承認)、`delete_faq`、`list_products`、`upsert_product`、`delete_product`、`add_document`、`delete_document` の 10 個です。`get_overview` には `bot: { enabled, name }` が入ります。詳しくは [mcp.md](mcp.md)。
+`get_bot` (設定と直近 30 日の概要)、`update_bot` (返信ルールの一部を変更)、`list_faqs`、`upsert_faq` (`id` があれば更新。`variants` で言い換えを最大 10 個。`status: "approved"` で提案を承認)、`delete_faq`、`list_products`、`upsert_product`、`delete_product`、`add_document`、`delete_document` の 10 個です。`get_overview` には `bot: { enabled, name }` が入ります。詳しくは [mcp.md](mcp.md)。
 
 ## 11. 制限
 
-- 検索は語の一致を数えるだけです (意味の近さは見ません)。言い換えが多い質問は、FAQ の質問に言い方を足すか、小さい FAQ (合計 6,000 文字以下) にしてください。
+- 検索は語の一致を数えるだけです (意味の近さは見ません)。言い換えが多い質問は、FAQ に言い換え (`variants`) を足すか、小さい FAQ (合計 6,000 文字以下) にしてください。
 - 返信のたびに、承認済み FAQ・状態が「取得済み」のドキュメントの本文・在庫ありの商品をすべて読み込みます。ドキュメントが非常に大きい (合計で数 MB) と、Workers の CPU 時間の上限に近づきます。
 - 画像やスタンプの内容は読みません。
 
@@ -166,8 +167,8 @@
 
 - **Rules** (`PUT /api/bot`, partial update, 400 `invalid_bot_config`): `enabled`, `name` (default `Soku`), `channels`, `language` (`auto` follows the customer), `segmentId`, `persona`, `guidelines` and `guardrails` (≤ 20 × 200 chars), `unknownAction` (`handoff` or `fallback` with `fallbackMessage`), `handoffMessage`, `maxTurns` (replies per contact per 24 h, 1–50, default 10), `autoClose` and `resolveMessage`, `recommendProducts`, `suggestFaqs`.
 - **Prompt**: name, persona, guidelines, rules (guardrails plus fixed rules: answer only from the knowledge or say `unknown`, hand over on request / anger / impossible asks, reply in the customer's or the fixed language, short plain text, products only by their ids), knowledge, customer (display name, channel, business local time; never custom fields or bot variables), JSON output (`reply`, `action`, `resolved`, `faqIds`, `productIds`, `reason`). History: the contact's last 12 text messages. Returned ids not in the given knowledge are dropped; non-JSON text is sent as is; empty or cut-off JSON counts as `unknown`.
-- **Knowledge**: FAQs (`approved` are used, `suggested` wait for review; all approved FAQs go into every prompt while they total ≤ 6,000 chars, else the top 6), documents (https URL fetched with a 10 s timeout, 2 MB cap, https redirects only, `text/*` or JSON only, HTML reduced to text, ≤ 200,000 chars; no PDF; failures are stored as `failed` with the reason; pasted text also works; top 4 chunks of ~1,200 chars per reply), products (top 5 in stock; sent as LINE carousel / Meta generic cards with a link button, at most 10, products without a URL listed as text; CSV import with columns `name, description, price, currency, url, imageUrl, tags (| or ;), sku, inStock`, ≤ 500 rows, an sku match updates only the columns present). Ranking counts matched query terms (NFKC, lower case, latin words of 2+ chars and kanji / kana 2-grams). FAQ suggestions come from finished conversations (≤ 3, when `suggestFaqs` is on) and from documents (≤ 10, on request), skipping questions that already exist.
+- **Knowledge**: FAQs (`approved` are used, `suggested` wait for review; each has a primary `question` plus up to 10 `variants`, other phrasings of ≤ 500 chars that may not repeat the question or each other, all scored for retrieval and listed in the prompt as `Q: a / b A: …`; all approved FAQs go into every prompt while they total ≤ 6,000 chars, else the top 6), documents (https URL fetched with a 10 s timeout, 2 MB cap, https redirects only, `text/*` or JSON only, HTML reduced to text, ≤ 200,000 chars; no PDF; failures are stored as `failed` with the reason; pasted text also works; top 4 chunks of ~1,200 chars per reply), products (top 5 in stock; sent as LINE carousel / Meta generic cards with a link button, at most 10, products without a URL listed as text; CSV import with columns `name, description, price, currency, url, imageUrl, tags (| or ;), sku, inStock`, ≤ 500 rows, an sku match updates only the columns present). Ranking counts matched query terms (NFKC, lower case, latin words of 2+ chars and kanji / kana 2-grams). FAQ suggestions come from finished conversations (≤ 3, when `suggestFaqs` is on) and from documents (≤ 10, on request), each with ≤ 3 variants, skipping items whose question or variant already exists as a question or variant.
 - **Hand-over**: pauses the bot for the contact, clears its session and sequences, notifies the team, sends `handoffMessage` and records `bot_handoff` with `reason` (`customer_request`, `missing_knowledge`, `policy`, `max_turns`, `ai_error`, `other`). Hand-over keywords keep working as before and do not record `bot_handoff`.
 - **Overview** (`GET /api/bot/overview?days=`, UTC days): `handled` = contacts with a `bot_reply` or `bot_handoff` in the period, `replies`, `handoffs`, `resolved`, `resolutionRate` and `handoffRate` (% of handled), `avgTurns`, daily `series`, `handoffReasons`, `topFaqs` (all-time uses), `topProducts` (cards sent in the period), knowledge counts.
 - **Playground** (`POST /api/bot/playground`): shows what Soku would do without sending or logging anything, but calls the AI provider (billed). **Inbox**: `POST /api/inbox/:id/draft` drafts a reply for the staff member (billed); `POST /api/inbox/:id/products` sends product cards as a human reply and pauses the bot unless `pauseBot: false`. Closing a conversation in the inbox makes FAQ suggestions when `suggestFaqs` is on.
-- **MCP**: `get_bot`, `update_bot`, `list_faqs`, `upsert_faq`, `delete_faq`, `list_products`, `upsert_product`, `delete_product`, `add_document`, `delete_document`; `get_overview` reports `bot: { enabled, name }`.
+- **MCP**: `get_bot`, `update_bot`, `list_faqs`, `upsert_faq` (takes `variants`), `delete_faq`, `list_products`, `upsert_product`, `delete_product`, `add_document`, `delete_document`; `get_overview` reports `bot: { enabled, name }`.
