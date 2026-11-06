@@ -225,7 +225,7 @@ export async function metaSubscribePage(token: string, pageId: string, version =
   return { ok: true as const }
 }
 
-/** Messenger Profile fields Sokuto manages. Order matters on DELETE: the menu must go before get_started. */
+/** Messenger Profile fields Sokutō manages. Order matters on DELETE: the menu must go before get_started. */
 export const PROFILE_FIELDS = ['persistent_menu', 'ice_breakers', 'greeting', 'get_started']
 /** Instagram (`platform=instagram`) only supports these. */
 export const IG_PROFILE_FIELDS = ['persistent_menu', 'ice_breakers']

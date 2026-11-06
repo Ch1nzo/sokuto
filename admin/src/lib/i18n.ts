@@ -4,7 +4,7 @@ export type Lang = 'ja' | 'en'
 
 const dict = {
   ja: {
-    appName: 'Sokuto',
+    appName: 'Sokutō',
     nav_dashboard: 'ダッシュボード',
     nav_inbox: '受信箱',
     nav_flows: '自動化',
@@ -480,7 +480,7 @@ const dict = {
     test_sequence_hint: '登録直後からの配信を再生します (待機は飛ばします)。',
   },
   en: {
-    appName: 'Sokuto',
+    appName: 'Sokutō',
     nav_dashboard: 'Dashboard',
     nav_inbox: 'Inbox',
     nav_flows: 'Automations',

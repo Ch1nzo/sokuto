@@ -1,20 +1,20 @@
-# Sokuto
+# Sokutō
 
-<p align="center"><img src="docs/images/hero.webp" alt="Sokuto" width="800"></p>
+<p align="center"><img src="docs/images/hero.webp" alt="Sokutō" width="800"></p>
 
-Sokuto(即答)= すぐに答える
+Sokutō(即答)= すぐに答える
 
-Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボットを、**あなた自身の無料 Cloudflare アカウント**の上で動かすためのオープンソースソフトウェア (MIT) です。「価格とコメントした人に DM で価格を送る」「友だち追加した人にあいさつしてアンケートを取る」といった自動応答を管理画面から作れます。ChatGPT / Claude / Claude Code から MCP(AI アシスタントが外部のツールを操作するための共通の接続方式)で自動化を作ったりテストしたりすることもできます。商用サービス noflow.pro のオープンソース代替として作られており、日本向けに LINE 対応を加えています。
+Sokutō は LINE・Facebook Messenger・Instagram で動くチャットボットを、**あなた自身の無料 Cloudflare アカウント**の上で動かすためのオープンソースソフトウェア (MIT) です。「価格とコメントした人に DM で価格を送る」「友だち追加した人にあいさつしてアンケートを取る」といった自動応答を管理画面から作れます。ChatGPT / Claude / Claude Code から MCP(AI アシスタントが外部のツールを操作するための共通の接続方式)で自動化を作ったりテストしたりすることもできます。商用サービス noflow.pro のオープンソース代替として作られており、日本向けに LINE 対応を加えています。
 
 [English below](#english)
 
 ---
 
-## なぜ Sokuto か
+## なぜ Sokutō か
 
 - ソフトウェアは MIT ライセンスで、買い切りどころか無料です。Cloudflare の無料プランの範囲で動くように作られているので、月額料金はかかりません。
 - サーバーはあなたの Cloudflare アカウント内で動く Worker(Cloudflare が提供する小さなプログラムの実行環境)です。サービス終了や値上げの影響を受けません。
-- 連絡先・会話履歴・設定は自分のデータとして、あなたのアカウントの D1(Cloudflare のデータベース)と KV(同じく Cloudflare の設定保存領域)にだけ保存されます。Sokuto の開発者を含め、第三者には送られません。
+- 連絡先・会話履歴・設定は自分のデータとして、あなたのアカウントの D1(Cloudflare のデータベース)と KV(同じく Cloudflare の設定保存領域)にだけ保存されます。Sokutō の開発者を含め、第三者には送られません。
 - 管理画面で MCP トークンを発行すると、ChatGPT / Claude / Claude Code などの AI から操作でき、「こういう自動化を作って」と頼めます。AI はスキーマを読んで自動化を作成し、テストし、公開まで行えます。
 
 ## できること
@@ -34,7 +34,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - 設定: ボット変数 (営業時間などを一度登録し、どのメッセージでも `{{bot.hours}}` のように使えます)
 - AI 応答 (Anthropic / OpenAI 互換 / Workers AI): 「設定」→「AI 応答 (LLM)」でプロバイダーと API キーを登録し、接続テストできます (キーは暗号化して保存)。「AI 応答 (会話)」ステップは指示と参考情報 (FAQ など) をもとにお客さんと会話し、目的を果たすか最大回数に達したら次のステップへ進みます。「意図」トリガーは、キーワードに一致しないメッセージを AI が判定して当てはまる自動化を始めます。呼び出しごとにプロバイダーの料金がかかり、テストでも実際に呼び出します (Workers AI は Cloudflare の無料枠内で使えます)。詳しくは [docs/ai.md](docs/ai.md)
 - MCP サーバー: 26 個のツールで自動化・連絡先・受信箱・配信・レポートを AI から操作 ([docs/mcp.md](docs/mcp.md))
-- ワークスペース: 複数の店舗 / ブランドを 1 つの Sokuto で運用。接続・連絡先・自動化・設定がワークスペースごとに分かれ、サイドバーで切替 (管理者パスワードは共通。MCP トークンはワークスペースごと)
+- ワークスペース: 複数の店舗 / ブランドを 1 つの Sokutō で運用。接続・連絡先・自動化・設定がワークスペースごとに分かれ、サイドバーで切替 (管理者パスワードは共通。MCP トークンはワークスペースごと)
 
 ## 5 分でインストール
 
@@ -59,11 +59,11 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 5. **自動化** → **テンプレートから作る** でテンプレートを選び、文面を自分のお店に合わせて直し、**テスト** で動きを確かめてから **公開する** を押します。
 6. (任意) **設定** → **AI 連携 (MCP)** でトークンを発行し、Claude / ChatGPT などをつなぎます ([docs/mcp.md](docs/mcp.md))。
 
-> パスワードを忘れたとき: Cloudflare ダッシュボード → ストレージとデータベース → KV → Sokuto の KV を開き、キー `admin:password` を削除すると、次にアクセスしたときに再びパスワード設定画面が出ます。削除したらすぐに新しいパスワードを設定してください。
+> パスワードを忘れたとき: Cloudflare ダッシュボード → ストレージとデータベース → KV → Sokutō の KV を開き、キー `admin:password` を削除すると、次にアクセスしたときに再びパスワード設定画面が出ます。削除したらすぐに新しいパスワードを設定してください。
 
 ## 料金と制限
 
-Sokuto 自体に料金はありません。ただし、次の外部サービスには制限があります。数値は執筆時点のものです。最新情報は各社の公式ページで確認してください。
+Sokutō 自体に料金はありません。ただし、次の外部サービスには制限があります。数値は執筆時点のものです。最新情報は各社の公式ページで確認してください。
 
 **Cloudflare 無料プラン**
 
@@ -77,11 +77,11 @@ Sokuto 自体に料金はありません。ただし、次の外部サービス�
 
 - 応答メッセージ (お客さんのメッセージへの返信) は無料で、通数に数えられません。
 - プッシュメッセージ (一斉配信、待機ステップのあとの送信、受信箱からの手動返信など) は、LINE 公式アカウントの料金プランの月間通数に数えられます。無料プランは月 200 通です (2026 年時点)。最新情報は LINE 公式の料金ページで確認してください。
-- Sokuto はお客さんのメッセージ 1 つに対し、最初の 1 回だけ応答メッセージ (reply) を使います。1 回の応答で 2 つ以上のステップを送る自動化では、2 つ目以降はプッシュメッセージとして送られ、通数に数えられます。
+- Sokutō はお客さんのメッセージ 1 つに対し、最初の 1 回だけ応答メッセージ (reply) を使います。1 回の応答で 2 つ以上のステップを送る自動化では、2 つ目以降はプッシュメッセージとして送られ、通数に数えられます。
 
 **Meta (Messenger / Instagram)**
 
-- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。Sokuto の一斉配信は 24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます。メッセージタグを付けた配信は例外ですが、Meta のポリシーでイベントの確認・購入後の連絡・アカウント更新に限られます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
+- **24 時間ルール**: お客さんの最後のメッセージから 24 時間を過ぎると、通常のメッセージは送れません。Sokutō の一斉配信は 24 時間以内にメッセージをくれた人にだけ送ります (それ以外は「対象外」として数えられます。メッセージタグを付けた配信は例外ですが、Meta のポリシーでイベントの確認・購入後の連絡・アカウント更新に限られます)。24 時間を超える待機ステップのあとのメッセージも送れずにエラーになります。
 - コメントへのプライベート返信 (DM) は、1 つのコメントにつき 1 回だけです。
 
 ## 仕組み
@@ -92,7 +92,7 @@ Sokuto 自体に料金はありません。ただし、次の外部サービス�
 LINE / Messenger / Instagram
         │  Webhook (署名を検証)
         ▼
-Cloudflare Worker (Sokuto)  ── 管理画面 (React SPA, 静的アセット)
+Cloudflare Worker (Sokutō)  ── 管理画面 (React SPA, 静的アセット)
    │   │   └── /mcp  ← ChatGPT / Claude (Bearer トークン)
    │   └── Cron (1 分ごと): 待機の再開・一斉配信
    ▼
@@ -107,11 +107,11 @@ D1 (連絡先・会話・自動化・統計)   KV (自動生成された鍵・�
 
 ## noflow との違い
 
-Sokuto は noflow.pro を参考にしたオープンソースの代替ですが、同じものではありません。現時点の違いを正直に挙げると、次のとおりです。
+Sokutō は noflow.pro を参考にしたオープンソースの代替ですが、同じものではありません。現時点の違いを正直に挙げると、次のとおりです。
 
 - **ホスト型のインストーラーはまだありません**。Deploy to Cloudflare ボタンで自分の Cloudflare にデプロイする形です。
 - **Meta アプリの設定は手動です**。Facebook / Instagram を使うには、自分で Meta 開発者アプリを作り、一般公開する場合はアプリレビューを通す必要があります ([docs/setup-meta.md](docs/setup-meta.md))。ここが一番手間のかかる部分です。
-- 一方で、LINE に対応していること、ソースコードとデータがすべて自分の手元にあること、費用がかからないことは Sokuto の利点です。
+- 一方で、LINE に対応していること、ソースコードとデータがすべて自分の手元にあること、費用がかからないことは Sokutō の利点です。
 
 ## ライセンス
 
@@ -123,11 +123,11 @@ MIT License。[LICENSE](LICENSE) を見てください。
 
 ## English
 
-Sokuto (即答) means "instant answer".
+Sokutō (即答) means "instant answer".
 
-Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instagram** that runs entirely on **your own free Cloudflare account** (Workers + D1 + KV + Cron). It ships an admin web app and an MCP server so ChatGPT, Claude and Claude Code can build, test and publish automations. It is an open-source alternative to noflow.pro, with LINE support added for the Japanese market.
+Sokutō is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instagram** that runs entirely on **your own free Cloudflare account** (Workers + D1 + KV + Cron). It ships an admin web app and an MCP server so ChatGPT, Claude and Claude Code can build, test and publish automations. It is an open-source alternative to noflow.pro, with LINE support added for the Japanese market.
 
-### Why Sokuto
+### Why Sokutō
 
 - **Free, not just buy-once**: MIT-licensed, designed to fit Cloudflare's free plan.
 - **Your server**: a Worker in your own Cloudflare account.
@@ -144,7 +144,7 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 - Channel settings: Messenger/Instagram Get Started, greeting, persistent menu and ice breakers, and the LINE rich menu, each item starting a flow.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
 - AI replies (Anthropic, OpenAI-compatible, or Workers AI; set up in Settings with a connection test, key stored encrypted): an AI reply step that holds a conversation from your instructions and FAQ text, and intent triggers that let the AI pick a flow for messages no keyword matched. Each call is billed by the provider, test runs included; Workers AI runs within Cloudflare's free tier. See [docs/ai.md](docs/ai.md).
-- Workspaces: run several shops / brands from one Sokuto. Connections, contacts, automations and settings are separate per workspace, switched from the sidebar (one admin password; one MCP token per workspace).
+- Workspaces: run several shops / brands from one Sokutō. Connections, contacts, automations and settings are separate per workspace, switched from the sidebar (one admin password; one MCP token per workspace).
 
 ### Install in 5 minutes
 

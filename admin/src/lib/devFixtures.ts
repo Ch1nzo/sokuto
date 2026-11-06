@@ -522,7 +522,7 @@ const DATASETS: Record<DataMode, Dataset> = {
     lastMessage: () => null,
     messages: () => [],
     overview: () => ({
-      general: { botName: 'Sokuto', paused: false },
+      general: { botName: 'Sokutō', paused: false },
       channels: [],
       stats: { contacts: 0, newContacts7d: 0, messagesIn7d: 0, messagesOut7d: 0, flowsLive: 0, events30d: {} },
       notifications: [],
@@ -540,7 +540,7 @@ const DATASETS: Record<DataMode, Dataset> = {
       { id: 1, contactId: id, direction: 'in', source: 'user', kind: 'text', text: '営業時間を教えてください', payload: { type: 'message' }, flowId: null, stepId: null, error: null, createdAt: ago(2 * MIN) },
     ],
     overview: () => ({
-      general: { botName: 'Sokuto', paused: false },
+      general: { botName: 'Sokutō', paused: false },
       channels: ['line'],
       stats: { contacts: 1, newContacts7d: 1, messagesIn7d: 1, messagesOut7d: 1, flowsLive: 1, events30d: {} },
       notifications: [{ id: 1, contactId: 1, text: '佐藤 美咲 が担当者を希望しています', read: 0, createdAt: ago(MIN) }],
@@ -558,7 +558,7 @@ const DATASETS: Record<DataMode, Dataset> = {
     lastMessage: genericLast,
     messages: hugeMessages,
     overview: () => ({
-      general: { botName: 'Sokuto', paused: false },
+      general: { botName: 'Sokutō', paused: false },
       channels: ['line', 'messenger', 'instagram'],
       stats: { contacts: 25_000, newContacts7d: 1_284, messagesIn7d: 184_233, messagesOut7d: 1_002_417, flowsLive: 48, events30d: {} },
       notifications: Array.from({ length: 10 }, (_, i) => ({ id: 1000 - i, contactId: i + 1, text: `${POOL_NAMES[i % POOL_NAMES.length]} が担当者を希望しています`, read: 0, createdAt: ago(i * HOUR) })),

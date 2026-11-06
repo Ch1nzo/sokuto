@@ -1,4 +1,4 @@
-# Sokuto needs no secrets at deploy time.
+# Sokutō needs no secrets at deploy time.
 # Session keys, encryption keys and the MCP token are generated automatically
 # on first run and stored in your own Cloudflare KV namespace.
 #

@@ -200,7 +200,7 @@ export function buildRichMenu(m: LineRichMenu) {
       action,
     }
   })
-  return { size: { width, height }, selected: true, name: 'Sokuto', chatBarText: m.chatBarText.slice(0, 14), areas }
+  return { size: { width, height }, selected: true, name: 'Sokutō', chatBarText: m.chatBarText.slice(0, 14), areas }
 }
 
 type LineResult<T> = { ok: true; data: T } | { ok: false; error: string }

@@ -6,7 +6,7 @@ import { decryptString, encryptString, randomToken } from './crypto'
 import type { Channel } from './channels/types'
 
 /**
- * Secrets that Sokuto generates by itself on first run and keeps in KV.
+ * Secrets that Sokutō generates by itself on first run and keeps in KV.
  * Users never have to configure these. Shared by all workspaces.
  */
 export type SecretName = 'session_secret' | 'enc_key' | 'meta_verify_token'
@@ -53,7 +53,7 @@ export type GeneralSettings = {
 }
 
 export const DEFAULT_GENERAL: GeneralSettings = {
-  botName: 'Sokuto',
+  botName: 'Sokutō',
   language: 'ja',
   timezone: 'Asia/Tokyo',
   paused: false,

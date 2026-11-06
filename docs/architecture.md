@@ -1,6 +1,6 @@
 # アーキテクチャ
 
-Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の受信、管理画面用の API、MCP サーバー、1 分ごとの定期処理 (Cron) をすべて担当し、データは D1 (SQLite) と KV に保存します。管理画面 (React SPA) は同じ Worker の静的アセットとして配信されます。
+Sokutō は 1 つの Cloudflare Worker で動きます。Worker が Webhook の受信、管理画面用の API、MCP サーバー、1 分ごとの定期処理 (Cron) をすべて担当し、データは D1 (SQLite) と KV に保存します。管理画面 (React SPA) は同じ Worker の静的アセットとして配信されます。
 
 ## リクエストの流れ
 
@@ -29,7 +29,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 
 ## ワークスペース
 
-1 つの Sokuto (1 つの Worker・D1・KV) で、複数の**ワークスペース** (店舗やブランド) を運用できます。ワークスペースごとに、LINE / Meta の接続、連絡先と会話、自動化とシーケンス、一斉配信、セグメント、定型文、レポート (`events`)、通知、一般設定 (ボット名・タイムゾーン・担当者呼び出し・ボット変数)、AI 設定、Messenger / Instagram のプロフィールと LINE リッチメニュー、MCP トークンが分かれます。管理者パスワード、セッション、暗号化鍵、Meta の検証トークンは全ワークスペース共通です。最初からあるデータはワークスペース 1 (「Default」) になり、ワークスペース 1 は削除できません。コードは `src/workspaces.ts` です。
+1 つの Sokutō (1 つの Worker・D1・KV) で、複数の**ワークスペース** (店舗やブランド) を運用できます。ワークスペースごとに、LINE / Meta の接続、連絡先と会話、自動化とシーケンス、一斉配信、セグメント、定型文、レポート (`events`)、通知、一般設定 (ボット名・タイムゾーン・担当者呼び出し・ボット変数)、AI 設定、Messenger / Instagram のプロフィールと LINE リッチメニュー、MCP トークンが分かれます。管理者パスワード、セッション、暗号化鍵、Meta の検証トークンは全ワークスペース共通です。最初からあるデータはワークスペース 1 (「Default」) になり、ワークスペース 1 は削除できません。コードは `src/workspaces.ts` です。
 
 - **どのワークスペースか**: 管理画面の API (`/api/*`) は、ヘッダー `X-Workspace: <ID>` (なければ Cookie `sokuto_ws`、どちらもなければ 1) でワークスペースを選びます (`src/auth/index.ts` の `resolveWorkspace`)。存在しない ID は 404 `workspace_not_found` です。MCP トークンで呼んだ場合は、トークンのワークスペースに固定されます (ヘッダーは無視)。
 - **ワークスペースの管理**: `GET /api/workspaces` (`{ workspaces: [{ id, name, createdAt }], current }`)、`POST /api/workspaces { name }` (201)、`PUT /api/workspaces/:id { name }`、`DELETE /api/workspaces/:id` (ID 1 は 400 `cannot_delete_default`)。名前は 1〜60 文字 (それ以外は 400 `invalid_name`)。パスワードでログインしたセッションからだけ使えます (MCP トークンでは 403 `session_required`)。削除すると、そのワークスペースの連絡先・会話・セッション・タグ・シーケンス登録・配信 (と宛先)・自動化・セグメント・定型文・記録・通知・設定を 1 回の D1 バッチで消し、MCP トークンも無効にします。
@@ -202,7 +202,7 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 
 ## English summary
 
-Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
+Sokutō is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
 - **Workspaces** (`src/workspaces.ts`): one deployment hosts several workspaces (shops / brands), each with its own LINE / Meta connection, contacts, conversations, flows, broadcasts, segments, snippets, events, notifications, general settings, bot variables, AI settings, profile / rich menu and MCP token; the admin password, sessions, the encryption key and the Meta verify token are shared. Existing data is workspace 1 ("Default"), which cannot be deleted. `/api/*` picks the workspace from the `X-Workspace` header (else the `sokuto_ws` cookie, else 1; unknown → 404 `workspace_not_found`); an MCP token is pinned to its own workspace. `GET/POST /api/workspaces`, `PUT/DELETE /api/workspaces/:id` (session only, else 403 `session_required`; deleting 1 → 400 `cannot_delete_default`; deleting removes all of the workspace's rows in one D1 batch and its MCP token). Webhooks are `/webhooks/line/<id>` and `/webhooks/meta/<id>`; the old URLs without an id are workspace 1. A Meta app has one callback URL, so use one Meta app per workspace. The scheduler runs all workspaces, taking the workspace from the contact or broadcast row.
 - **Data**: D1 tables `workspaces`, `settings` (keys prefixed `ws:<id>:`: `general`, `channel:line`, `channel:meta`, `profile:meta`, `richmenu:line`, `ai`), `contacts` (unique per `workspace_id` + `channel` + `channel_user_id`), `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`, `snippets` (canned inbox replies); contacts carry an inbox `status` (`open`/`closed`, reopened by any inbound message) and internal `notes`. `contacts`, `flows`, `broadcasts`, `segments`, `snippets`, `events` and `notifications` carry `workspace_id`; the other tables are reached through a contact, flow or broadcast. `processed_events` ids are `<workspace>:<channel>:<event id>`. KV holds auto-generated secrets, the password hash, MCP tokens (`mcp:ws:<id>` = hash, `mcp:token:<hash>` = workspace id; the pre-workspace `mcp:token_hash` is moved to workspace 1 on first use) and login rate-limit counters.

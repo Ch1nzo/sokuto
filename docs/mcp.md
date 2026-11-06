@@ -1,6 +1,6 @@
-# AI (ChatGPT / Claude) から Sokuto を操作する (MCP)
+# AI (ChatGPT / Claude) から Sokutō を操作する (MCP)
 
-**MCP (Model Context Protocol)** は、AI アシスタントが外部のツールを安全に呼び出すための共通の仕組みです。Sokuto は MCP サーバーを内蔵しているので、Claude や ChatGPT に「こういう自動化を作って」と日本語で頼むと、AI が自動化を作成し、テストし、公開まで行えます。
+**MCP (Model Context Protocol)** は、AI アシスタントが外部のツールを安全に呼び出すための共通の仕組みです。Sokutō は MCP サーバーを内蔵しているので、Claude や ChatGPT に「こういう自動化を作って」と日本語で頼むと、AI が自動化を作成し、テストし、公開まで行えます。
 
 - MCP の URL: `https://<あなたの Worker の URL>/mcp`
 - 認証: HTTP ヘッダー `Authorization: Bearer <トークン>`
@@ -10,7 +10,7 @@
 
 ## 1. トークンを発行する
 
-1. Sokuto の管理画面で **「設定」** を開きます。
+1. Sokutō の管理画面で **「設定」** を開きます。
 2. **「AI 連携 (MCP)」** の欄で **「トークンを発行」** を押します。
 3. 表示された **MCP URL** と **トークン** (`sk_` で始まる文字列) をコピーします。
    - **トークンは一度しか表示されません。** なくした場合は「トークンを再発行」を押してください (古いトークンは使えなくなります)。
@@ -59,9 +59,9 @@ Claude Desktop の設定ファイル `claude_desktop_config.json` は、ロー�
 }
 ```
 
-3. Claude Desktop を再起動します。チャット入力欄のツールの一覧に Sokuto が表示されれば成功です。
+3. Claude Desktop を再起動します。チャット入力欄のツールの一覧に Sokutō が表示されれば成功です。
 
-> Claude の「コネクタ」画面 (カスタムコネクタの追加) は、OAuth で認証するサーバー向けです。Sokuto は現在、固定のトークン (Bearer) だけに対応しているため、上の設定ファイルの方法を使ってください。
+> Claude の「コネクタ」画面 (カスタムコネクタの追加) は、OAuth で認証するサーバー向けです。Sokutō は現在、固定のトークン (Bearer) だけに対応しているため、上の設定ファイルの方法を使ってください。
 
 ### ChatGPT
 
@@ -71,7 +71,7 @@ ChatGPT では、**開発者モード** を有効にすると、リモート MCP
 2. **「作成」** (コネクタを追加) を押し、名前に `sokuto`、MCP サーバーの URL に自分の MCP URL を入れます。
 3. 認証方式で、固定のヘッダー (API キー / Bearer トークン) を設定できる場合は `Authorization: Bearer sk_xxxxxxxx` を設定します。
 
-> 注意: 執筆時点では、ChatGPT のコネクタの認証方式は OAuth または「認証なし」が中心で、固定の Bearer トークンを入力できない場合があります。その場合、Sokuto の MCP サーバーには ChatGPT から直接接続できません (Sokuto は OAuth にまだ対応していません)。Claude Code / Claude Desktop / Cursor を使ってください。
+> 注意: 執筆時点では、ChatGPT のコネクタの認証方式は OAuth または「認証なし」が中心で、固定の Bearer トークンを入力できない場合があります。その場合、Sokutō の MCP サーバーには ChatGPT から直接接続できません (Sokutō は OAuth にまだ対応していません)。Claude Code / Claude Desktop / Cursor を使ってください。
 
 ### Cursor
 
@@ -90,7 +90,7 @@ ChatGPT では、**開発者モード** を有効にすると、リモート MCP
 }
 ```
 
-Cursor の **「設定」→「MCP」** で Sokuto が有効になっていることを確認します。
+Cursor の **「設定」→「MCP」** で Sokutō が有効になっていることを確認します。
 
 ### その他のクライアント
 
@@ -160,17 +160,17 @@ AI に「公開する前に確認して」と伝えておくと、勝手に公�
 - トークンをチャットや SNS、公開リポジトリに貼らないでください。
 - 漏れたかもしれない場合は、**「設定」→「AI 連携 (MCP)」→「トークンを再発行」** を押してください。古いトークンはすぐに使えなくなります。使わなくなったら **「無効化」** を押してください。
 - トークンの再発行と無効化は、管理画面にパスワードでログインしているときだけ行えます (トークン自身では再発行できません)。
-- Sokuto はトークンそのものを保存せず、ハッシュ値 (SHA-256) だけを KV に保存しています。ワークスペースを削除すると、そのトークンも使えなくなります。
+- Sokutō はトークンそのものを保存せず、ハッシュ値 (SHA-256) だけを KV に保存しています。ワークスペースを削除すると、そのトークンも使えなくなります。
 
 ---
 
 ## English summary
 
-Sokuto includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`, authenticated with `Authorization: Bearer <token>`. Generate the token in **Settings → AI (MCP)**; it is shown only once and can be rotated or revoked there (session login required). Tokens are per workspace: a token only sees and changes the workspace it was issued in (`get_overview` reports `workspace: { id, name }`), and is revoked when that workspace is deleted; issue one token per workspace to drive several. Workspaces themselves are managed only in the admin.
+Sokutō includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`, authenticated with `Authorization: Bearer <token>`. Generate the token in **Settings → AI (MCP)**; it is shown only once and can be rotated or revoked there (session login required). Tokens are per workspace: a token only sees and changes the workspace it was issued in (`get_overview` reports `workspace: { id, name }`), and is revoked when that workspace is deleted; issue one token per workspace to drive several. Workspaces themselves are managed only in the admin.
 
 - **Claude Code**: `claude mcp add --transport http sokuto https://<worker>/mcp --header "Authorization: Bearer <token>"`
-- **Claude Desktop**: use `mcp-remote` in `claude_desktop_config.json` (`npx -y mcp-remote <url> --header "Authorization: Bearer ${SOKUTO_TOKEN}"`). Custom connectors in the Claude UI expect OAuth, which Sokuto does not support yet.
-- **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokuto yet.
+- **Claude Desktop**: use `mcp-remote` in `claude_desktop_config.json` (`npx -y mcp-remote <url> --header "Authorization: Bearer ${SOKUTO_TOKEN}"`). Custom connectors in the Claude UI expect OAuth, which Sokutō does not support yet.
+- **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokutō yet.
 - **Cursor**: `mcp.json` with `url` and `headers`.
 
 26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. `update_flow` keeps the stored canvas `layout` (admin node positions) when the new definition omits it. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access to its workspace (MCP and `/api/*`, pinned to that workspace); only its SHA-256 hash is stored.

@@ -1,5 +1,5 @@
 /*
- * Sokuto admin: layout glue on top of Bezier (@channel.io/bezier-react/styles.css).
+ * Sokutō admin: layout glue on top of Bezier (@channel.io/bezier-react/styles.css).
  * Colors, radii and shadows come ONLY from Bezier CSS variables, which switch with
  * <html data-bezier-theme="light|dark"> (set by AppProvider). Never add prefers-color-scheme
  * queries here: the theme is resolved in lib/theme.tsx.

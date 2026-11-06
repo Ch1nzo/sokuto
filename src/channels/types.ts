@@ -1,4 +1,4 @@
-/** Channels Sokuto can talk to. */
+/** Channels Sokutō can talk to. */
 export type Channel = 'line' | 'messenger' | 'instagram'
 
 export const CHANNELS: Channel[] = ['line', 'messenger', 'instagram']

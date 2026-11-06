@@ -2,7 +2,7 @@
   "name": "sokuto",
   "version": "0.1.0",
   "private": true,
-  "description": "Sokuto: self-hosted chatbot for LINE, Facebook Messenger and Instagram that runs on your own free Cloudflare account. Build automations by hand or from ChatGPT / Claude over MCP.",
+  "description": "Sokutō: self-hosted chatbot for LINE, Facebook Messenger and Instagram that runs on your own free Cloudflare account. Build automations by hand or from ChatGPT / Claude over MCP.",
   "license": "MIT",
   "type": "module",
   "scripts": {

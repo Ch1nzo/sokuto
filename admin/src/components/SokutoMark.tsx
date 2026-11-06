@@ -1,4 +1,4 @@
-/** Sokuto brand mark: blue rounded speech bubble with a white lightning bolt (docs/images/icon.png). */
+/** Sokutō brand mark: blue rounded speech bubble with a white lightning bolt (docs/images/icon.png). */
 export function SokutoMark({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
