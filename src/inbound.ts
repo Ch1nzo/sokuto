@@ -44,6 +44,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   if (event.type === 'message' && event.text && general.handoffKeywords.some((k) => k && event.text!.toLowerCase().includes(k.toLowerCase()))) {
     await setBotPaused(db, contact.id, true)
     await db.delete(schema.sessions).where(eq(schema.sessions.contactId, contact.id))
+    await db.delete(schema.sequenceSubscriptions).where(eq(schema.sequenceSubscriptions.contactId, contact.id))
     await db.insert(schema.notifications).values({ contactId: contact.id, text: `${contact.displayName ?? contact.channelUserId} が担当者を希望しています` })
     if (general.handoffReply) {
       const res = await adapter.send(contact.channelUserId, { text: general.handoffReply }, { replyToken })

@@ -3,6 +3,7 @@ import type { Db } from './db'
 import { schema } from './db'
 import type { Env } from './env'
 import { getAdapter } from './channels/registry'
+import { isBotPaused } from './contacts'
 import type { Channel } from './channels/types'
 import { dueSessions } from './inbound'
 import { parseFlow, runFrom, logMessage, type RunContext } from './flows/engine'
@@ -13,7 +14,8 @@ const BROADCAST_PER_TICK = 30
 
 export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: number; broadcastSent: number }> {
   let resumed = 0
-  const { timezone, botFields } = await getGeneral(db)
+  const general = await getGeneral(db)
+  const { timezone, botFields } = general
   for (const s of await dueSessions(db)) {
     const contact = await db.select().from(schema.contacts).where(eq(schema.contacts.id, s.contactId)).get()
     const row = await db.select().from(schema.flows).where(eq(schema.flows.id, s.flowId)).get()
@@ -37,6 +39,11 @@ export async function runScheduledTasks(env: Env, db: Db): Promise<{ resumed: nu
     const row = await db.select().from(schema.flows).where(eq(schema.flows.id, s.flowId)).get()
     if (!contact || !row || row.status !== 'live' || row.kind !== 'sequence') {
       await db.delete(subs).where(eq(subs.id, s.id))
+      continue
+    }
+    if (general.paused || (await isBotPaused(db, contact))) {
+      // Bot paused (globally or for this contact after a hand-over): retry in an hour instead of clogging the batch.
+      await db.update(subs).set({ resumeAt: new Date(Date.now() + 3600_000).toISOString() }).where(eq(subs.id, s.id))
       continue
     }
     const adapter = await getAdapter(env, db, contact.channel as Channel)
