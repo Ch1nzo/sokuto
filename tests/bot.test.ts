@@ -11,6 +11,7 @@ import {
   parseProductsCsv,
   productCards,
   productText,
+  publicHttpsUrl,
   retrieve,
   terms,
   type Knowledge,
@@ -328,5 +329,32 @@ describe('botConfigSchema', () => {
 
   it('validates a partial update without filling in defaults', () => {
     expect(botConfigSchema.partial().parse({ enabled: true })).toEqual({ enabled: true })
+  })
+})
+
+describe('publicHttpsUrl', () => {
+  it('accepts public https hosts only', () => {
+    expect(publicHttpsUrl('https://example.com/help?x=1')?.hostname).toBe('example.com')
+    expect(publicHttpsUrl('https://Example.COM.')?.hostname).toBe('example.com.')
+    for (const bad of [
+      'http://example.com/',
+      'ftp://example.com/',
+      'not a url',
+      'https://localhost/',
+      'https://LOCALHOST:8787/x',
+      'https://127.0.0.1/',
+      'https://10.1.2.3/',
+      'https://192.168.0.1/',
+      'https://172.16.5.5/',
+      'https://172.31.255.255/',
+      'https://169.254.169.254/latest/meta-data',
+      'https://0.0.0.0/',
+      'https://[::1]/',
+      'https://[fd00::1]/',
+      'https://[fe80::1]/',
+      'https://intranet.local/',
+      'https://db.internal/',
+    ]) expect(publicHttpsUrl(bad), bad).toBeNull()
+    expect(publicHttpsUrl('https://172.32.0.1/')).not.toBeNull()
   })
 })

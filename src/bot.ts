@@ -30,7 +30,15 @@ type Fail = { error: string; errors?: string[] }
 
 const issues = (e: z.ZodError) => e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
 const errorText = (e: unknown) => (e instanceof Error ? (e.name === 'TimeoutError' ? 'timeout' : e.message) : String(e))
-const isHttps = (url: string) => /^https:\/\/\S+$/i.test(url) && URL.canParse(url)
+/** Loopback, private, link-local and internal hostnames (also by IP literal). Workers cannot reach them anyway; this makes the refusal explicit and testable. */
+const PRIVATE_HOST = /^(localhost|[^.]+\.(local|internal|localdomain|home|lan)|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|\[?(::1?|f[cd][0-9a-f]{2}:.*|fe80:.*|::ffff:.*)\]?)$/i
+/** The URL when it is https and points at a public hostname, else null. */
+export function publicHttpsUrl(url: string): URL | null {
+  if (!/^https:\/\/\S+$/i.test(url) || !URL.canParse(url)) return null
+  const u = new URL(url)
+  return PRIVATE_HOST.test(u.hostname.toLowerCase().replace(/\.$/, '')) ? null : u
+}
+const isHttps = (url: string) => publicHttpsUrl(url) !== null
 const now = () => new Date().toISOString()
 
 /* ---------- Search ---------- */
@@ -298,13 +306,23 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array> {
 
 /** Text of an https page (HTML, plain text or JSON; no PDF): 10 s timeout, 2 MB, 200,000 characters. */
 export async function fetchDocument(url: string): Promise<{ title: string; content: string }> {
-  if (!isHttps(url)) throw new Error('url_must_be_https')
-  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { accept: 'text/html, text/plain;q=0.9, */*;q=0.1' } })
+  // Redirects are followed by hand so every hop is checked against the same https + public-host rule (max 3 hops).
+  let target = publicHttpsUrl(url)
+  if (!target) throw new Error('url_must_be_https')
+  let res: Response
+  for (let hop = 0; ; hop++) {
+    res = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(10_000), headers: { accept: 'text/html, text/plain;q=0.9, */*;q=0.1' } })
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+    if (!location) break
+    await res.body?.cancel()
+    if (hop >= 3) throw new Error('too_many_redirects')
+    target = publicHttpsUrl(new URL(location, target).href)
+    if (!target) throw new Error('url_must_be_https')
+  }
   const fail = async (error: string) => {
     await res.body?.cancel()
     throw new Error(error)
   }
-  if (res.url && !isHttps(res.url)) return fail('url_must_be_https')
   if (!res.ok) return fail(`http_${res.status}`)
   const type = res.headers.get('content-type') ?? ''
   if (!/^\s*(text\/|application\/json)/i.test(type)) return fail('unsupported_content_type')
