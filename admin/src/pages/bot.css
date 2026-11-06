@@ -97,6 +97,8 @@
   padding: 12px; border: 1px solid var(--bdr-black-light); border-radius: var(--radius-8);
 }
 .bot-switch__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; cursor: pointer; overflow-wrap: anywhere; }
+/* The toggle keeps its size when the text wraps on narrow screens. */
+.bot-switch > :not(.bot-switch__text) { flex-shrink: 0; }
 /* Save bar: stays at the bottom of the viewport while the long form scrolls. */
 .bot-savebar {
   position: sticky; bottom: 0; z-index: 2;
