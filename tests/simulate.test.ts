@@ -112,6 +112,28 @@ describe('simulateFlow', () => {
     expect(r.completed).toBe(true)
   })
 
+  it('comment_reply uses the first variant in dry runs', async () => {
+    const reply = (text: string, texts?: string[]) => flow({ triggers: [{ type: 'comment' }], entry: 'cr', steps: [{ id: 'cr', type: 'comment_reply', text, texts }] }, { channel: 'instagram' })
+    expect((await simulateFlow(db, reply('', ['B', 'C']), [{ type: 'comment', text: 'hi' }])).steps[0]!.commentReplies).toEqual(['B'])
+    expect((await simulateFlow(db, reply('A', ['B', 'C']), [{ type: 'comment', text: 'hi' }])).steps[0]!.commentReplies).toEqual(['A'])
+  })
+
+  it('is_follower is true for the test user', async () => {
+    const f = flow({
+      triggers: [{ type: 'keyword', keywords: ['go'] }],
+      entry: 'c1',
+      steps: [
+        { id: 'c1', type: 'condition', rules: [{ field: 'is_follower', op: 'equals', value: 'true' }], yes: 'y', no: 'n' },
+        { id: 'y', type: 'message', text: 'yes' },
+        { id: 'n', type: 'message', text: 'no' },
+      ],
+    }, { channel: 'any' })
+    for (const channel of ['instagram', 'line'] as const) {
+      const r = await simulateFlow(db, f, [{ type: 'message', text: 'go' }], channel)
+      expect(r.steps[0]!.outputs.map((o) => o.text)).toEqual(['yes'])
+    }
+  })
+
   it('does nothing for input that matches no trigger', async () => {
     const r = await simulateFlow(db, leadFlow, [{ type: 'message', text: 'hello' }])
     expect(r.steps[0]!.triggered).toBe(false)

@@ -109,6 +109,24 @@ describe('validateFlow', () => {
     expect(validateFlow({ triggers: [{ type: 'any_message', cooldownHours: 24 }], entry: null, steps: [] }).ok).toBe(true)
   })
 
+  it('accepts comment_reply variants with an empty text', () => {
+    const r = validateFlow({ triggers: [{ type: 'comment' }], entry: 'cr', steps: [{ id: 'cr', type: 'comment_reply', text: '', texts: ['A', 'B'] }] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.warnings).toEqual([])
+  })
+
+  it('rejects a comment_reply with neither text nor texts, and more than 4 texts', () => {
+    expect(errorsOf({ triggers: [], entry: 'cr', steps: [{ id: 'cr', type: 'comment_reply', text: ' ', texts: [''] }] })).toContain('step cr: comment_reply needs text or texts')
+    expect(errorsOf({ triggers: [], entry: 'cr', steps: [{ id: 'cr', type: 'comment_reply' }] })).toContain('step cr: comment_reply needs text or texts')
+    expect(errorsOf({ triggers: [], entry: 'cr', steps: [{ id: 'cr', type: 'comment_reply', text: 'x', texts: ['1', '2', '3', '4', '5'] }] }).length).toBeGreaterThan(0)
+  })
+
+  it('accepts excludeKeywords and like on a comment trigger', () => {
+    const r = validateFlow({ triggers: [{ type: 'comment', keywords: ['link'], excludeKeywords: ['spam'], like: true }], entry: null, steps: [] })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.definition.triggers[0]).toEqual({ type: 'comment', keywords: ['link'], excludeKeywords: ['spam'], like: true })
+  })
+
   it('rejects invalid step shapes and non-objects', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'bad field!' }] }).length).toBeGreaterThan(0)
     expect(errorsOf({ triggers: [], entry: 'd', steps: [{ id: 'd', type: 'delay', seconds: 0 }] }).length).toBeGreaterThan(0)

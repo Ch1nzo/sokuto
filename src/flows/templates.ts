@@ -44,6 +44,27 @@ export const TEMPLATES: FlowTemplate[] = [
     },
   },
   {
+    slug: 'comment-follow-gate',
+    name: { ja: 'コメント → フォローを確認してリンクを送る', en: 'Comment → follow check → link' },
+    description: {
+      ja: '「リンク」「欲しい」とコメントした人にいいねと公開返信をし、DM でフォローをお願いして、フォローを確認できたらリンクを送ります。',
+      en: 'Likes and answers comments like "link", asks for a follow by DM and sends the link once the follow is confirmed.',
+    },
+    channel: 'instagram',
+    definition: {
+      triggers: [{ type: 'comment', keywords: ['リンク', 'link', '欲しい', 'ほしい'], like: true }],
+      entry: 'cr1',
+      steps: [
+        { id: 'cr1', type: 'comment_reply', text: 'DM をお送りしました ✓', texts: ['DM をご確認ください 📩', 'メッセージをお送りしました!'], next: 'm1' },
+        { id: 'm1', type: 'message', text: '{{first_name}} さん、コメントありがとうございます! 先にフォローをお願いします 🙏\nフォローしたら下のボタンを押してください。', buttons: [{ label: 'フォローしました', next: 'c1' }] },
+        { id: 'c1', type: 'condition', rules: [{ field: 'is_follower', op: 'equals', value: 'true' }], yes: 'm2', no: 'm3' },
+        { id: 'm2', type: 'message', text: 'フォローありがとうございます 💚 リンクはこちらです。\nhttps://example.com/link', next: 'a1' },
+        { id: 'a1', type: 'action', actions: [{ type: 'add_tag', tag: 'follower' }], next: null },
+        { id: 'm3', type: 'message', text: 'まだフォローが確認できません。フォローしてから、もう一度ボタンを押してください。', buttons: [{ label: 'フォローしました', next: 'c1' }] },
+      ],
+    },
+  },
+  {
     slug: 'faq',
     name: { ja: 'よくある質問(営業時間・場所・支払い)', en: 'FAQ keywords' },
     description: { ja: 'キーワードに応じて定型回答を返します。', en: 'Replies to common keywords with canned answers.' },

@@ -3,7 +3,7 @@ import type { Channel } from '../channels/types'
 /** When an automation starts. */
 export type Trigger =
   | { type: 'keyword'; keywords: string[]; match?: 'contains' | 'exact' | 'starts_with' }
-  | { type: 'comment'; keywords?: string[]; postIds?: string[] }
+  | { type: 'comment'; keywords?: string[]; excludeKeywords?: string[]; postIds?: string[]; like?: boolean }
   | { type: 'first_message' }
   | { type: 'follow' }
   | { type: 'any_message'; cooldownHours?: number }
@@ -37,7 +37,7 @@ export type Step =
   | { id: string; type: 'delay'; seconds: number; next?: string | null }
   | { id: string; type: 'random'; branches: { weight: number; next?: string | null }[] }
   | { id: string; type: 'goto'; flowId: number }
-  | { id: string; type: 'comment_reply'; text: string; next?: string | null }
+  | { id: string; type: 'comment_reply'; text: string; texts?: string[]; next?: string | null }
 
 export type FlowDefinition = {
   triggers: Trigger[]

@@ -1,4 +1,4 @@
-import { Badge, Button, HStack, SegmentedControl, SegmentedControlItem, Tag, Text, TextField, VStack } from '@channel.io/bezier-react'
+import { Badge, Button, HStack, SegmentedControl, SegmentedControlItem, Tag, Text, TextArea, TextField, VStack } from '@channel.io/bezier-react'
 import { ArrowDownIcon, ArrowUpIcon, CancelIcon, TrashIcon } from '@channel.io/bezier-icons'
 import type { Action, ButtonDef, ConditionRule, FlowRecord, Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
@@ -10,6 +10,7 @@ import {
   MAX_BUTTONS,
   MAX_BUTTON_LABEL,
   MAX_CHOICE_LABEL,
+  MAX_REPLY_VARIANTS,
   OPS_WITHOUT_VALUE,
   RULE_OPS,
   STEP_TYPES,
@@ -284,9 +285,27 @@ function GotoBody({ step, onChange, t, flows, currentId }: BodyProps<'goto'> & {
 }
 
 function CommentReplyBody({ step, onChange, steps, t }: BodyProps<'comment_reply'>) {
+  const texts = step.texts ?? []
+  const setTexts = (ts: string[]) => onChange({ ...step, texts: ts.length ? ts : undefined })
   return (
     <>
       <TextAreaField label={t('editor_text')} value={step.text} maxLength={1000} helperText={`${step.text.length}/1000`} onChange={(e) => onChange({ ...step, text: e.target.value })} />
+      <VStack spacing={8}>
+        <Text typo="13" bold color="txt-black-darker">
+          {t('editor_reply_variants')} <span className="fe-count">({texts.length}/{MAX_REPLY_VARIANTS})</span>
+        </Text>
+        {texts.map((v, i) => (
+          <HStack spacing={8} align="start" key={i}>
+            <div className="fe-grow">
+              <TextArea minRows={3} maxLength={1000} value={v} aria-label={`${t('editor_reply_variants')} ${i + 1}`} onChange={(e) => setTexts(texts.map((x, j) => (j === i ? e.target.value : x)))} />
+            </div>
+            <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${t('editor_reply_variants')} ${i + 1}`} onClick={() => setTexts(texts.filter((_, j) => j !== i))} />
+          </HStack>
+        ))}
+        <div>
+          <AddButton text={t('editor_add_variant')} disabled={texts.length >= MAX_REPLY_VARIANTS} onClick={() => setTexts([...texts, ''])} />
+        </div>
+      </VStack>
       <NextField step={step} onChange={onChange} steps={steps} t={t} />
     </>
   )

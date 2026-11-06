@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buttonPayload, matchTrigger, parseButtonPayload, renderText } from '../src/flows/engine'
+import { buttonPayload, matchTrigger, parseButtonPayload, renderText, startFlow } from '../src/flows/engine'
+import { RecordingAdapter } from '../src/channels/adapter'
+import type { Db } from '../src/db'
 import type { FlowRecord, Trigger } from '../src/flows/types'
 import type { InboundEvent } from '../src/channels/types'
 import type { ContactRow } from '../src/contacts'
@@ -93,6 +95,12 @@ describe('matchTrigger: comment', () => {
     expect(matchTrigger(flow([t]), ev({ type: 'comment', text: 'x' }), false)).toBeNull()
   })
 
+  it('skips comments that contain an exclude keyword', () => {
+    const t: Trigger = { type: 'comment', keywords: ['link'], excludeKeywords: ['spam'] }
+    expect(matchTrigger(flow([t]), ev({ type: 'comment', text: 'link pls SPAM' }), false)).toBeNull()
+    expect(matchTrigger(flow([t]), ev({ type: 'comment', text: 'link pls' }), false)).toBe(t)
+  })
+
   it('requires both postIds and keywords when both are set', () => {
     const t: Trigger = { type: 'comment', postIds: ['p1'], keywords: ['info'] }
     expect(matchTrigger(flow([t]), ev({ type: 'comment', text: 'info', postId: 'p1' }), false)).toBe(t)
@@ -138,6 +146,19 @@ describe('matchTrigger: other trigger types', () => {
     expect(matchTrigger(f, ev({ type: 'postback', payload: 'X' }), false)).toBeNull()
     expect(matchTrigger(f, ev({ type: 'story_mention' }), false)).toBe(sm)
     expect(matchTrigger(f, ev({ type: 'story_reply', text: 'wow' }), false)).toBe(sr)
+  })
+})
+
+describe('startFlow', () => {
+  const run = async (trigger: Trigger) => {
+    const adapter = new RecordingAdapter('messenger')
+    await startFlow({ db: {} as unknown as Db, adapter, contact: contact(), flow: flow([trigger]), commentId: 'c1', dryRun: true }, trigger)
+    return adapter.likedComments
+  }
+
+  it('likes the comment when trigger.like is set', async () => {
+    expect(await run({ type: 'comment', like: true })).toEqual(['c1'])
+    expect(await run({ type: 'comment' })).toEqual([])
   })
 })
 

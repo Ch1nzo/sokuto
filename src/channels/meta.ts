@@ -178,13 +178,17 @@ export class MetaAdapter implements ChannelAdapter {
     return this.post(path, { message: text })
   }
 
+  async likeComment(commentId: string): Promise<SendResult> {
+    return this.post(`${commentId}/likes`, {})
+  }
+
   async getProfile(userId: string): Promise<ChannelProfile> {
-    const fields = this.channel === 'instagram' ? 'name,username,profile_pic' : 'first_name,last_name,profile_pic'
+    const fields = this.channel === 'instagram' ? 'name,username,profile_pic,is_user_follow_business' : 'first_name,last_name,profile_pic'
     const res = await fetch(this.url(userId, { fields }))
     if (!res.ok) return {}
-    const p = (await res.json()) as { name?: string; username?: string; first_name?: string; last_name?: string; profile_pic?: string }
+    const p = (await res.json()) as { name?: string; username?: string; first_name?: string; last_name?: string; profile_pic?: string; is_user_follow_business?: boolean }
     const displayName = p.name ?? [p.first_name, p.last_name].filter(Boolean).join(' ')
-    return { displayName: displayName || undefined, username: p.username, avatarUrl: p.profile_pic }
+    return { displayName: displayName || undefined, username: p.username, avatarUrl: p.profile_pic, followsBusiness: p.is_user_follow_business }
   }
 }
 

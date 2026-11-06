@@ -20,9 +20,9 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 ## できること
 
 - チャネル: LINE 公式アカウント、Facebook ページ (Messenger とページ投稿へのコメント)、Instagram プロアカウント (DM・コメント・ストーリー)
-- トリガー (9 種類): キーワード / 投稿へのコメント / 初めてのメッセージ / 友だち追加 (LINE) / すべてのメッセージ (フォールバック。同じ人への再起動間隔を設定可) / リンク・QR コード (ref) / ボタン payload / ストーリーでメンション / ストーリーへの返信
-- ステップ (8 種類): メッセージ (画像・ボタン付き) / 質問して保存 / 条件分岐 (フィールド・タグ・時刻・曜日・登録や前回受信からの日数) / アクション (タグ・フィールド・担当者通知・ボット停止・Webhook) / 待機 / ランダム分岐 / 別の自動化へ / コメントに公開返信
-- テンプレート (6 種類): あいさつ、コメント「価格」→ DM、よくある質問、満足度アンケート、注文受付、ストーリーメンションのお礼
+- トリガー (9 種類): キーワード / 投稿へのコメント (除外キーワード、コメントへの自動いいね) / 初めてのメッセージ / 友だち追加 (LINE) / すべてのメッセージ (フォールバック。同じ人への再起動間隔を設定可) / リンク・QR コード (ref) / ボタン payload / ストーリーでメンション / ストーリーへの返信
+- ステップ (8 種類): メッセージ (画像・ボタン付き) / 質問して保存 / 条件分岐 (フィールド・タグ・時刻・曜日・登録や前回受信からの日数・Instagram のフォロー有無) / アクション (タグ・フィールド・担当者通知・ボット停止・Webhook) / 待機 / ランダム分岐 / 別の自動化へ / コメントに公開返信 (複数パターンからランダムに選択)
+- テンプレート (7 種類): あいさつ、コメント「価格」→ DM、コメント → フォロー確認してリンク送信、よくある質問、満足度アンケート、注文受付、ストーリーメンションのお礼
 - 受信箱: 全チャネルの会話を一か所で確認し、返信できます。人が返信するとその相手のボットは自動で停止します。「担当者」「オペレーター」などのキーワードでも停止できます。
 - 連絡先: タグ、カスタムフィールド (電話番号など)、検索、CSV エクスポート
 - 一斉配信: タグで絞り込み、日時を予約して配信 (1 分ごとに最大 30 通ずつ送信)
@@ -132,9 +132,9 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 
 ### Features
 
-- 9 triggers (keyword, comment, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply)
-- 8 step types (message with image/buttons, question, condition (fields, tags, hour, weekday, days since signup or last message), action, delay, random, goto, public comment reply)
-- 6 templates, a unified inbox with human hand-over, contacts with tags/fields/CSV export, scheduled broadcasts (30 messages per minute), per-flow reports, a dry-run tester and an MCP server with 21 tools.
+- 9 triggers (keyword, comment with exclude keywords and auto-like, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply)
+- 8 step types (message with image/buttons, question, condition (fields, tags, hour, weekday, days since signup or last message, Instagram follow status), action, delay, random, goto, public comment reply with random variants)
+- 7 templates (including a comment → follow check → link gate), a unified inbox with human hand-over, contacts with tags/fields/CSV export, scheduled broadcasts (30 messages per minute), per-flow reports, a dry-run tester and an MCP server with 21 tools.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
 
 ### Install in 5 minutes

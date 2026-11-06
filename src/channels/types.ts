@@ -40,6 +40,8 @@ export type ChannelProfile = {
   displayName?: string
   avatarUrl?: string
   username?: string
+  /** Instagram: whether the person follows the business account. */
+  followsBusiness?: boolean
 }
 
 export type SendResult = { ok: true; messageId?: string } | { ok: false; error: string; code?: string }

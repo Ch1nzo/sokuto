@@ -116,10 +116,10 @@ payload に自動化とステップの情報が入っているので、**セッ�
 コードは `src/channels/` にあります。
 
 - `types.ts`: チャネルに依存しない受信イベント `InboundEvent` と送信メッセージ `OutboundMessage`。
-- `adapter.ts`: `ChannelAdapter` インターフェース (`send`, `getProfile`, 任意で `replyToComment`, `sendPrivateReply`)。
+- `adapter.ts`: `ChannelAdapter` インターフェース (`send`, `getProfile`, 任意で `replyToComment`, `sendPrivateReply`, `likeComment`)。`getProfile` が返す `ChannelProfile.followsBusiness` は Instagram のフォロー有無で、条件の `is_follower` が使います (自動化の実行ごとに 1 回だけ取得)。
 - `registry.ts`: 保存された設定からアダプターを作る `getAdapter`。
 - `line.ts`: 署名検証 (HMAC-SHA256、Base64)、Webhook の解析、送信。送信時は、受信時の **reply token を 1 回だけ使い** (無料)、使用済みや期限切れならプッシュ API で送ります。管理画面用に、Bot 情報の取得、Webhook URL の登録 (`PUT /v2/bot/channel/webhook/endpoint`)、Webhook のテストも実装しています。
-- `meta.ts`: 署名検証 (`X-Hub-Signature-256`、HMAC-SHA256 hex)、`page` / `instagram` 両方の Webhook の解析 (メッセージ、postback、クイックリプライ、ref、ストーリーへのメンション・返信、Facebook の `feed` コメント、Instagram の `comments`)、Send API での送信、コメントへの公開返信とプライベート返信。管理画面用に、ページアクセストークンの確認 (ページとリンクされた Instagram ビジネスアカウントの取得) と、ページの購読 (`subscribed_apps`) を実装しています。Graph API のバージョンは環境変数 `META_GRAPH_VERSION` (初期値 `v25.0`) です。
+- `meta.ts`: 署名検証 (`X-Hub-Signature-256`、HMAC-SHA256 hex)、`page` / `instagram` 両方の Webhook の解析 (メッセージ、postback、クイックリプライ、ref、ストーリーへのメンション・返信、Facebook の `feed` コメント、Instagram の `comments`)、Send API での送信、コメントへの公開返信とプライベート返信、コメントへのいいね (`POST /{comment-id}/likes`。失敗はエラーイベントとして記録)。Instagram のプロフィール取得では `is_user_follow_business` も読みます (相手が DM を送った後にだけ取得できます)。管理画面用に、ページアクセストークンの確認 (ページとリンクされた Instagram ビジネスアカウントの取得) と、ページの購読 (`subscribed_apps`) を実装しています。Graph API のバージョンは環境変数 `META_GRAPH_VERSION` (初期値 `v25.0`) です。
 
 Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:meta`) を共有し、ページにリンクされた Instagram アカウントがあれば Instagram も有効になります。
 
@@ -155,6 +155,6 @@ Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`,
 
 - **Data**: D1 tables `settings`, `contacts`, `contact_tags`, `messages`, `flows`, `sessions`, `broadcasts`, `broadcast_jobs`, `events`, `processed_events`, `notifications`; KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
 - **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 8 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → resume session → button payload → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter.
-- **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies and private replies, page token inspection and page subscription).
+- **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection and page subscription).
 - **Scheduler**: every minute, resumes up to 25 due delays, sends broadcasts at 30/minute (skipping Meta contacts outside the 24 h window), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

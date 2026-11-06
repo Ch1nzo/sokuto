@@ -5,7 +5,7 @@ const next = z.string().nullable().optional()
 
 const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('keyword'), keywords: z.array(z.string().min(1)).min(1), match: z.enum(['contains', 'exact', 'starts_with']).optional() }),
-  z.object({ type: z.literal('comment'), keywords: z.array(z.string()).optional(), postIds: z.array(z.string()).optional() }),
+  z.object({ type: z.literal('comment'), keywords: z.array(z.string()).optional(), excludeKeywords: z.array(z.string()).optional(), postIds: z.array(z.string()).optional(), like: z.boolean().optional() }),
   z.object({ type: z.literal('first_message') }),
   z.object({ type: z.literal('follow') }),
   z.object({ type: z.literal('any_message'), cooldownHours: z.number().positive().max(720).optional() }),
@@ -40,7 +40,7 @@ const stepSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string().min(1), type: z.literal('delay'), seconds: z.number().int().min(1).max(60 * 60 * 24 * 30), next }),
   z.object({ id: z.string().min(1), type: z.literal('random'), branches: z.array(z.object({ weight: z.number().min(0), next })).min(1) }),
   z.object({ id: z.string().min(1), type: z.literal('goto'), flowId: z.number().int().positive() }),
-  z.object({ id: z.string().min(1), type: z.literal('comment_reply'), text: z.string().min(1).max(1000), next }),
+  z.object({ id: z.string().min(1), type: z.literal('comment_reply'), text: z.string().max(1000).default(''), texts: z.array(z.string().max(1000)).max(4).optional(), next }),
 ])
 
 export const flowDefinitionSchema = z.object({
@@ -84,8 +84,11 @@ export function validateFlow(input: unknown): { ok: true; definition: FlowDefini
         break
       case 'action':
       case 'delay':
+        check(s.next, `step ${s.id}.next`)
+        break
       case 'comment_reply':
         check(s.next, `step ${s.id}.next`)
+        if (![s.text, ...(s.texts ?? [])].some((t) => t.trim())) errors.push(`step ${s.id}: comment_reply needs text or texts`)
         break
       case 'random':
         s.branches.forEach((b, i) => check(b.next, `step ${s.id}.branches[${i}].next`))
@@ -104,7 +107,7 @@ Steps are a graph: each step names the next step id (or null to end). Use short 
 
 Triggers (when the flow starts):
 - { "type": "keyword", "keywords": ["価格","price"], "match": "contains"|"exact"|"starts_with" }  message containing a keyword
-- { "type": "comment", "keywords": [...]?, "postIds": [...]? }  a comment on a Facebook/Instagram post (optionally only with keywords / on given posts)
+- { "type": "comment", "keywords": [...]?, "excludeKeywords": [...]?, "postIds": [...]?, "like"?: true }  a comment on a Facebook/Instagram post (optionally only with keywords / on given posts; never when the comment contains one of excludeKeywords). "like": true also likes the comment
 - { "type": "first_message" }  the person's very first message
 - { "type": "follow" }  LINE follow (friend add)
 - { "type": "any_message", "cooldownHours"?: 24 }  fallback for every message; with cooldownHours it starts at most once per contact within that many hours (max 720)
@@ -123,7 +126,8 @@ Steps:
 - { "id", "type": "delay", "seconds": 3600, "next": stepId }
 - { "id", "type": "random", "branches": [{ "weight": 1, "next": "a" }, { "weight": 1, "next": "b" }] }
 - { "id", "type": "goto", "flowId": 12 }
-- { "id", "type": "comment_reply", "text": "DMを送りました ✓", "next": stepId }  public reply under the triggering comment (comment trigger only)
+- { "id", "type": "comment_reply", "text": "DMを送りました ✓", "texts"?: ["DM しました!", "DM をご確認ください"], "next": stepId }  public reply under the triggering comment (comment trigger only). One of text + texts (max 5 in total, up to 4 in texts; text may be "" when texts is set) is picked at random so replies do not all look the same
 
 Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}, {{bot.<key>}} for bot variables set in Settings (keys listed in get_overview → general.botFields).
-Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.`
+Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.
+On Instagram, is_follower can only be checked after the person has sent a DM or tapped a button: put the condition behind a button such as "フォローしました", not right after the comment.`

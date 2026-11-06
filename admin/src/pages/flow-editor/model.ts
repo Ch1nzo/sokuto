@@ -33,6 +33,7 @@ export const DELAY_PRESETS: { seconds: number; label: string }[] = [
 export const MAX_BUTTONS = 13
 export const MAX_BUTTON_LABEL = 40
 export const MAX_CHOICE_LABEL = 20
+export const MAX_REPLY_VARIANTS = 4
 
 const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr' }
 

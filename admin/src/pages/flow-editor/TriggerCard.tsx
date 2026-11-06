@@ -1,4 +1,4 @@
-import { HStack, VStack } from '@channel.io/bezier-react'
+import { Checkbox, HStack, VStack } from '@channel.io/bezier-react'
 import { TrashIcon } from '@channel.io/bezier-icons'
 import type { Trigger } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
@@ -32,10 +32,22 @@ export function TriggerCard({ trigger, index, onChange, onRemove, t }: { trigger
         </div>
       )}
       {trigger.type === 'comment' && (
-        <div className="fe-grid-2">
-          <ListInputField label={t('editor_keywords')} value={trigger.keywords ?? []} onChange={(keywords) => onChange({ ...trigger, keywords })} />
-          <ListInputField label={t('editor_post_ids')} value={trigger.postIds ?? []} onChange={(postIds) => onChange({ ...trigger, postIds })} />
-        </div>
+        <>
+          <div className="fe-grid-2">
+            <ListInputField label={t('editor_keywords')} value={trigger.keywords ?? []} onChange={(keywords) => onChange({ ...trigger, keywords })} />
+            <ListInputField label={t('editor_post_ids')} value={trigger.postIds ?? []} onChange={(postIds) => onChange({ ...trigger, postIds })} />
+          </div>
+          <ListInputField label={t('editor_exclude_keywords')} value={trigger.excludeKeywords ?? []} onChange={(excludeKeywords) => onChange({ ...trigger, excludeKeywords: excludeKeywords.length ? excludeKeywords : undefined })} />
+          <Checkbox
+            checked={Boolean(trigger.like)}
+            onCheckedChange={(checked) => {
+              const { like: _, ...rest } = trigger
+              onChange(checked === true ? { ...rest, like: true } : rest)
+            }}
+          >
+            {t('editor_like_comment')}
+          </Checkbox>
+        </>
       )}
       {trigger.type === 'any_message' && (
         <TextInputField

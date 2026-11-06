@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import type { Db } from '../db'
 import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
-import type { InboundEvent, OutboundMessage } from '../channels/types'
+import type { ChannelProfile, InboundEvent, OutboundMessage } from '../channels/types'
 import { addTag, firstName, getTags, parseFields, removeTag, setBotPaused, setField, type ContactRow } from '../contacts'
 import { matchRules, normalize } from './rules'
 import type { ButtonDef, FlowDefinition, FlowRecord, Step, Trigger } from './types'
@@ -30,6 +30,8 @@ export type RunContext = {
   timezone?: string
   /** Clock override for tests. */
   now?: () => Date
+  /** Instagram follow status, fetched once per run by the first is_follower condition. */
+  followsBusiness?: boolean
 }
 
 const MAX_STEPS_PER_RUN = 50
@@ -81,6 +83,7 @@ export function matchTrigger(flow: FlowRecord, event: InboundEvent, isFirstMessa
         if (event.type === 'comment') {
           if (t.postIds && t.postIds.length > 0 && !(event.postId && t.postIds.includes(event.postId))) break
           if (t.keywords && t.keywords.length > 0 && !keywordMatches(event.text, t.keywords)) break
+          if (t.excludeKeywords?.length && keywordMatches(event.text, t.excludeKeywords)) break
           return t
         }
         break
@@ -134,6 +137,16 @@ function render(ctx: RunContext, text: string, encode?: (v: string) => string): 
 async function contactTags(ctx: RunContext): Promise<string[]> {
   if (ctx.dryRun) return [...(ctx.dryRunTags ?? [])]
   return getTags(ctx.db, ctx.contact.id)
+}
+
+/** Instagram only (Meta returns it once the person has messaged); other channels always count as following. */
+async function isFollower(ctx: RunContext): Promise<boolean> {
+  if (ctx.contact.channel !== 'instagram') return true
+  if (ctx.followsBusiness === undefined) {
+    const p = await ctx.adapter.getProfile(ctx.contact.channelUserId).catch((): ChannelProfile => ({}))
+    ctx.followsBusiness = p.followsBusiness ?? false
+  }
+  return ctx.followsBusiness
 }
 
 export async function logEvent(db: Db, ev: { type: string; channel?: string; flowId?: number; stepId?: string; contactId?: number; meta?: unknown }) {
@@ -283,7 +296,8 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
       case 'condition': {
         const needTags = step.rules.some((r) => r.op === 'has_tag' || r.op === 'not_has_tag')
         const tags = needTags ? await contactTags(ctx) : []
-        const subject = { contact: ctx.contact, tags, lastInput: ctx.lastInput, timezone: ctx.timezone, now: ctx.now }
+        const needFollow = step.rules.some((r) => r.field === 'is_follower')
+        const subject = { contact: ctx.contact, tags, lastInput: ctx.lastInput, timezone: ctx.timezone, now: ctx.now, isFollower: needFollow ? await isFollower(ctx) : undefined }
         current = (matchRules(step.rules, step.mode, subject) ? step.yes : step.no) ?? null
         break
       }
@@ -322,8 +336,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         break
       }
       case 'comment_reply': {
-        if (ctx.commentId && ctx.adapter.replyToComment) {
-          const res = await ctx.adapter.replyToComment(ctx.commentId, render(ctx, step.text))
+        const variants = [step.text, ...(step.texts ?? [])].filter((t) => t.trim())
+        const text = ctx.dryRun ? variants[0] : variants[Math.floor(Math.random() * variants.length)]
+        if (text && ctx.commentId && ctx.adapter.replyToComment) {
+          const res = await ctx.adapter.replyToComment(ctx.commentId, render(ctx, text))
           if (!ctx.dryRun) await logEvent(ctx.db, { type: res.ok ? 'comment_replied' : 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: res.ok ? undefined : { error: res.error } })
         }
         current = step.next ?? null
@@ -336,6 +352,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
 
 export async function startFlow(ctx: RunContext, trigger: Trigger | null): Promise<void> {
   if (!ctx.dryRun) await logEvent(ctx.db, { type: 'trigger_fired', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: trigger ? { trigger: trigger.type } : undefined })
+  if (trigger?.type === 'comment' && trigger.like && ctx.commentId && ctx.adapter.likeComment) {
+    const res = await ctx.adapter.likeComment(ctx.commentId).catch((e: unknown) => ({ ok: false as const, error: String(e) }))
+    if (!res.ok && !ctx.dryRun) await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, contactId: ctx.contact.id, meta: { op: 'like_comment', error: res.error } })
+  }
   await runFrom(ctx, ctx.flow.definition.entry)
 }
 
