@@ -20,8 +20,8 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 ## できること
 
 - チャネル: LINE 公式アカウント、Facebook ページ (Messenger とページ投稿へのコメント)、Instagram プロアカウント (DM・コメント・ストーリー)
-- トリガー (9 種類): キーワード / 投稿へのコメント (除外キーワード、コメントへの自動いいね) / 初めてのメッセージ / 友だち追加 (LINE) / すべてのメッセージ (フォールバック。同じ人への再起動間隔を設定可) / リンク・QR コード (ref) / ボタン payload / ストーリーでメンション / ストーリーへの返信
-- ステップ (9 種類): メッセージ (画像・ボタン・カルーセル・動画 / 音声 / ファイル付き) / 質問して保存 (メール・電話番号・数値・URL・日付の入力チェック、スキップボタン) / 条件分岐 (フィールド・タグ・時刻・曜日・登録や前回受信からの日数・Instagram のフォロー有無) / アクション (タグ・フィールド・担当者通知・ボット停止・Webhook・シーケンスへの登録 / 解除) / 待機 (10 秒以下は入力中を表示してその場で待機) / ランダム分岐 / 別の自動化へ / コメントに公開返信 (複数パターンからランダムに選択) / 外部リクエスト (HTTPS の API を呼び、応答の値をフィールドに保存)
+- トリガー (10 種類): キーワード / 投稿へのコメント (除外キーワード、コメントへの自動いいね) / 初めてのメッセージ / 友だち追加 (LINE) / すべてのメッセージ (フォールバック。同じ人への再起動間隔を設定可) / リンク・QR コード (ref) / ボタン payload / ストーリーでメンション / ストーリーへの返信 / 意図 (キーワードに一致しないメッセージを AI が判定)
+- ステップ (10 種類): メッセージ (画像・ボタン・カルーセル・動画 / 音声 / ファイル付き) / 質問して保存 (メール・電話番号・数値・URL・日付の入力チェック、スキップボタン) / 条件分岐 (フィールド・タグ・時刻・曜日・登録や前回受信からの日数・Instagram のフォロー有無) / アクション (タグ・フィールド・担当者通知・ボット停止・Webhook・シーケンスへの登録 / 解除) / 待機 (10 秒以下は入力中を表示してその場で待機) / ランダム分岐 / 別の自動化へ / コメントに公開返信 (複数パターンからランダムに選択) / 外部リクエスト (HTTPS の API を呼び、応答の値をフィールドに保存) / AI 応答 (指示と FAQ をもとに AI が会話し、終わったら次へ)
 - シーケンス (ステップ配信): トリガーのない自動化で、登録した人に「今日 → 1 日後 → 3 日後」のように待機を挟んで順に配信します。自動化のアクション「シーケンスに登録 / 解除」や AI (MCP) で登録し、受信箱で登録中のシーケンスの確認と解除ができます
 - テンプレート (7 種類): あいさつ、コメント「価格」→ DM、コメント → フォロー確認してリンク送信、よくある質問、満足度アンケート、注文受付、ストーリーメンションのお礼
 - 受信箱: 全チャネルの会話を一か所で確認し、返信できます。人が返信するとその相手のボットは自動で停止します。「担当者」「オペレーター」などのキーワードでも停止できます。対応が済んだ会話は「完了」にでき (新しいメッセージが届くと「対応中」に戻ります)、お客さんには見えない社内メモと、設定で登録した定型文の挿入も使えます。
@@ -31,7 +31,7 @@ Sokuto は LINE・Facebook Messenger・Instagram で動くチャットボット�
 - テスト: 実際には何も送らずに、お客さんの立場で自動化を試せます
 - チャネル設定: Messenger / Instagram の「はじめる」ボタン・あいさつ文・固定メニュー・会話スターター、LINE のリッチメニューを管理画面から設定 (押すと選んだ自動化が始まります)
 - 設定: ボット変数 (営業時間などを一度登録し、どのメッセージでも `{{bot.hours}}` のように使えます)
-- AI 応答の設定 (Anthropic / OpenAI 互換 / Workers AI): 「設定」→「AI 応答 (LLM)」でプロバイダーと API キーを登録し、接続テストできます (キーは暗号化して保存。呼び出しごとにプロバイダーの料金がかかります。Workers AI は Cloudflare の無料枠内で使えます)
+- AI 応答 (Anthropic / OpenAI 互換 / Workers AI): 「設定」→「AI 応答 (LLM)」でプロバイダーと API キーを登録し、接続テストできます (キーは暗号化して保存)。「AI 応答 (会話)」ステップは指示と参考情報 (FAQ など) をもとにお客さんと会話し、目的を果たすか最大回数に達したら次のステップへ進みます。「意図」トリガーは、キーワードに一致しないメッセージを AI が判定して当てはまる自動化を始めます。呼び出しごとにプロバイダーの料金がかかり、テストでも実際に呼び出します (Workers AI は Cloudflare の無料枠内で使えます)。詳しくは [docs/ai.md](docs/ai.md)
 - MCP サーバー: 26 個のツールで自動化・連絡先・受信箱・配信・レポートを AI から操作 ([docs/mcp.md](docs/mcp.md))
 
 ## 5 分でインストール
@@ -135,13 +135,13 @@ Sokuto is an open-source (MIT) chatbot for **LINE, Facebook Messenger and Instag
 
 ### Features
 
-- 9 triggers (keyword, comment with exclude keywords and auto-like, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply)
-- 9 step types (message with image, buttons, carousel cards and video/audio/file attachments, question with input validation (email/phone/number/url/date) and skip, condition (fields, tags, hour, weekday, days since signup or last message, Instagram follow status), action, delay (≤10 s waits inline with a typing indicator), random, goto, public comment reply with random variants, external request (calls an HTTPS API and saves values from the JSON response to fields))
+- 10 triggers (keyword, comment with exclude keywords and auto-like, first message, LINE follow, any message with optional per-contact cooldown, ref link/QR, button payload, story mention, story reply, intent classified by AI)
+- 10 step types (message with image, buttons, carousel cards and video/audio/file attachments, question with input validation (email/phone/number/url/date) and skip, condition (fields, tags, hour, weekday, days since signup or last message, Instagram follow status), action, delay (≤10 s waits inline with a typing indicator), random, goto, public comment reply with random variants, external request (calls an HTTPS API and saves values from the JSON response to fields), AI reply (a multi-turn AI conversation from your instructions and FAQ text))
 - Sequences (drip campaigns): trigger-less flows that send their steps over time (delay steps between messages) to contacts enrolled with a "subscribe to sequence" action or over MCP; the inbox shows and removes enrollments.
 - 7 templates (including a comment → follow check → link gate), a unified inbox with human hand-over, open/closed conversations (a new message reopens), internal notes and snippets (canned replies), contacts with tags/fields/CSV export and segments (saved condition rules), scheduled broadcasts to a tag or segment (30 messages per minute) with buttons (link / start a flow), click counts and Meta message tags, per-flow reports, a dry-run tester and an MCP server with 26 tools.
 - Channel settings: Messenger/Instagram Get Started, greeting, persistent menu and ice breakers, and the LINE rich menu, each item starting a flow.
 - Bot variables in Settings (e.g. opening hours), usable in any message as `{{bot.hours}}`.
-- AI provider settings (Anthropic, OpenAI-compatible, or Workers AI) with a connection test; the API key is stored encrypted. Each call is billed by the provider; Workers AI runs within Cloudflare's free tier.
+- AI replies (Anthropic, OpenAI-compatible, or Workers AI; set up in Settings with a connection test, key stored encrypted): an AI reply step that holds a conversation from your instructions and FAQ text, and intent triggers that let the AI pick a flow for messages no keyword matched. Each call is billed by the provider, test runs included; Workers AI runs within Cloudflare's free tier. See [docs/ai.md](docs/ai.md).
 
 ### Install in 5 minutes
 

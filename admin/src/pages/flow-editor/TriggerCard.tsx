@@ -66,6 +66,12 @@ export function TriggerCard({ trigger, index, onChange, onRemove, t }: { trigger
       )}
       {trigger.type === 'ref' && <TextInputField label={t('editor_ref')} value={trigger.ref} onChange={(e) => onChange({ ...trigger, ref: e.target.value })} />}
       {trigger.type === 'postback' && <TextInputField label={t('editor_payload')} value={trigger.payload} onChange={(e) => onChange({ ...trigger, payload: e.target.value })} />}
+      {trigger.type === 'intent' && (
+        <>
+          <TextInputField label={t('editor_intent_description')} value={trigger.description} maxLength={300} onChange={(e) => onChange({ ...trigger, description: e.target.value })} />
+          <ListInputField label={t('editor_intent_examples')} value={trigger.examples ?? []} onChange={(examples) => onChange({ ...trigger, examples })} />
+        </>
+      )}
     </div>
   )
 }

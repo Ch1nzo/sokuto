@@ -152,7 +152,7 @@ sokuto/
 │   │   ├── validate.ts       # Zod による検証と、AI 向け説明 FLOW_SCHEMA_DOC
 │   │   ├── engine.ts         # フローの実行 (トリガー照合、ステップ実行、セッション)
 │   │   ├── simulate.ts       # テスト実行 (何も送らない)
-│   │   └── templates.ts      # テンプレート 6 種類
+│   │   └── templates.ts      # テンプレート 7 種類
 │   ├── inbound.ts            # 受信イベントの処理 (重複排除、担当者呼び出し、トリガー照合)
 │   ├── scheduler.ts          # 定期処理 (待機の再開、一斉配信)
 │   ├── contacts.ts           # 連絡先・タグ・フィールド・ボット停止

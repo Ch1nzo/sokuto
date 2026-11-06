@@ -2,7 +2,8 @@ import { RecordingAdapter } from '../channels/adapter'
 import type { Channel, InboundEvent, OutboundMessage } from '../channels/types'
 import type { Db } from '../db'
 import type { ContactRow } from '../contacts'
-import { buttonPayload, flattenButtons, matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
+import type { AiCaller } from '../ai'
+import { buttonPayload, flattenButtons, matchIntent, matchTrigger, parseButtonPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './engine'
 import { SKIP_PAYLOAD } from './inputs'
 import type { FlowRecord } from './types'
 
@@ -13,7 +14,8 @@ export type SimulationStep = { input: SimulatedInput; triggered: boolean; output
 
 export type SimulationResult = { steps: SimulationStep[]; fields: Record<string, string>; tags: string[]; notifications: string[]; notes: string[]; completed: boolean }
 
-export type SimulateOptions = { botFields?: Record<string, string>; timezone?: string; now?: () => Date }
+/** `ai` is called for real when given (API/MCP tests pass lazyAi: billed by the provider). */
+export type SimulateOptions = { botFields?: Record<string, string>; timezone?: string; now?: () => Date; ai?: AiCaller }
 
 /** Plays a list of user inputs against a flow without touching channels, contacts or stats. */
 export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedInput[], channel: Channel = flow.channel === 'any' ? 'line' : flow.channel, isNewContact = true, opts: SimulateOptions = {}): Promise<SimulationResult> {
@@ -37,7 +39,7 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     updatedAt: new Date().toISOString(),
   }
   const liveFlow: FlowRecord = { ...flow, status: 'live' }
-  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], dryRunNotes: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now }
+  const ctx: RunContext = { db, adapter, contact, flow: liveFlow, dryRun: true, dryRunSession: null, dryRunTags: new Set(), dryRunNotifications: [], dryRunNotes: [], botFields: opts.botFields, timezone: opts.timezone ?? 'Asia/Tokyo', now: opts.now, ai: opts.ai }
   const steps: SimulationStep[] = []
   let first = isNewContact
   for (const input of inputs) {
@@ -74,7 +76,9 @@ export async function simulateFlow(db: Db, flow: FlowRecord, inputs: SimulatedIn
     }
     if (!triggered && parseButtonPayload(event.payload)) triggered = await resumeFromButton(ctx, event.payload!)
     if (!triggered) {
-      const trigger = matchTrigger(liveFlow, event, first)
+      let trigger = matchTrigger(liveFlow, event, first)
+      // Intent triggers as in inbound.ts, with this flow's intents as the only candidates.
+      if (!ctx.dryRunSession) trigger = (await matchIntent(ctx.ai, [liveFlow], event, trigger))?.trigger ?? trigger
       if (trigger) {
         triggered = true
         await startFlow(ctx, trigger)

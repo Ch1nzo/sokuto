@@ -46,7 +46,7 @@ import { broadcastReach, runScheduledTasks } from '../scheduler'
 import { loadSegment, matchesSegment, parseSegment, tagsByContact } from '../segments'
 import { parseBroadcastButtons } from '../broadcasts'
 import { randomToken, sha256Hex } from '../crypto'
-import { complete } from '../ai'
+import { complete, lazyAi } from '../ai'
 
 export const apiRoutes = new Hono<AppEnv>()
 
@@ -357,7 +357,7 @@ apiRoutes.post('/flows/:id/test', async (c) => {
     target = { ...flow, definition: v.definition }
   }
   const { botFields, timezone } = await getGeneral(d)
-  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true, { botFields, timezone })
+  const result = await simulateFlow(d, target, body.inputs ?? [], body.channel, body.newContact ?? true, { botFields, timezone, ai: lazyAi(c.env, d) })
   return c.json(result)
 })
 

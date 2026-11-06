@@ -100,7 +100,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 
 | ツール | 内容 |
 | --- | --- |
-| `get_overview` | ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
+| `get_overview` | ボット名、ボット変数 (`general.botFields`、本文で `{{bot.<キー>}}` として使える)、接続済みチャネル、AI プロバイダーの設定状況 (`ai: { configured, provider }`。AI 応答ステップと意図トリガーに必要)、公開中の自動化数、直近 7 日の連絡先・メッセージ数 |
 | `get_flow_schema` | 自動化 (フロー) の JSON の書き方 (トリガー・ステップ・変数・コツ)。作成や編集の前に読みます |
 | `list_templates` | 用意されているテンプレート 7 種類の定義 |
 | `list_flows` | すべての自動化とシーケンスの一覧 (種類 `flow` / `sequence`、状態、チャネル、トリガー、ステップ数) |
@@ -110,7 +110,7 @@ Streamable HTTP 方式のリモート MCP サーバーに、任意のヘッダ�
 | `publish_flow` | 自動化を公開し、実際のお客さんに反応させる |
 | `unpublish_flow` | 自動化を下書きに戻す (シーケンスなら登録中の人もすべて解除) |
 | `delete_flow` | 自動化を完全に削除 (シーケンスへの登録も削除) |
-| `test_flow` | お客さんになりきって会話を試す (メッセージ、コメント、友だち追加、ボタンのタップなど)。`{ "type": "start" }` でトリガーなしに最初のステップから実行 (シーケンスの再生に使います。待機は飛ばします)。LINE や Meta には何も送られません。外部リクエストのステップは呼ばずに `notes` に記録されます |
+| `test_flow` | お客さんになりきって会話を試す (メッセージ、コメント、友だち追加、ボタンのタップなど)。`{ "type": "start" }` でトリガーなしに最初のステップから実行 (シーケンスの再生に使います。待機は飛ばします)。LINE や Meta には何も送られません。外部リクエストのステップは呼ばずに `notes` に記録されます。**AI 応答ステップと意図トリガーは設定の AI を実際に呼び出し、料金がかかります** (未設定なら AI 応答ステップは `notes` に記録して次へ。[ai.md](ai.md)) |
 | `list_contacts` | 連絡先を名前・タグ・チャネルで検索 |
 | `get_contact` | 1 人の連絡先 (会話の状態 `open` / `closed`、社内メモ、フィールド、タグ、登録中のシーケンスと次回の配信日時、最近のメッセージ 30 件) |
 | `tag_contact` | 連絡先にタグを付ける / 外す |
@@ -171,4 +171,4 @@ Sokuto includes a remote MCP server (Streamable HTTP) at `https://<worker>/mcp`,
 - **ChatGPT**: Developer mode connectors (may require a paid plan). If the connector UI only offers OAuth or no auth, it cannot connect to Sokuto yet.
 - **Cursor**: `mcp.json` with `url` and `headers`.
 
-26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access (MCP and `/api/*`); only its SHA-256 hash is stored.
+26 tools: `get_overview`, `get_flow_schema`, `list_templates`, `list_flows`, `get_flow`, `create_flow`, `update_flow`, `publish_flow`, `unpublish_flow`, `delete_flow`, `test_flow`, `list_contacts`, `get_contact`, `tag_contact`, `set_bot_paused`, `list_conversations`, `send_message`, `get_reports`, `broadcast_reach`, `create_broadcast` (both accept `segmentId` and `messageTag`; `create_broadcast` also takes `imageUrl` and up to 3 `buttons`, links or flows to start), `list_segments`, `create_segment`, `delete_segment`, `subscribe_sequence`, `update_contact`, `list_notifications`. `list_conversations` filters by `all | open | unread | paused | closed`; `update_contact` closes/reopens a conversation (a new inbound message reopens it) and sets internal notes. `get_overview` reports `ai: { configured, provider }`; `test_flow` sends nothing to LINE/Meta but `ai` steps and `intent` triggers call the configured AI provider for real (billed; see [ai.md](ai.md)). Sequences (drip campaigns) are flows created with `kind: "sequence"`: no triggers, contacts enrolled with `subscribe_sequence` or a `subscribe` action, played in `test_flow` with `{ "type": "start" }`. A typical build loop is `get_flow_schema` → `create_flow` (draft) → `test_flow` (dry run, nothing is sent) → `publish_flow`. The token grants full access (MCP and `/api/*`); only its SHA-256 hash is stored.

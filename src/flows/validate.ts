@@ -17,6 +17,7 @@ const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('postback'), payload: z.string().min(1) }),
   z.object({ type: z.literal('story_mention') }),
   z.object({ type: z.literal('story_reply') }),
+  z.object({ type: z.literal('intent'), description: z.string().trim().min(1).max(300), examples: z.array(z.string().min(1).max(200)).max(10).optional() }),
 ])
 
 export const ruleSchema = z.object({
@@ -78,6 +79,7 @@ const stepSchema = z.discriminatedUnion('type', [
     timeoutMs: z.number().int().min(1000).max(15000).optional(),
     next,
   }),
+  z.object({ id: z.string().min(1), type: z.literal('ai'), instructions: z.string().min(1).max(4000), knowledge: z.string().max(20000).optional(), maxTurns: z.number().int().min(1).max(20).optional(), next }),
 ])
 
 export const flowDefinitionSchema = z.object({
@@ -133,6 +135,7 @@ export function validateFlow(input: unknown, kind: FlowRecord['kind'] = 'flow'):
       case 'action':
       case 'delay':
       case 'request':
+      case 'ai':
         check(s.next, `step ${s.id}.next`)
         break
       case 'comment_reply':
@@ -165,6 +168,7 @@ Triggers (when the flow starts):
 - { "type": "ref", "ref": "campaign1" }  referral link / QR (m.me/<page>?ref=campaign1, ig.me, LINE)
 - { "type": "postback", "payload": "..." }  a button payload
 - { "type": "story_mention" } / { "type": "story_reply" }  Instagram stories
+- { "type": "intent", "description": "asks about shipping or delivery" (≤300), "examples"?: ["送料はいくら?", "いつ届く?"] (≤10) }  classified by AI: when a message (2+ characters) matches no specific trigger and no conversation is waiting, ONE AI call compares it with the intent triggers of all live flows and starts the matching flow; with no match, first_message / any_message apply as usual. Needs an AI provider in Settings (get_overview → ai.configured): without one, intent triggers never fire. Each classified message is one paid API call. test_flow classifies against this flow's intents only and calls the real provider (billed)
 
 Steps:
 - { "id", "type": "message", "text": "Hi {{first_name}}!", "imageUrl"?: "https://...", "buttons"?: [{ "label": "注文", "next": "q1" } | { "label": "詳細", "url": "https://..." }], "next"?: stepId }
@@ -186,6 +190,8 @@ Steps:
 - { "id", "type": "comment_reply", "text": "DMを送りました ✓", "texts"?: ["DM しました!", "DM をご確認ください"], "next": stepId }  public reply under the triggering comment (comment trigger only). One of text + texts (max 5 in total, up to 4 in texts; text may be "" when texts is set) is picked at random so replies do not all look the same
 - { "id", "type": "request", "method": "GET"|"POST", "url": "https://api.example.com/price?item={{item}}", "headers"?: { "Authorization": "Bearer {{bot.api_key}}" } (≤10), "body"?: "{\\"phone\\": \\"{{phone}}\\"}" (POST, ≤10000 chars), "save"?: [{ "field": "price", "path": "data.price" }] (≤10), "timeoutMs"?: 8000 (1000–15000), "next": stepId }
   Calls an external HTTPS API and saves values from the response to contact fields. Placeholders in "url" are URL-encoded; in a JSON body they are JSON-escaped (POST defaults to Content-Type: application/json). "path" is dotted ("data.price", "items.0.name"; "" = the whole body); objects are saved as JSON, values are cut at 2000 chars. On failure (HTTP error, timeout, non-https) an error event is logged and the flow still continues to "next": branch on the saved field with a condition (is_set / is_empty). test_flow never calls the API: it lists the skipped request in "notes".
+- { "id", "type": "ai", "instructions": "You are the assistant of cafe X. Answer only about opening hours ({{bot.hours}}) and reservations; otherwise offer a human." (≤4000, placeholders allowed), "knowledge"?: "FAQ text…" (≤20000), "maxTurns"?: 5 (1–20), "next": stepId }
+  An AI conversation: the model answers the message that reached the step (or greets when there is none), then waits and answers each new message until it judges the goal reached or after maxTurns replies (default 5), then the flow goes on to "next". It replies in the user's language; the last 12 messages of this conversation are kept as history. Each turn is one paid API call to the provider in Settings, and test_flow calls it too. If no AI provider is configured or a call fails / returns nothing, nothing is sent, an error event is logged (test_flow: "notes") and the flow continues to "next". Hand-over keywords still work during the conversation. Not allowed in sequences.
 
 Placeholders in text: {{name}}, {{first_name}}, {{username}}, {{last_input}}, {{<field>}} e.g. {{phone}}, {{bot.<key>}} for bot variables set in Settings (keys listed in get_overview → general.botFields).
 Tips: for comment triggers put a comment_reply first, then one message with buttons (on Facebook the person must tap a button before the bot can send more). Keep button labels under 20 characters.

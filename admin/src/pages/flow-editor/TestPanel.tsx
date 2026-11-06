@@ -20,6 +20,7 @@ function inputLabel(input: SimulatedInput, t: TFn): string {
 function waitingLabel(waiting: string, t: TFn): string {
   if (waiting === 'input') return t('test_waiting_input')
   if (waiting === 'button') return t('test_waiting_button')
+  if (waiting === 'ai') return t('test_waiting_ai')
   return waiting
 }
 

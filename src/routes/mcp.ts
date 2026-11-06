@@ -6,7 +6,8 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { checkBearer, type AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
 import type { Env } from '../env'
-import { configuredChannels, getGeneral } from '../settings'
+import { configuredChannels, getGeneral, getSetting, type AiConfig } from '../settings'
+import { lazyAi } from '../ai'
 import { addTag, getTags, inboxWhere, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
@@ -31,7 +32,7 @@ export function buildMcpServer(env: Env): McpServer {
   const d = createDb(env.DB)
   const server = new McpServer({ name: 'sokuto', version: '0.1.0' })
 
-  server.registerTool('get_overview', { title: 'Overview', description: 'Bot name, configured channels, live flows and key numbers for the last 7 days.' }, async () => {
+  server.registerTool('get_overview', { title: 'Overview', description: 'Bot name, configured channels, AI provider (needed by ai steps and intent triggers), live flows and key numbers for the last 7 days.' }, async () => {
     const since7 = new Date(Date.now() - 7 * 86400_000).toISOString()
     const [contacts, new7, msgIn, msgOut, flowsLive] = await Promise.all([
       d.select({ n: sql<number>`count(*)` }).from(schema.contacts).get(),
@@ -40,7 +41,9 @@ export function buildMcpServer(env: Env): McpServer {
       d.select({ n: sql<number>`count(*)` }).from(schema.messages).where(and(eq(schema.messages.direction, 'out'), gte(schema.messages.createdAt, since7))).get(),
       d.select({ n: sql<number>`count(*)` }).from(schema.flows).where(eq(schema.flows.status, 'live')).get(),
     ])
-    return json({ general: await getGeneral(d), channels: await configuredChannels(d), contacts: contacts?.n ?? 0, newContacts7d: new7?.n ?? 0, messagesIn7d: msgIn?.n ?? 0, messagesOut7d: msgOut?.n ?? 0, flowsLive: flowsLive?.n ?? 0 })
+    // The settings row as stored: provider only, the API key stays encrypted.
+    const aiCfg = await getSetting<AiConfig>(d, 'ai')
+    return json({ general: await getGeneral(d), channels: await configuredChannels(d), ai: aiCfg ? { configured: true, provider: aiCfg.provider } : { configured: false }, contacts: contacts?.n ?? 0, newContacts7d: new7?.n ?? 0, messagesIn7d: msgIn?.n ?? 0, messagesOut7d: msgOut?.n ?? 0, flowsLive: flowsLive?.n ?? 0 })
   })
 
   server.registerTool('get_flow_schema', { title: 'Flow JSON schema', description: 'Read this before creating or editing a flow. Explains triggers, steps, placeholders and best practices.' }, async () => ({ content: [{ type: 'text', text: FLOW_SCHEMA_DOC }] }))
@@ -119,7 +122,7 @@ export function buildMcpServer(env: Env): McpServer {
     'test_flow',
     {
       title: 'Test flow',
-      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label"), and { type: "start" } to run from the entry without a trigger (use it to play a sequence; delays are skipped). External request steps are not called: they are listed in notes.',
+      description: 'Plays a conversation against a flow as a customer would. Nothing is sent to LINE or Meta. Inputs: messages, comments, follows, button taps (button: "label"), and { type: "start" } to run from the entry without a trigger (use it to play a sequence; delays are skipped). External request steps are not called: they are listed in notes. AI steps and intent triggers DO call the AI provider configured in Settings (each turn / classification is billed by the provider); without one, ai steps are skipped with a note.',
       inputSchema: {
         id: z.number().int(),
         inputs: z.array(z.object({ type: z.enum(['start', 'message', 'comment', 'follow', 'postback', 'ref', 'story_mention', 'story_reply']).default('message'), text: z.string().optional(), button: z.string().optional(), payload: z.string().optional(), ref: z.string().optional() })),
@@ -131,7 +134,7 @@ export function buildMcpServer(env: Env): McpServer {
       const flow = await flowById(d, id)
       if (!flow) return fail('not_found')
       const { botFields, timezone } = await getGeneral(d)
-      return json(await simulateFlow(d, flow, inputs, channel, newContact, { botFields, timezone }))
+      return json(await simulateFlow(d, flow, inputs, channel, newContact, { botFields, timezone, ai: lazyAi(env, d) }))
     },
   )
 

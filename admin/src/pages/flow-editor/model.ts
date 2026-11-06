@@ -17,9 +17,9 @@ export type ValidateType = NonNullable<Extract<Step, { type: 'question' }>['vali
 export type StepOf<T extends StepType> = Extract<Step, { type: T }>
 export type TFn = ReturnType<typeof useT>
 
-export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply', 'request']
+export const STEP_TYPES: StepType[] = ['message', 'question', 'condition', 'action', 'delay', 'random', 'goto', 'comment_reply', 'request', 'ai']
 export const SEQUENCE_STEP_TYPES: StepType[] = ['message', 'condition', 'action', 'delay', 'random', 'request']
-export const TRIGGER_TYPES: TriggerType[] = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply']
+export const TRIGGER_TYPES: TriggerType[] = ['keyword', 'comment', 'first_message', 'follow', 'any_message', 'ref', 'postback', 'story_mention', 'story_reply', 'intent']
 export const ACTION_TYPES: ActionType[] = ['add_tag', 'remove_tag', 'set_field', 'notify', 'pause_bot', 'webhook', 'subscribe', 'unsubscribe']
 export const MATCH_TYPES: MatchType[] = ['contains', 'exact', 'starts_with']
 export const VALIDATE_TYPES: ValidateType[] = ['email', 'phone', 'number', 'url', 'date']
@@ -46,7 +46,7 @@ export const MAX_CARD_TITLE = 40
 export const MAX_CARD_SUBTITLE = 60
 export const ATTACHMENT_TYPES: AttachmentDef['type'][] = ['video', 'audio', 'file']
 
-const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr', request: 'rq' }
+const ID_PREFIX: Record<StepType, string> = { message: 'm', question: 'q', condition: 'c', action: 'a', delay: 'd', random: 'r', goto: 'g', comment_reply: 'cr', request: 'rq', ai: 'ai' }
 
 /* ---------- Pure helpers ---------- */
 
@@ -70,6 +70,7 @@ export function defaultStep(type: StepType, id: string): Step {
     case 'goto': return { id, type, flowId: 0 }
     case 'comment_reply': return { id, type, text: '', next: null }
     case 'request': return { id, type, method: 'GET', url: '', next: null }
+    case 'ai': return { id, type, instructions: '', maxTurns: 5, next: null }
   }
 }
 
@@ -79,6 +80,7 @@ export function defaultTrigger(type: TriggerType): Trigger {
     case 'comment': return { type, keywords: [], postIds: [] }
     case 'ref': return { type, ref: '' }
     case 'postback': return { type, payload: '' }
+    case 'intent': return { type, description: '', examples: [] }
     default: return { type }
   }
 }
@@ -126,6 +128,6 @@ export function clearRefs(s: Step, removedId: string): Step {
 }
 
 export function stepSummary(s: Step): string {
-  const text = 'text' in s ? s.text : 'url' in s ? s.url : ''
+  const text = 'text' in s ? s.text : 'url' in s ? s.url : 'instructions' in s ? s.instructions : ''
   return text.length > 20 ? `${text.slice(0, 20)}…` : text
 }

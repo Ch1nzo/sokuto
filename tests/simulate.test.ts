@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { simulateFlow } from '../src/flows/simulate'
 import type { Db } from '../src/db'
 import type { FlowDefinition, FlowRecord } from '../src/flows/types'
+import type { AiCaller, AiRequest } from '../src/ai'
 
 const db = {} as unknown as Db
 
@@ -392,5 +393,84 @@ describe('numeric conditions on unset fields', () => {
     })
     const r = await simulateFlow(db, f, [{ type: 'message', text: 'go' }])
     expect(r.steps[0]!.outputs.map((o) => o.text)).toEqual(['high'])
+  })
+})
+
+describe('ai step', () => {
+  const aiFlow = (maxTurns?: number) =>
+    flow({
+      triggers: [{ type: 'keyword', keywords: ['help'] }],
+      entry: 'ai1',
+      steps: [
+        { id: 'ai1', type: 'ai', instructions: 'You help {{first_name}}.', knowledge: 'Open 9-17', maxTurns, next: 'm1' },
+        { id: 'm1', type: 'message', text: 'Bye' },
+      ],
+    })
+  /** Fake model: echoes the last user message, done once the user says thanks. */
+  const echo = (calls: AiRequest[]): AiCaller => async (req) => {
+    calls.push(req)
+    const last = req.messages.at(-1)!.content
+    return '```json\n' + JSON.stringify({ reply: `echo: ${last}`, done: last.includes('thanks') }) + '\n```'
+  }
+  const texts = (r: Awaited<ReturnType<typeof simulateFlow>>) => r.steps.map((s) => s.outputs.map((o) => o.text))
+
+  it('ai step keeps the conversation until done', async () => {
+    const calls: AiRequest[] = []
+    const r = await simulateFlow(db, aiFlow(), [{ type: 'message', text: 'help' }, { type: 'message', text: 'hours?' }, { type: 'message', text: 'thanks' }], undefined, true, { ai: echo(calls) })
+    expect(texts(r)).toEqual([['echo: help'], ['echo: hours?'], ['echo: thanks', 'Bye']])
+    expect(r.steps.map((s) => s.waiting)).toEqual(['ai', 'ai', null])
+    expect(r.completed).toBe(true)
+    expect(calls[0]!.system).toContain('You help テスト.')
+    expect(calls[0]!.system).toContain('# Knowledge\nOpen 9-17')
+    expect(calls[0]!.system).toContain('"done"')
+    expect(calls[2]!.messages.map((m) => `${m.role}:${m.content.slice(0, 10)}`)).toEqual(['user:help', 'assistant:{"reply":"', 'user:hours?', 'assistant:{"reply":"', 'user:thanks'])
+  })
+
+  it('ai step stops at maxTurns', async () => {
+    const r = await simulateFlow(db, aiFlow(2), [{ type: 'message', text: 'help' }, { type: 'message', text: 'more' }], undefined, true, { ai: echo([]) })
+    expect(texts(r)).toEqual([['echo: help'], ['echo: more', 'Bye']])
+    expect(r.completed).toBe(true)
+  })
+
+  it('ai step without a caller records a note and continues', async () => {
+    const r = await simulateFlow(db, aiFlow(), [{ type: 'message', text: 'help' }])
+    expect(texts(r)).toEqual([['Bye']])
+    expect(r.notes).toEqual(['ai ai1: ai_not_configured'])
+    const failing = await simulateFlow(db, aiFlow(), [{ type: 'message', text: 'help' }], undefined, true, { ai: async () => Promise.reject(new Error('ai_http_500')) })
+    expect(failing.notes).toEqual(['ai ai1: ai_http_500'])
+    expect(texts(failing)).toEqual([['Bye']])
+  })
+
+  it('greets when the step is reached without a message', async () => {
+    const calls: AiRequest[] = []
+    await simulateFlow(db, aiFlow(), [{ type: 'start' }], undefined, true, { ai: echo(calls) })
+    expect(calls[0]!.messages).toEqual([{ role: 'user', content: '(The conversation starts now. Greet the user.)' }])
+  })
+})
+
+describe('intent trigger', () => {
+  const shipping = flow({ triggers: [{ type: 'intent', description: 'asks about shipping', examples: ['送料は?'] }], entry: 'm1', steps: [{ id: 'm1', type: 'message', text: 'Shipping is free.' }] })
+
+  it('intent trigger starts the flow when the classifier picks it', async () => {
+    const calls: AiRequest[] = []
+    const ai: AiCaller = async (req) => {
+      calls.push(req)
+      return '{"flowId": 7}'
+    }
+    const r = await simulateFlow(db, shipping, [{ type: 'message', text: 'how much is delivery?' }], undefined, true, { ai })
+    expect(r.steps[0]!.triggered).toBe(true)
+    expect(r.steps[0]!.outputs.map((o) => o.text)).toEqual(['Shipping is free.'])
+    expect(calls[0]!.system).toContain('flowId 7: asks about shipping')
+  })
+
+  it('does not start the flow when the classifier returns null, nor call it for 1-character messages', async () => {
+    let n = 0
+    const ai: AiCaller = async () => {
+      n++
+      return '{"flowId": null}'
+    }
+    const r = await simulateFlow(db, shipping, [{ type: 'message', text: 'hello there' }, { type: 'message', text: 'k' }], undefined, true, { ai })
+    expect(r.steps.map((s) => s.triggered)).toEqual([false, false])
+    expect(n).toBe(1)
   })
 })

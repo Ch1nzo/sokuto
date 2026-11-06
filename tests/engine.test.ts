@@ -134,6 +134,13 @@ describe('matchTrigger: other trigger types', () => {
     expect(matchTrigger(flow([first, any]), ev({ text: 'x' }), false)).toBe(any)
   })
 
+  it('never matches an intent trigger alone (classified by matchIntent)', () => {
+    const intent: Trigger = { type: 'intent', description: 'asks about shipping' }
+    const any: Trigger = { type: 'any_message' }
+    expect(matchTrigger(flow([intent]), ev({ text: 'how much is shipping?' }), true)).toBeNull()
+    expect(matchTrigger(flow([intent, any]), ev({ text: 'how much is shipping?' }), false)).toBe(any)
+  })
+
   it('matches follow, ref, postback and story triggers', () => {
     const follow: Trigger = { type: 'follow' }
     const ref: Trigger = { type: 'ref', ref: 'qr1' }

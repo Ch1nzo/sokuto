@@ -5,17 +5,18 @@ import { getChannelConfig, getOrCreateSecret } from '../settings'
 import { LineAdapter, parseLineWebhook, verifyLineSignature } from '../channels/line'
 import { MetaAdapter, parseMetaWebhook, verifyMetaSignature } from '../channels/meta'
 import { handleInbound } from '../inbound'
+import { lazyAi, type AiCaller } from '../ai'
 import type { InboundEvent } from '../channels/types'
 import type { ChannelAdapter } from '../channels/adapter'
 
 export const webhookRoutes = new Hono<AppEnv>()
 
-async function processAll(db: ReturnType<typeof createDb>, adapterFor: (ev: InboundEvent) => ChannelAdapter | null, events: InboundEvent[], replyTokens: Map<string, string>) {
+async function processAll(db: ReturnType<typeof createDb>, adapterFor: (ev: InboundEvent) => ChannelAdapter | null, events: InboundEvent[], replyTokens: Map<string, string>, ai: AiCaller) {
   for (const ev of events) {
     const adapter = adapterFor(ev)
     if (!adapter) continue
     try {
-      await handleInbound(db, adapter, ev, replyTokens.get(ev.channelUserId))
+      await handleInbound(db, adapter, ev, replyTokens.get(ev.channelUserId), ai)
     } catch (err) {
       console.error('inbound failed', ev.channel, ev.type, err)
     }
@@ -30,7 +31,7 @@ webhookRoutes.post('/line', async (c) => {
   if (!(await verifyLineSignature(cfg.channelSecret, body, c.req.header('x-line-signature')))) return c.json({ error: 'bad_signature' }, 401)
   const { events, replyTokens } = parseLineWebhook(body)
   const adapter = new LineAdapter(cfg)
-  c.executionCtx.waitUntil(processAll(db, () => adapter, events, replyTokens))
+  c.executionCtx.waitUntil(processAll(db, () => adapter, events, replyTokens, lazyAi(c.env, db)))
   return c.json({ ok: true })
 })
 
@@ -52,6 +53,6 @@ webhookRoutes.post('/meta', async (c) => {
   const { events, replyTokens } = parseMetaWebhook(body, cfg)
   const version = c.env.META_GRAPH_VERSION || undefined
   const adapters = { messenger: new MetaAdapter('messenger', cfg, version), instagram: cfg.instagramAccountId ? new MetaAdapter('instagram', cfg, version) : null }
-  c.executionCtx.waitUntil(processAll(db, (ev) => (ev.channel === 'instagram' ? adapters.instagram : adapters.messenger), events, replyTokens))
+  c.executionCtx.waitUntil(processAll(db, (ev) => (ev.channel === 'instagram' ? adapters.instagram : adapters.messenger), events, replyTokens, lazyAi(c.env, db)))
   return c.text('EVENT_RECEIVED')
 })

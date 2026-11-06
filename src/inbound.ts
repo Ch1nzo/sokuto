@@ -5,7 +5,8 @@ import type { ChannelAdapter } from './channels/adapter'
 import type { InboundEvent } from './channels/types'
 import { isBotPaused, setBotPaused, upsertContact, type ContactRow } from './contacts'
 import { getGeneral } from './settings'
-import { logEvent, logMessage, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
+import { logEvent, logMessage, matchIntent, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
+import type { AiCaller } from './ai'
 import { parseBroadcastButtons, parseBroadcastPayload } from './broadcasts'
 
 /** Remembers platform event ids so retried webhooks are not processed twice. */
@@ -20,7 +21,7 @@ export async function liveFlows(db: Db) {
 }
 
 /** Processes one normalized inbound event end to end. */
-export async function handleInbound(db: Db, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string): Promise<void> {
+export async function handleInbound(db: Db, adapter: ChannelAdapter, event: InboundEvent, replyToken?: string, ai?: AiCaller): Promise<void> {
   if (!(await markProcessed(db, `${event.channel}:${event.eventId}`))) return
   const { contact: initial, created } = await upsertContact(db, event.channel, event.channelUserId, () => adapter.getProfile(event.channelUserId))
   let contact: ContactRow = initial
@@ -39,7 +40,7 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
 
   const general = await getGeneral(db)
   if (general.paused) return
-  const base = { db, adapter, replyToken, timezone: general.timezone, botFields: general.botFields }
+  const base = { db, adapter, replyToken, timezone: general.timezone, botFields: general.botFields, ai }
 
   // Hand-over keywords pause the bot for this contact and notify the team.
   if (event.type === 'message' && event.text && general.handoffKeywords.some((k) => k && event.text!.toLowerCase().includes(k.toLowerCase()))) {
@@ -117,6 +118,8 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
     }
     if (!chosen || (chosen.trigger.type === 'any_message' && trigger.type === 'first_message')) chosen = { flow, trigger }
   }
+  // 3b. Intent triggers: without a session, one AI call may pick a flow for a message no specific trigger matched.
+  if (!session) chosen = (await matchIntent(ai, flows, event, chosen?.trigger ?? null)) ?? chosen
   if (!chosen) return
   // any_message with a cooldown starts at most once per contact within that window.
   if (chosen.trigger.type === 'any_message' && chosen.trigger.cooldownHours) {

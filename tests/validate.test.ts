@@ -185,6 +185,21 @@ describe('validateFlow', () => {
     expect(errorsOf(def({ next: 'zz' }))).toContain('step rq1.next points to unknown step "zz"')
   })
 
+  it('accepts ai steps and intent triggers within their limits', () => {
+    const intent = { type: 'intent', description: 'asks about shipping', examples: ['送料は?'] }
+    const def = (step: object, trigger: object = intent) => ({ triggers: [trigger], entry: 'ai1', steps: [{ id: 'ai1', type: 'ai', instructions: 'Help with {{bot.hours}}.', next: 'm1', ...step }, { id: 'm1', type: 'message', text: 'Bye' }] })
+    const ok = validateFlow(def({ knowledge: 'FAQ', maxTurns: 20 }))
+    expect(ok.ok && ok.warnings).toEqual([])
+    expect(errorsOf(def({ maxTurns: 21 })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ maxTurns: 0 })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ instructions: '' })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ knowledge: 'x'.repeat(20001) })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({ next: 'zz' }))).toContain('step ai1.next points to unknown step "zz"')
+    expect(errorsOf(def({}, { type: 'intent', description: '' })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({}, { type: 'intent', description: '   ' })).length).toBeGreaterThan(0)
+    expect(errorsOf(def({}, { type: 'intent', description: 'x', examples: Array(11).fill('a') })).length).toBeGreaterThan(0)
+  })
+
   it('rejects invalid step shapes and non-objects', () => {
     expect(errorsOf({ triggers: [], entry: 'q', steps: [{ id: 'q', type: 'question', text: 'x', field: 'bad field!' }] }).length).toBeGreaterThan(0)
     expect(errorsOf({ triggers: [], entry: 'd', steps: [{ id: 'd', type: 'delay', seconds: 0 }] }).length).toBeGreaterThan(0)
@@ -216,6 +231,11 @@ describe('validateFlow (sequences)', () => {
     expect(r.ok ? [] : r.errors).toContain('step q1: question steps are not allowed in a sequence')
     // The same steps are fine in a normal flow.
     expect(validateFlow({ ...seq, steps: [...seq.steps, { id: 'q1', type: 'question', text: 'x', field: 'f' }] }).ok).toBe(true)
+  })
+
+  it('rejects ai steps in a sequence (they wait for messages)', () => {
+    const r = validateFlow({ ...seq, steps: [...seq.steps, { id: 'ai1', type: 'ai', instructions: 'Help.' }] }, 'sequence')
+    expect(r.ok ? [] : r.errors).toContain('step ai1: ai steps are not allowed in a sequence')
   })
 
   it('accepts subscribe / unsubscribe actions and requires a flowId', () => {

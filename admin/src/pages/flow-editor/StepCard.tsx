@@ -455,6 +455,34 @@ function RequestBody({ step, onChange, steps, t }: BodyProps<'request'>) {
   )
 }
 
+function AiBody({ step, onChange, steps, t }: BodyProps<'ai'>) {
+  return (
+    <>
+      <TextAreaField label={t('editor_instructions')} helperText={t('editor_instructions_help')} value={step.instructions} maxLength={4000} maxRows={10} onChange={(e) => onChange({ ...step, instructions: e.target.value })} />
+      <TextAreaField
+        label={t('editor_knowledge')}
+        helperText={`${(step.knowledge ?? '').length}/20000`}
+        value={step.knowledge ?? ''}
+        maxLength={20000}
+        maxRows={16}
+        onChange={(e) => onChange({ ...step, knowledge: e.target.value || undefined })}
+      />
+      <TextInputField
+        label={t('editor_max_turns')}
+        helperText={t('editor_ai_cost')}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={20}
+        placeholder="5"
+        value={step.maxTurns ?? ''}
+        onChange={(e) => onChange({ ...step, maxTurns: parseInt(e.target.value, 10) || undefined })}
+      />
+      <NextField step={step} onChange={onChange} steps={steps} t={t} />
+    </>
+  )
+}
+
 function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; onChange: (s: Step) => void; steps: Step[]; t: TFn; flows: FlowRecord[]; currentId: number }) {
   switch (step.type) {
     case 'message': return <MessageBody step={step} onChange={onChange} steps={steps} t={t} />
@@ -466,6 +494,7 @@ function StepBody({ step, onChange, steps, t, flows, currentId }: { step: Step; 
     case 'goto': return <GotoBody step={step} onChange={onChange} steps={steps} t={t} flows={flows} currentId={currentId} />
     case 'comment_reply': return <CommentReplyBody step={step} onChange={onChange} steps={steps} t={t} />
     case 'request': return <RequestBody step={step} onChange={onChange} steps={steps} t={t} />
+    case 'ai': return <AiBody step={step} onChange={onChange} steps={steps} t={t} />
   }
 }
 

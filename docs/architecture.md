@@ -38,7 +38,7 @@ Sokuto は 1 つの Cloudflare Worker で動きます。Worker が Webhook の�
 | `contact_tags` | 連絡先とタグの対応 (連絡先ごとにタグは一意) |
 | `messages` | 会話履歴。`direction` (in/out)、`source` (user/bot/human/system)、`kind` (text/image/postback/comment/event)、送信エラー |
 | `flows` | 自動化。名前、チャネル (`any`/`line`/`messenger`/`instagram`)、状態 (`draft`/`live`)、種類 (`flow` / `sequence`。作成時にだけ決まる)、定義 (JSON) |
-| `sessions` | 連絡先ごとに 1 つの実行中セッション。どの自動化のどのステップで、何を待っているか (`input`/`button`/`delay`)、再開日時 |
+| `sessions` | 連絡先ごとに 1 つの実行中セッション。どの自動化のどのステップで、何を待っているか (`input`/`button`/`ai`/`delay`)、再開日時、待機中のデータ (`context`、AI 応答ステップの会話履歴) |
 | `sequence_subscriptions` | シーケンスへの登録。連絡先とシーケンスの組で一意。次に実行するステップ (`step_id`) と実行日時 (`resume_at`) |
 | `broadcasts` | 一斉配信。対象チャネル・タグまたはセグメント (`segment_id`)、本文、ボタン (`buttons`、JSON 最大 3 個: リンクか自動化)、Meta メッセージタグ (`message_tag`)、予約日時、状態 (`scheduled`/`running`/`done`/`canceled`)、件数 (送信・失敗・ボタンのクリック数 `clicked`) |
 | `broadcast_jobs` | 配信の宛先 1 件ごとの送信状態 (`pending`/`sent`/`failed`/`skipped`) |
@@ -67,8 +67,9 @@ KV には次のキーが入ります。
 
 自動化は `{ triggers, entry, steps }` という JSON です (`src/flows/types.ts`)。ステップはグラフになっていて、各ステップが次のステップの ID (`next`、条件分岐なら `yes`/`no`、ボタンならボタンごとの `next`) を持ちます。`null` で終了です。
 
-- トリガー 9 種類: `keyword`, `comment`, `first_message`, `follow`, `any_message`, `ref`, `postback`, `story_mention`, `story_reply`
-- ステップ 9 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`, `request`
+- トリガー 10 種類: `keyword`, `comment`, `first_message`, `follow`, `any_message`, `ref`, `postback`, `story_mention`, `story_reply`, `intent`
+- ステップ 10 種類: `message`, `question`, `condition`, `action`, `delay`, `random`, `goto`, `comment_reply`, `request`, `ai`
+- AI 応答 (`ai`) と意図 (`intent`): 設定の AI プロバイダー (`src/ai.ts`) を呼びます。`ai` は指示 (`instructions`)・参考情報 (`knowledge`) をもとに、`done` になるか `maxTurns` (既定 5、最大 20) 回返事をするまで会話してから `next` へ進みます。`intent` は `matchTrigger` では一致せず、受信手順 8b でまとめて分類されます。詳しくは [ai.md](ai.md)。
 - 外部リクエスト (`request`): HTTPS の API を GET / POST で呼び、応答 JSON の値 (`data.price`、`items.0.name` のようなパス。空なら本文全体) を連絡先のフィールドに保存します (最大 10 件、各 2000 文字まで)。URL の変数は URL エンコード、JSON 本文の変数は JSON 文字列としてエスケープされます。タイムアウトは既定 8 秒 (最大 15 秒)。失敗 (HTTP エラー・タイムアウト) は `error` イベントを記録して `next` へ進むので、保存したフィールドを条件分岐 (`is_set`) で確認します。
 - 変数: `{{name}}`, `{{first_name}}`, `{{username}}`, `{{last_input}}`, `{{<フィールド名>}}` (例: `{{phone}}`), `{{bot.<キー>}}` (設定の「ボット変数」。例: `{{bot.hours}}`。未定義のものはそのまま残ります)
 - 条件の特殊項目: `channel`, `last_input`, `name`, `is_follower` (Instagram のフォロー状態。他のチャネルは常に `true`), `hour` (設定のタイムゾーンで 0〜23), `weekday` (0=日〜6=土), `days_since_created` (登録からの日数), `days_since_last_inbound` (前回受信からの日数。新規は空)。それ以外は連絡先のフィールド名で、`tag` は `has_tag` / `not_has_tag` と組み合わせます。判定は `src/flows/rules.ts` の純粋関数です。
@@ -83,10 +84,12 @@ KV には次のキーが入ります。
 4. **担当者呼び出しキーワード** (初期値: 担当者・オペレーター・human・agent) を含むメッセージなら、その連絡先のボットを停止し、セッションを消し、通知を作り、設定の返信文を送って終了。
 5. その連絡先のボットが停止中なら終了 (`bot_paused_until` を過ぎていれば自動で再開)。
    - 5b. **一斉配信のボタン** (`sk-bc:<配信 ID>:<ボタン番号>`) なら、`events` に `button_clicked` (`meta: { broadcastId, index, label }`) を記録して配信の `clicked` を 1 増やし、ボタンの自動化が公開中なら最初から始めて終了。質問の答えを待っている途中のタップを答えとして扱わないよう、セッションより先に処理します。
-6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ。関係のない入力なら 7 へ進む。
+6. **待機中のセッションがあれば続きを実行**。質問の答えならフィールドに保存して次へ、ボタンなら押されたボタンの `next` へ、AI 応答ステップならテキストを AI に渡して返事を送る。関係のない入力なら 7 へ進む。
 7. **ボタンの payload** (`sk:...`) なら、セッションがなくてもその自動化の続きを実行。
    - 7b. **`sk-flow:<自動化 ID>`** の postback (Messenger / Instagram の「はじめる」ボタン・固定メニュー・会話スターター、LINE リッチメニューの「自動化を始める」) なら、その自動化が公開中であればトリガーに関係なく最初から始める。公開中でなければ 8 へ。
-8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。`any_message` に `cooldownHours` があり、その連絡先で同じ自動化が指定時間内に起動済み (`events` の `trigger_fired`) なら起動しない。
+8. **トリガーを照合**。公開中の自動化を ID 順に見て、具体的なトリガー (キーワード、コメントなど) が最初に一致したものを採用。`first_message` / `any_message` は他に一致がないときだけ使う (`first_message` が `any_message` より優先)。
+   - 8b. **意図トリガー**: 具体的なトリガーに一致しなかったテキストメッセージ (2 文字以上) で、その連絡先にセッションがなければ、チャネルが合う公開中の自動化の `intent` トリガーをすべて候補にして AI を 1 回呼び (`matchIntent` → `classifyIntent`、返答は `{"flowId": n|null}`)、選ばれた自動化を始める。候補がなければ AI は呼ばない。AI が未設定・失敗・`null` なら `first_message` / `any_message` のまま。
+   - `any_message` に `cooldownHours` があり、その連絡先で同じ自動化が指定時間内に起動済み (`events` の `trigger_fired`) なら起動しない。
 
 ### セッションと待機
 
@@ -94,6 +97,7 @@ KV には次のキーが入ります。
 
 - **`input`**: `question` ステップ。次のメッセージを答えとして指定のフィールドに保存します。選択肢 (`choices`) がある場合、選択肢以外の入力はトリガー照合に回されます。入力チェック (`validate`: email / phone / number / url / date) がある場合は答えを検証して正規化してから保存します (電話番号は記号を除いた数字、日付は `YYYY-MM-DD`)。形式が違えば `retryText` (未設定なら既定の文) を送り、そのまま待ち続けます。`skipLabel` があるとクイックリプライの末尾にスキップボタン (payload `sk-skip`) が付き、押されるとフィールドを保存せずに次のステップへ進みます。
 - **`button`**: `next` を持つボタン付きの `message` ステップ。ボタンが押されるのを待ちます。
+- **`ai`**: `ai` ステップ。会話の続きを待ち、テキストメッセージが届くたびに AI を 1 回呼んで返事を送ります。`context` に直近 12 メッセージ (`t`) と返事の回数 (`n`) を保存します。AI が `done` を返すか `maxTurns` に達すると `next` へ進みます。テキスト以外 (ボタンのタップなど) は受信手順 7 以降に回ります。AI が未設定・失敗・空の返事なら、何も送らず `error` イベントを記録して `next` へ進みます。
 - **`delay`**: `delay` ステップ。`resume_at` を記録し、定期処理が時刻になったら再開します。10 秒以下の待機は (1 回の実行で合計 20 秒まで) セッションを保存せず、相手に入力中の表示 (Meta `typing_on` / LINE ローディング) を出してその場で待ってから次へ進みます。
 
 1 回の実行で進むステップは最大 50 です (無限ループ防止)。送信に失敗するとセッションは終了します。
@@ -127,7 +131,7 @@ payload に自動化とステップの情報が入っているので、**セッ�
 
 ### テスト実行
 
-`src/flows/simulate.ts` は、`RecordingAdapter` (送信内容を記録するだけのアダプター) を使い、仮の連絡先「テスト 太郎」で自動化を実行します。セッション・タグ・通知はメモリ上だけで扱い、D1 にも LINE / Meta にも何も書き込みません。待機ステップは待たずに次へ進みます。外部リクエストは呼ばずに飛ばし、結果の `notes` に記録します (例: `request rq1: skipped GET https://…`)。管理画面の「テスト」と MCP の `test_flow` が使います。
+`src/flows/simulate.ts` は、`RecordingAdapter` (送信内容を記録するだけのアダプター) を使い、仮の連絡先「テスト 太郎」で自動化を実行します。セッション・タグ・通知はメモリ上だけで扱い、D1 にも LINE / Meta にも何も書き込みません。待機ステップは待たずに次へ進みます。外部リクエストは呼ばずに飛ばし、結果の `notes` に記録します (例: `request rq1: skipped GET https://…`)。AI 応答ステップと意図トリガーは `SimulateOptions.ai` に渡された AI を呼びます。管理画面の「テスト」と MCP の `test_flow` は設定の AI (`lazyAi`) を渡すので**実際に呼び出され、料金がかかります** (未設定なら AI 応答ステップは `notes` に `ai_not_configured` を記録して次へ)。意図トリガーは、テスト中の自動化の意図だけを候補に判定します。
 
 ## チャネルアダプター
 
@@ -149,7 +153,7 @@ Messenger と Instagram は 1 つの Meta アプリ (1 つの設定 `channel:met
 - `openai`: `POST {Base URL}/chat/completions` (Base URL の既定は `https://api.openai.com/v1`。OpenAI 互換 API ならどれでも可。モデルは必須)。
 - `workers_ai`: Worker の `AI` バインディング (`wrangler.jsonc` の `"ai": { "binding": "AI" }`、既定モデル `@cf/meta/llama-3.3-70b-instruct-fp8-fast`)。バインディングがない古いデプロイでは `workers_ai_binding_missing`、`wrangler dev --local` (`npm run dev`) では「Binding AI needs to be run remotely」のエラーになります。
 
-`lazyAi(env, db)` は初回の呼び出しで設定を読み、未設定なら `ai_not_configured` で失敗します。`parseAiReply` (`{"reply","done"}`)、`intentPrompt` / `parseIntent` / `classifyIntent` (意図の分類) は純粋関数で、JSON の前後の文章やコードフェンスを許容します。管理用 API: `PUT` / `DELETE /api/settings/ai`、`POST /api/settings/ai/test` (API キーは返しません)。
+`ai` ステップと `intent` トリガーが使います (Webhook・定期処理・テスト実行が `RunContext.ai` に `lazyAi` を渡します)。`lazyAi(env, db)` は初回の呼び出しで設定を読み、未設定なら `ai_not_configured` で失敗します。`parseAiReply` (`{"reply","done"}`)、`intentPrompt` / `parseIntent` / `classifyIntent` (意図の分類) は純粋関数で、JSON の前後の文章やコードフェンスを許容します。管理用 API: `PUT` / `DELETE /api/settings/ai`、`POST /api/settings/ai/test` (API キーは返しません)。
 
 ## 定期処理 (`src/scheduler.ts`)
 
@@ -185,9 +189,9 @@ Cron で 1 分ごとに実行されます (管理用 API `POST /api/scheduler/ru
 Sokuto is a single Cloudflare Worker (Hono). `run_worker_first` routes `/api/*`, `/webhooks/*`, `/mcp` and `/health` to code; everything else is served from the static admin SPA (`dist/client`, SPA fallback), including `/privacy` and `/data-deletion`. Webhooks are signature-checked, answered immediately, and processed in `waitUntil`.
 
 - **Data**: D1 tables `settings` (incl. `profile:meta`, `richmenu:line` and `ai`), `contacts`, `contact_tags`, `messages`, `flows` (kind `flow` or `sequence`), `sessions`, `sequence_subscriptions`, `broadcasts`, `broadcast_jobs`, `segments` (saved condition rules for filtering contacts and targeting broadcasts), `events`, `processed_events`, `notifications`, `snippets` (canned inbox replies); contacts carry an inbox `status` (`open`/`closed`, reopened by any inbound message) and internal `notes`. KV holds auto-generated secrets, the password hash, the MCP token hash and login rate-limit counters.
-- **Flow engine**: a flow is `{ triggers, entry, steps }` (9 triggers, 9 step types). One session per contact waits for `input`, `button` or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → broadcast button `sk-bc:<broadcast>:<i>` (logs `button_clicked`, increments `broadcasts.clicked`, starts the button's live flow; checked before the session so a tap is never taken as an answer) → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`).
+- **Flow engine**: a flow is `{ triggers, entry, steps }` (10 triggers, 10 step types). One session per contact waits for `input`, `button`, `ai` (an AI conversation; transcript of the last 12 messages in `context`) or `delay`. Inbound order: dedupe → contact upsert → global pause → hand-over keywords → per-contact pause → broadcast button `sk-bc:<broadcast>:<i>` (logs `button_clicked`, increments `broadcasts.clicked`, starts the button's live flow; checked before the session so a tap is never taken as an answer) → resume session → button payload → `sk-flow:<id>` postback (profile menus, ice breakers, LINE rich menu areas start that live flow) → trigger match (specific triggers beat `first_message`/`any_message`) → intent triggers (no session, a text of 2+ characters that matched no specific trigger: one AI call classifies it against every live `intent` trigger on the channel). Button payloads `sk:<flow>:<step>:<i>` let a conversation continue without a session, which is how Facebook/Instagram comment private replies continue in Messenger. `simulate.ts` dry-runs flows with a recording adapter (input `start` runs from the entry without a trigger; external `request` steps are skipped and listed in `notes`; `ai` steps and intent triggers call the AI passed in `SimulateOptions.ai`, which the admin tester and MCP `test_flow` set to the real provider, so tests are billed). See [ai.md](ai.md).
 - **Sequences**: flows with `kind: 'sequence'` have no triggers and only message / condition / action / delay / random steps. Contacts are enrolled (live sequences only, once each) with the `subscribe` action, `POST /api/contacts/:id/sequences` or MCP `subscribe_sequence`; each enrollment is a `sequence_subscriptions` row (`step_id` to run next, `resume_at`) instead of a session. Delays update the row, the end deletes it, buttons do not wait (a later tap runs through the normal `sk:` path). Enrollments are removed on unsubscribe, unpublish, flow or contact deletion and unfollow.
 - **Adapters**: `ChannelAdapter` with LINE (reply token used once, then push) and Meta (Messenger + Instagram, comment replies, private replies and likes (`likeComment`), Instagram follow status as `ChannelProfile.followsBusiness` for `is_follower`, page token inspection, page subscription and the Messenger Profile API); LINE also creates, uploads and sets the default rich menu.
-- **AI providers** (`src/ai.ts`): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db)` loads the `ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
+- **AI providers** (`src/ai.ts`, used by `ai` steps and `intent` triggers): `complete()` calls Anthropic (`/v1/messages`, default `claude-sonnet-5-5`), any OpenAI-compatible `/chat/completions` (model required) or Workers AI through the `AI` binding (default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`). `lazyAi(env, db)` loads the `ai` settings row on first use; `parseAiReply`, `intentPrompt`, `parseIntent` and `classifyIntent` are pure helpers. Settings: `PUT`/`DELETE /api/settings/ai`, `POST /api/settings/ai/test`; the key is never returned.
 - **Scheduler**: every minute, resumes up to 25 due delays (delays ≤10 s run inline) and up to 25 due sequence enrollments, sends broadcasts at 30/minute to a tag or a segment (segment rules are evaluated in memory with `matchRules`; a deleted segment reaches nobody; Meta contacts outside the 24 h window are skipped unless the broadcast has a Meta message tag; up to 3 buttons, links or `sk-bc:` postbacks that start a flow, with tap counts), and prunes dedupe records. Delay resumes do not check the 24 h window.
 - **Security**: no deploy-time secrets; channel tokens and the AI API key AES-GCM encrypted in D1 with a key in KV; PBKDF2 (100k) password hash; HMAC-signed 30-day cookie sessions; 10 login attempts per IP per 15 minutes; MCP token stored as SHA-256 and valid for `/mcp` and `/api/*`; constant-time webhook signature checks.

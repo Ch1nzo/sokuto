@@ -3,6 +3,7 @@ import type { Db } from '../db'
 import { schema } from '../db'
 import type { ChannelAdapter } from '../channels/adapter'
 import type { ChannelProfile, InboundEvent, OutboundButton, OutboundMessage } from '../channels/types'
+import { classifyIntent, parseAiReply, type AiCaller, type AiMessage } from '../ai'
 import { addTag, firstName, getTags, parseFields, removeTag, setBotPaused, setField, type ContactRow } from '../contacts'
 import { DEFAULT_RETRY_TEXT, SKIP_PAYLOAD, validateInput } from './inputs'
 import { matchRules, normalize } from './rules'
@@ -39,9 +40,13 @@ export type RunContext = {
   inlineWaited?: number
   /** Set when running a sequence enrollment (sequence_subscriptions row id): no sessions, buttons do not wait. */
   sequence?: { id: number }
+  /** AI provider for ai steps (lazyAi in production, a fake in tests); missing = not configured. */
+  ai?: AiCaller
 }
 
 const MAX_STEPS_PER_RUN = 50
+const AI_FORMAT = 'Reply in the language the user writes in, briefly, as chat messages. Answer with JSON only: {"reply": "<your message to the user>", "done": <true when the goal of the conversation is reached or the user wants to stop, otherwise false>}.'
+const AI_GREETING = '(The conversation starts now. Greet the user.)'
 // ponytail: inline waits are capped at 10 s per step / 20 s per run so the webhook's waitUntil (~30 s) never expires; longer waits go through the scheduler.
 const INLINE_DELAY_MAX = 10
 const INLINE_DELAY_BUDGET = 20
@@ -128,9 +133,27 @@ export function matchTrigger(flow: FlowRecord, event: InboundEvent, isFirstMessa
       case 'any_message':
         if (event.type === 'message') fallback = fallback ?? t
         break
+      case 'intent':
+        // Never matched alone: matchIntent classifies across flows with one AI call.
+        break
     }
   }
   return fallback
+}
+
+/**
+ * Intent triggers: a message (2+ characters) that no specific trigger matched is classified against
+ * the intent triggers of `flows` on the event's channel with one AI call. Returns the picked flow or null.
+ */
+export async function matchIntent(ai: AiCaller | undefined, flows: FlowRecord[], event: InboundEvent, matched: Trigger | null): Promise<{ flow: FlowRecord; trigger: Trigger } | null> {
+  const text = event.text?.trim() ?? ''
+  if (!ai || event.type !== 'message' || text.length < 2 || (matched && matched.type !== 'first_message' && matched.type !== 'any_message')) return null
+  const onChannel = flows.filter((f) => f.channel === 'any' || f.channel === event.channel)
+  const candidates = onChannel.flatMap((f) => f.definition.triggers.flatMap((t) => (t.type === 'intent' ? [{ flowId: f.id, description: t.description, examples: t.examples }] : [])))
+  const id = await classifyIntent(ai, text, candidates)
+  const flow = onChannel.find((f) => f.id === id)
+  const trigger = flow?.definition.triggers.find((t) => t.type === 'intent')
+  return flow && trigger ? { flow, trigger } : null
 }
 
 /** Replaces {{name}}, {{first_name}}, {{field}}, {{bot.key}} and {field} placeholders; `encode` escapes the substituted values. */
@@ -292,6 +315,44 @@ async function performRequest(ctx: RunContext, step: Step & { type: 'request' })
   }
 }
 
+/** Conversation of an ai step kept in the session context: last messages (`t`) and replies sent so far (`n`). */
+type AiState = { t: AiMessage[]; n: number }
+
+/**
+ * One AI reply. Returns true when the step is over (done, maxTurns reached, AI missing or failing) and the
+ * flow should go on to `next`; false when it stopped here (waiting for the next message, or the send failed).
+ */
+async function aiTurn(ctx: RunContext, step: Step & { type: 'ai' }, input: string | undefined, state: AiState): Promise<boolean> {
+  const fail = async (error: string) => {
+    if (ctx.dryRun) (ctx.dryRunNotes ??= []).push(`ai ${step.id}: ${error}`)
+    else await logEvent(ctx.db, { type: 'error', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { error } })
+    return true
+  }
+  if (!ctx.ai) return fail('ai_not_configured')
+  const system = [render(ctx, step.instructions), step.knowledge ? `# Knowledge\n${step.knowledge}` : '', AI_FORMAT].filter(Boolean).join('\n\n')
+  // The stored transcript is user/assistant pairs, so the request always starts with a user message (Anthropic requires it).
+  const messages: AiMessage[] = [...state.t, { role: 'user', content: input || AI_GREETING }]
+  let reply: { reply: string; done: boolean }
+  try {
+    reply = parseAiReply(await ctx.ai({ system, messages }))
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e))
+  }
+  if (!reply.reply) return fail('empty_reply')
+  // Messenger / Instagram reject texts over 2000 characters.
+  if (!(await deliver(ctx, step, { text: reply.reply.slice(0, 2000) })).ok) {
+    await endSession(ctx)
+    return false
+  }
+  const n = state.n + 1
+  if (reply.done || n >= (step.maxTurns ?? 5)) return true
+  // ponytail: history is this step's transcript only (last 12 messages), not the whole inbox conversation.
+  // The model's turns are stored in the JSON format it is asked for, so it keeps answering that way.
+  const t = [...messages, { role: 'assistant' as const, content: JSON.stringify({ reply: reply.reply, done: false }) }].slice(-12)
+  await saveSession(ctx, { stepId: step.id, waiting: 'ai', context: JSON.stringify({ t, n } satisfies AiState) })
+  return false
+}
+
 export async function performActions(ctx: RunContext, actions: Array<{ type: string } & Record<string, unknown>>) {
   for (const a of actions) {
     if (ctx.dryRun) {
@@ -449,6 +510,10 @@ export async function runFrom(ctx: RunContext, stepId: string | null | undefined
         await performRequest(ctx, step)
         current = step.next ?? null
         break
+      case 'ai':
+        if (!(await aiTurn(ctx, step, ctx.lastInput, { t: [], n: 0 }))) return
+        current = step.next ?? null
+        break
     }
   }
   await endSession(ctx)
@@ -512,6 +577,19 @@ export async function resumeSession(ctx: RunContext, session: SessionRow, event:
     if (!button) return false
     if (!ctx.dryRun) await logEvent(ctx.db, { type: 'button_clicked', channel: ctx.contact.channel, flowId: ctx.flow.id, stepId: step.id, contactId: ctx.contact.id, meta: { label: button.label } })
     await runFrom(ctx, button.next)
+    return true
+  }
+  if (session.waiting === 'ai' && step.type === 'ai') {
+    // Only typed text continues the conversation; button taps and other events go to their own handlers.
+    const input = event.type === 'message' ? event.text?.trim() : ''
+    if (!input) return false
+    let saved: Partial<AiState> = {}
+    try {
+      saved = JSON.parse(session.context) as Partial<AiState>
+    } catch {
+      // corrupt context: start the transcript over
+    }
+    if (await aiTurn(ctx, step, input, { t: Array.isArray(saved.t) ? saved.t : [], n: Number(saved.n) || 0 })) await runFrom(ctx, step.next)
     return true
   }
   return false
