@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { FlowDefinition, FlowRecord } from './types'
 import { INPUT_VALIDATIONS } from './inputs'
+import { MESSAGE_TAGS } from '../channels/types'
 
 const next = z.string().nullable().optional()
 
@@ -28,6 +29,17 @@ export const segmentInputSchema = z.object({
   rules: z.array(ruleSchema).min(1).max(20),
   mode: z.enum(['all', 'any']).default('all'),
 })
+
+/** Broadcast buttons (POST /api/broadcasts, MCP create_broadcast): each one a link or an automation to start on tap. */
+export const broadcastButtonsSchema = z
+  .array(
+    z
+      .object({ label: z.string().trim().min(1).max(40), url: z.string().url().optional(), flowId: z.number().int().positive().optional() })
+      .refine((b) => !b.url !== !b.flowId, 'give either url or flowId, not both'),
+  )
+  .max(3)
+
+export const messageTagSchema = z.enum(MESSAGE_TAGS)
 
 const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add_tag'), tag: z.string().min(1) }),

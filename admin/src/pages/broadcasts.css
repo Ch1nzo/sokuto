@@ -3,6 +3,14 @@
 .bc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 860px) { .bc-grid { grid-template-columns: minmax(0, 1fr); } }
 
+/* Button row: label / URL / automation / delete; on mobile label + delete, then URL and automation full width. */
+.bc-button { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+@media (max-width: 860px) {
+  .bc-button { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 8px; border-bottom: 1px solid var(--bdr-black-light); }
+  .bc-button > :nth-child(2), .bc-button > :nth-child(3) { grid-column: 1 / -1; }
+  .bc-button > :last-child { grid-column: 2; grid-row: 1; }
+}
+
 .bc-counter { display: flex; flex-direction: column; gap: 2px; }
 .bc-counter.is-over { color: var(--bgtxt-orange-dark); }
 

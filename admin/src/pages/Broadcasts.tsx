@@ -12,7 +12,10 @@ import {
   useToast,
   type BadgeVariant,
 } from '@channel.io/bezier-react'
-import { FunnelIcon, InfoFilledIcon, MegaphoneIcon } from '@channel.io/bezier-icons'
+import { ErrorTriangleFilledIcon, FunnelIcon, InfoFilledIcon, MegaphoneIcon, TrashIcon } from '@channel.io/bezier-icons'
+import type { BroadcastButton } from '@shared/broadcasts'
+import { MESSAGE_TAGS } from '@shared/channels/types'
+import type { FlowRecord } from '@shared/flows/types'
 import { api, errorMessage } from '../lib/api'
 import { useLang, useT, type Key } from '../lib/i18n'
 import {
@@ -31,6 +34,7 @@ import {
   type Column,
 } from '../components'
 import { ConfirmAction } from '../components/ConfirmAction'
+import { AddButton, IconBtn } from './flow-editor/fields'
 import './broadcasts.css'
 
 type BroadcastStatus = 'scheduled' | 'running' | 'done' | 'canceled'
@@ -43,6 +47,9 @@ type Broadcast = {
   segmentId?: number | null
   text: string
   imageUrl?: string | null
+  buttons?: BroadcastButton[]
+  messageTag?: string | null
+  clicked?: number
   status: BroadcastStatus
   total: number
   sent: number
@@ -54,9 +61,16 @@ type Broadcast = {
 type Reach = { total: number; reachable: number }
 type TagCount = { tag: string; n: number }
 type SegmentRef = { id: number; name: string }
+type FlowRef = Pick<FlowRecord, 'id' | 'name' | 'status' | 'kind'>
 type Channel = 'any' | 'line' | 'messenger' | 'instagram'
+/** One button row in the form; `flowId` is the SelectField value ('' = none). */
+type FormButton = { label: string; url: string; flowId: string }
 
-const emptyForm = { name: '', channel: 'any' as Channel, tag: '', segmentId: '', text: '', imageUrl: '', scheduledAt: '' }
+const emptyForm = { name: '', channel: 'any' as Channel, tag: '', segmentId: '', text: '', imageUrl: '', scheduledAt: '', buttons: [] as FormButton[], messageTag: '' }
+
+/** validate.ts broadcastButtonsSchema */
+const MAX_BUTTONS = 3
+const MAX_BUTTON_LABEL = 40
 
 /** Soft limit: warn (do not block) above this many characters. */
 const TEXT_SOFT_LIMIT = 1000
@@ -89,6 +103,7 @@ export default function Broadcasts() {
   const [formError, setFormError] = useState<unknown>(null)
   const [tags, setTags] = useState<TagCount[]>([])
   const [segments, setSegments] = useState<SegmentRef[]>([])
+  const [flows, setFlows] = useState<FlowRef[]>([])
   const [reach, setReach] = useState<Reach | null | 'error'>(null)
   const [busy, setBusy] = useState(false)
   const [pendingCancel, setPendingCancel] = useState<Broadcast | null>(null)
@@ -119,6 +134,10 @@ export default function Broadcasts() {
       .get<{ segments: SegmentRef[] }>('/api/segments')
       .then((r) => setSegments(r.segments))
       .catch(() => setSegments([]))
+    api
+      .get<{ flows: FlowRef[] }>('/api/flows')
+      .then((r) => setFlows(r.flows.filter((f) => f.status === 'live' && f.kind === 'flow')))
+      .catch(() => setFlows([]))
   }, [])
 
   useEffect(() => {
@@ -128,6 +147,7 @@ export default function Broadcasts() {
       const params = new URLSearchParams({ channel: form.channel })
       if (form.segmentId) params.set('segmentId', form.segmentId)
       else if (form.tag.trim()) params.set('tag', form.tag.trim())
+      if (form.messageTag) params.set('messageTag', form.messageTag)
       api
         .get<Reach>(`/api/broadcasts/reach?${params.toString()}`)
         .then((r) => !cancelled && setReach(r))
@@ -137,7 +157,7 @@ export default function Broadcasts() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [form.channel, form.tag, form.segmentId])
+  }, [form.channel, form.tag, form.segmentId, form.messageTag])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -158,6 +178,8 @@ export default function Broadcasts() {
         segmentId: form.segmentId ? Number(form.segmentId) : null,
         text: form.text,
         imageUrl: form.imageUrl.trim(),
+        buttons: form.buttons.map((b) => (b.url.trim() ? { label: b.label, url: b.url.trim() } : { label: b.label, flowId: b.flowId ? Number(b.flowId) : undefined })),
+        messageTag: form.messageTag || null,
         scheduledAt,
       })
       setForm(emptyForm)
@@ -187,6 +209,10 @@ export default function Broadcasts() {
 
   const segmentName = (id: number) => segments.find((s) => s.id === id)?.name ?? `#${id}`
   const segmentOptions = [{ value: '', label: t('bc_segment_none') }, ...segments.map((s) => ({ value: String(s.id), label: s.name }))]
+  const flowName = (id: number) => flows.find((f) => f.id === id)?.name ?? `#${id}`
+  const flowOptions = [{ value: '', label: t('bc_button_none') }, ...flows.map((f) => ({ value: String(f.id), label: f.name }))]
+  const messageTagOptions = [{ value: '', label: t('bc_message_tag_none') }, ...MESSAGE_TAGS.map((x) => ({ value: x, label: x }))]
+  const setButton = (i: number, b: FormButton) => setForm({ ...form, buttons: form.buttons.map((x, j) => (j === i ? b : x)) })
 
   const channelOptions: { value: Channel; label: string }[] = [
     { value: 'any', label: t('channel_any') },
@@ -269,6 +295,11 @@ export default function Broadcasts() {
           <Text typo="12" color={b.failed > 0 ? 'bgtxt-red-normal' : 'txt-black-dark'}>
             {fmt(b.failed)} {t('bc_failed')}
           </Text>
+          {!!b.buttons?.length && (
+            <Text typo="12" color="txt-black-dark">
+              {fmt(b.clicked ?? 0)} {t('bc_clicked')}
+            </Text>
+          )}
         </div>
       ),
     },
@@ -328,6 +359,25 @@ export default function Broadcasts() {
               </span>
             }
           />
+          <VStack spacing={8}>
+            <Text typo="13" bold color="txt-black-darker">
+              {t('bc_buttons')} <span className="tabular">({form.buttons.length}/{MAX_BUTTONS})</span>
+            </Text>
+            {form.buttons.map((b, i) => (
+              <div className="bc-button" key={i}>
+                <TextInputField label={t('editor_button_label')} value={b.label} maxLength={MAX_BUTTON_LABEL} onChange={(e) => setButton(i, { ...b, label: e.target.value })} />
+                <TextInputField label={t('editor_button_url')} type="url" value={b.url} placeholder="https://" disabled={!!b.flowId} onChange={(e) => setButton(i, { ...b, url: e.target.value })} />
+                <SelectField label={t('bc_button_flow')} value={b.flowId} options={flowOptions} disabled={!!b.url.trim()} onChange={(v) => setButton(i, { ...b, flowId: v })} />
+                <IconBtn icon={TrashIcon} danger label={`${t('delete')}: ${b.label || t('editor_button_label')}`} onClick={() => setForm({ ...form, buttons: form.buttons.filter((_, j) => j !== i) })} />
+              </div>
+            ))}
+            <Text typo="12" color="txt-black-dark">
+              {t('bc_buttons_hint')}
+            </Text>
+            <div>
+              <AddButton text={t('bc_add_button')} disabled={form.buttons.length >= MAX_BUTTONS} onClick={() => setForm({ ...form, buttons: [...form.buttons, { label: '', url: '', flowId: '' }] })} />
+            </div>
+          </VStack>
           <div className="bc-grid">
             <TextInputField
               label={t('bc_image')}
@@ -344,6 +394,8 @@ export default function Broadcasts() {
               onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
             />
           </div>
+          <SelectField label={t('bc_message_tag')} value={form.messageTag} options={messageTagOptions} onChange={(v) => setForm({ ...form, messageTag: v })} />
+          {form.messageTag && <Banner variant="orange" icon={ErrorTriangleFilledIcon} content={t('bc_message_tag_warning')} />}
           {formError !== null && <ErrorBanner error={formError} />}
           <div className="bc-submit">
             <Text typo="13" color="txt-black-darker" className="bc-reach">
@@ -404,6 +456,15 @@ export default function Broadcasts() {
                   </a>
                 )}
                 <p>{reading.text}</p>
+                {!!reading.buttons?.length && (
+                  <div className="chips">
+                    {reading.buttons.map((x, i) => (
+                      <button key={i} type="button" className="chip" disabled title={x.url ?? (x.flowId != null ? flowName(x.flowId) : undefined)}>
+                        {x.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Text typo="12" color="txt-black-dark" className="tabular">
                   {t('bc_chars').replace('{n}', fmt(charCount(reading.text)))}
                 </Text>

@@ -1,11 +1,12 @@
-import { and, eq, gte, isNotNull } from 'drizzle-orm'
+import { and, eq, gte, isNotNull, sql } from 'drizzle-orm'
 import type { Db } from './db'
 import { schema } from './db'
 import type { ChannelAdapter } from './channels/adapter'
 import type { InboundEvent } from './channels/types'
 import { isBotPaused, setBotPaused, upsertContact, type ContactRow } from './contacts'
 import { getGeneral } from './settings'
-import { logMessage, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
+import { logEvent, logMessage, matchTrigger, parseButtonPayload, parseFlow, parseFlowPayload, resumeFromButton, resumeSession, startFlow, type RunContext } from './flows/engine'
+import { parseBroadcastButtons, parseBroadcastPayload } from './broadcasts'
 
 /** Remembers platform event ids so retried webhooks are not processed twice. */
 export async function markProcessed(db: Db, id: string): Promise<boolean> {
@@ -56,6 +57,22 @@ export async function handleInbound(db: Db, adapter: ChannelAdapter, event: Inbo
   if (await isBotPaused(db, contact)) return
 
   const flows = await liveFlows(db)
+
+  // 0. Broadcast buttons (`sk-bc:<broadcastId>:<i>`): count the tap and start its automation.
+  // Handled before the session so a tap while a question is waiting is not taken as the answer.
+  const bc = parseBroadcastPayload(event.payload)
+  if (bc) {
+    const row = await db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, bc.broadcastId)).get()
+    const button = row ? parseBroadcastButtons(row.buttons)[bc.index] : undefined
+    if (row && button) {
+      await logEvent(db, { type: 'button_clicked', channel: contact.channel, contactId: contact.id, meta: { broadcastId: row.id, index: bc.index, label: button.label } })
+      await db.update(schema.broadcasts).set({ clicked: sql`${schema.broadcasts.clicked} + 1` }).where(eq(schema.broadcasts.id, row.id))
+      const flow = flows.find((f) => f.id === button.flowId)
+      if (flow) await startFlow({ ...base, contact, flow }, null)
+    }
+    return
+  }
+
   const session = await db.select().from(schema.sessions).where(eq(schema.sessions.contactId, contact.id)).get()
 
   // 1. Continue a waiting conversation.

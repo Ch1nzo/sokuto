@@ -37,10 +37,11 @@ import type { Channel } from '../channels/types'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { flowChannelSchema, flowKindSchema, segmentInputSchema, validateFlow } from '../flows/validate'
+import { broadcastButtonsSchema, flowChannelSchema, flowKindSchema, messageTagSchema, segmentInputSchema, validateFlow } from '../flows/validate'
 import { simulateFlow, type SimulatedInput } from '../flows/simulate'
 import { broadcastReach, runScheduledTasks } from '../scheduler'
 import { loadSegment, matchesSegment, parseSegment, tagsByContact } from '../segments'
+import { parseBroadcastButtons } from '../broadcasts'
 import { randomToken, sha256Hex } from '../crypto'
 
 export const apiRoutes = new Hono<AppEnv>()
@@ -542,7 +543,7 @@ apiRoutes.post('/inbox/:id/bot', async (c) => {
 /* ---------- Broadcasts ---------- */
 apiRoutes.get('/broadcasts', async (c) => {
   const rows = await db(c.env).select().from(schema.broadcasts).orderBy(desc(schema.broadcasts.id)).limit(100)
-  return c.json({ broadcasts: rows })
+  return c.json({ broadcasts: rows.map((r) => ({ ...r, buttons: parseBroadcastButtons(r.buttons) })) })
 })
 
 apiRoutes.get('/broadcasts/reach', async (c) => {
@@ -551,12 +552,12 @@ apiRoutes.get('/broadcasts/reach', async (c) => {
   const tag = c.req.query('tag')?.trim() || null
   const segmentId = await segmentIdOf(d, c.req.query('segmentId'))
   if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
-  return c.json(await broadcastReach(d, channel, tag, segmentId))
+  return c.json(await broadcastReach(d, channel, tag, segmentId, Boolean(c.req.query('messageTag'))))
 })
 
 apiRoutes.post('/broadcasts', async (c) => {
   const d = db(c.env)
-  const body = await c.req.json<{ name?: string; channel?: string; tag?: string; text?: string; imageUrl?: string; scheduledAt?: string; segmentId?: number | null }>()
+  const body = await c.req.json<{ name?: string; channel?: string; tag?: string; text?: string; imageUrl?: string; scheduledAt?: string; segmentId?: number | null; buttons?: unknown; messageTag?: string | null }>()
   const text = body.text?.trim() ?? ''
   if (!text) return c.json({ error: 'missing_text' }, 400)
   const ch = flowChannelSchema.safeParse(body.channel ?? 'any')
@@ -565,9 +566,23 @@ apiRoutes.post('/broadcasts', async (c) => {
   if (Number.isNaN(scheduledAt.getTime())) return c.json({ error: 'invalid_date' }, 400)
   const segmentId = await segmentIdOf(d, body.segmentId)
   if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
+  const buttons = broadcastButtonsSchema.safeParse(body.buttons ?? [])
+  if (!buttons.success) return c.json({ error: 'invalid_buttons', errors: zodErrors(buttons.error) }, 400)
+  const messageTag = body.messageTag ? messageTagSchema.safeParse(body.messageTag) : null
+  if (messageTag && !messageTag.success) return c.json({ error: 'invalid_message_tag' }, 400)
   const row = await d
     .insert(schema.broadcasts)
-    .values({ name: body.name?.trim() || text.slice(0, 30), channel: ch.data, tag: segmentId ? null : body.tag?.trim() || null, segmentId, text, imageUrl: body.imageUrl?.trim() || null, scheduledAt: scheduledAt.toISOString() })
+    .values({
+      name: body.name?.trim() || text.slice(0, 30),
+      channel: ch.data,
+      tag: segmentId ? null : body.tag?.trim() || null,
+      segmentId,
+      text,
+      imageUrl: body.imageUrl?.trim() || null,
+      buttons: buttons.data.length ? JSON.stringify(buttons.data) : null,
+      messageTag: messageTag?.data ?? null,
+      scheduledAt: scheduledAt.toISOString(),
+    })
     .returning()
     .get()
   return c.json({ broadcast: row }, 201)
