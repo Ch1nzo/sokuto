@@ -10,11 +10,12 @@ import { configuredChannels, getGeneral } from '../settings'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { FLOW_SCHEMA_DOC, flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
+import { FLOW_SCHEMA_DOC, flowChannelSchema, flowKindSchema, segmentInputSchema, validateFlow } from '../flows/validate'
 import { simulateFlow } from '../flows/simulate'
 import { getAdapter } from '../channels/registry'
 import type { Channel } from '../channels/types'
 import { broadcastReach } from '../scheduler'
+import { loadSegment, parseSegment } from '../segments'
 
 export const mcpRoutes = new Hono<AppEnv>()
 
@@ -207,11 +208,35 @@ export function buildMcpServer(env: Env): McpServer {
     return json({ days, flows: perFlow, daily, recentErrors: errors.map((e) => ({ at: e.createdAt, flowId: e.flowId, stepId: e.stepId, meta: e.meta })) })
   })
 
-  server.registerTool('broadcast_reach', { title: 'Broadcast reach', description: 'How many contacts a broadcast would reach now (Meta: only people active in the last 24h).', inputSchema: { channel: flowChannelSchema.default('any'), tag: z.string().optional() } }, async ({ channel, tag }) => json(await broadcastReach(d, channel, tag ?? null)))
+  server.registerTool('broadcast_reach', { title: 'Broadcast reach', description: 'How many contacts a broadcast would reach now (Meta: only people active in the last 24h). segmentId (from list_segments) replaces tag.', inputSchema: { channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional() } }, async ({ channel, tag, segmentId }) => {
+    if (segmentId !== undefined && !(await loadSegment(d, segmentId))) return fail('invalid_segment')
+    return json(await broadcastReach(d, channel, tag ?? null, segmentId ?? null))
+  })
 
-  server.registerTool('create_broadcast', { title: 'Create broadcast', description: 'Schedules a message to everyone with a tag (or everyone). Sent by the minute-ly scheduler.', inputSchema: { name: z.string().optional(), channel: flowChannelSchema.default('any'), tag: z.string().optional(), text: z.string().min(1), scheduledAt: z.string().datetime().optional() } }, async ({ name, channel, tag, text, scheduledAt }) => {
-    const row = await d.insert(schema.broadcasts).values({ name: name ?? text.slice(0, 30), channel, tag: tag ?? null, text, scheduledAt: scheduledAt ?? new Date().toISOString() }).returning().get()
+  server.registerTool('create_broadcast', { title: 'Create broadcast', description: 'Schedules a message to everyone with a tag, everyone in a segment (segmentId from list_segments; replaces tag), or everyone. Sent by the minute-ly scheduler.', inputSchema: { name: z.string().optional(), channel: flowChannelSchema.default('any'), tag: z.string().optional(), segmentId: z.number().int().optional(), text: z.string().min(1), scheduledAt: z.string().datetime().optional() } }, async ({ name, channel, tag, segmentId, text, scheduledAt }) => {
+    if (segmentId !== undefined && !(await loadSegment(d, segmentId))) return fail('invalid_segment')
+    const row = await d.insert(schema.broadcasts).values({ name: name ?? text.slice(0, 30), channel, tag: segmentId !== undefined ? null : tag ?? null, segmentId: segmentId ?? null, text, scheduledAt: scheduledAt ?? new Date().toISOString() }).returning().get()
     return json(row)
+  })
+
+  server.registerTool('list_segments', { title: 'List segments', description: 'Saved contact filters (condition rules + all/any mode). Use the id as segmentId in broadcast_reach / create_broadcast.' }, async () => {
+    const rows = await d.select().from(schema.segments).orderBy(desc(schema.segments.id))
+    return json(rows.map(parseSegment))
+  })
+
+  server.registerTool(
+    'create_segment',
+    { title: 'Create segment', description: 'Saves condition rules as a segment for filtering contacts and targeting broadcasts. Rules use the condition step format from get_flow_schema (e.g. { "field": "tag", "op": "has_tag", "value": "vip" }); mode "all" (default) or "any".', inputSchema: segmentInputSchema.shape },
+    async ({ name, rules, mode }) => {
+      const row = await d.insert(schema.segments).values({ name, rules: JSON.stringify(rules), mode }).returning().get()
+      return json(parseSegment(row!))
+    },
+  )
+
+  server.registerTool('delete_segment', { title: 'Delete segment', description: 'Deletes a segment. Scheduled broadcasts that target it will reach nobody.', inputSchema: { id: z.number().int() } }, async ({ id }) => {
+    if (!(await loadSegment(d, id))) return fail('not_found')
+    await d.delete(schema.segments).where(eq(schema.segments.id, id))
+    return json({ ok: true })
   })
 
   server.registerTool(

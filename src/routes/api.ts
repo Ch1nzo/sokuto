@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { ZodError } from 'zod'
 import { and, desc, eq, gte, like, or, sql } from 'drizzle-orm'
 import type { AppEnv } from '../auth'
 import { createDb, schema, type Db } from '../db'
@@ -36,9 +37,10 @@ import type { Channel } from '../channels/types'
 import { addTag, getTags, parseFields, removeTag, setBotPaused } from '../contacts'
 import { contactSequences, logMessage, parseFlow, subscribeSequence, unsubscribeSequence } from '../flows/engine'
 import { TEMPLATES } from '../flows/templates'
-import { flowChannelSchema, flowKindSchema, validateFlow } from '../flows/validate'
+import { flowChannelSchema, flowKindSchema, segmentInputSchema, validateFlow } from '../flows/validate'
 import { simulateFlow, type SimulatedInput } from '../flows/simulate'
 import { broadcastReach, runScheduledTasks } from '../scheduler'
+import { loadSegment, matchesSegment, parseSegment, tagsByContact } from '../segments'
 import { randomToken, sha256Hex } from '../crypto'
 
 export const apiRoutes = new Hono<AppEnv>()
@@ -364,6 +366,7 @@ apiRoutes.get('/contacts', async (c) => {
   const q = c.req.query('q')?.trim()
   const tag = c.req.query('tag')?.trim()
   const channel = c.req.query('channel')?.trim()
+  const segment = c.req.query('segment')?.trim()
   const page = Math.max(1, Number(c.req.query('page') ?? '1'))
   const size = 50
   const conds = []
@@ -371,6 +374,14 @@ apiRoutes.get('/contacts', async (c) => {
   if (channel) conds.push(eq(schema.contacts.channel, channel))
   if (tag) conds.push(sql`${schema.contacts.id} in (select contact_id from contact_tags where tag = ${tag})`)
   const where = conds.length ? and(...conds) : undefined
+  if (segment) {
+    const seg = await loadSegment(d, Number(segment))
+    if (!seg) return c.json({ error: 'not_found' }, 404)
+    const tagMap = await tagsByContact(d)
+    // ponytail: O(n) in-memory scan over all contacts (rules are not SQL, and D1 caps bound parameters at 100); move to SQL if contacts outgrow Worker memory
+    const matched = (await d.select().from(schema.contacts).where(where).orderBy(desc(schema.contacts.updatedAt))).filter((r) => matchesSegment(seg, r, tagMap.get(r.id) ?? []))
+    return c.json({ contacts: matched.slice((page - 1) * size, page * size).map((r) => ({ ...r, fields: parseFields(r), tags: tagMap.get(r.id) ?? [] })), total: matched.length, page, size })
+  }
   const rows = await d.select().from(schema.contacts).where(where).orderBy(desc(schema.contacts.updatedAt)).limit(size).offset((page - 1) * size)
   const total = await d.select({ n: sql<number>`count(*)` }).from(schema.contacts).where(where).get()
   const ids = rows.map((r) => r.id)
@@ -535,23 +546,28 @@ apiRoutes.get('/broadcasts', async (c) => {
 })
 
 apiRoutes.get('/broadcasts/reach', async (c) => {
+  const d = db(c.env)
   const channel = (c.req.query('channel') || 'any') as Channel | 'any'
   const tag = c.req.query('tag')?.trim() || null
-  return c.json(await broadcastReach(db(c.env), channel, tag))
+  const segmentId = await segmentIdOf(d, c.req.query('segmentId'))
+  if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
+  return c.json(await broadcastReach(d, channel, tag, segmentId))
 })
 
 apiRoutes.post('/broadcasts', async (c) => {
   const d = db(c.env)
-  const body = await c.req.json<{ name?: string; channel?: string; tag?: string; text?: string; imageUrl?: string; scheduledAt?: string }>()
+  const body = await c.req.json<{ name?: string; channel?: string; tag?: string; text?: string; imageUrl?: string; scheduledAt?: string; segmentId?: number | null }>()
   const text = body.text?.trim() ?? ''
   if (!text) return c.json({ error: 'missing_text' }, 400)
   const ch = flowChannelSchema.safeParse(body.channel ?? 'any')
   if (!ch.success) return c.json({ error: 'invalid_channel' }, 400)
   const scheduledAt = body.scheduledAt ? new Date(body.scheduledAt) : new Date()
   if (Number.isNaN(scheduledAt.getTime())) return c.json({ error: 'invalid_date' }, 400)
+  const segmentId = await segmentIdOf(d, body.segmentId)
+  if (segmentId === false) return c.json({ error: 'invalid_segment' }, 400)
   const row = await d
     .insert(schema.broadcasts)
-    .values({ name: body.name?.trim() || text.slice(0, 30), channel: ch.data, tag: body.tag?.trim() || null, text, imageUrl: body.imageUrl?.trim() || null, scheduledAt: scheduledAt.toISOString() })
+    .values({ name: body.name?.trim() || text.slice(0, 30), channel: ch.data, tag: segmentId ? null : body.tag?.trim() || null, segmentId, text, imageUrl: body.imageUrl?.trim() || null, scheduledAt: scheduledAt.toISOString() })
     .returning()
     .get()
   return c.json({ broadcast: row }, 201)
@@ -562,6 +578,46 @@ apiRoutes.post('/broadcasts/:id/cancel', async (c) => {
   const id = Number(c.req.param('id'))
   await d.update(schema.broadcasts).set({ status: 'canceled' }).where(and(eq(schema.broadcasts.id, id), or(eq(schema.broadcasts.status, 'scheduled'), eq(schema.broadcasts.status, 'running'))))
   await d.update(schema.broadcastJobs).set({ status: 'skipped', error: 'canceled' }).where(and(eq(schema.broadcastJobs.broadcastId, id), eq(schema.broadcastJobs.status, 'pending')))
+  return c.json({ ok: true })
+})
+
+/* ---------- Segments ---------- */
+/** An optional segment id from a query or body: null when absent, false when it names no segment. */
+async function segmentIdOf(d: Db, raw: unknown): Promise<number | null | false> {
+  if (raw === undefined || raw === null || raw === '') return null
+  const seg = await loadSegment(d, Number(raw))
+  return seg ? seg.id : false
+}
+
+const issues = (e: ZodError) => e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+
+apiRoutes.get('/segments', async (c) => {
+  const rows = await db(c.env).select().from(schema.segments).orderBy(desc(schema.segments.id))
+  return c.json({ segments: rows.map(parseSegment) })
+})
+
+apiRoutes.post('/segments', async (c) => {
+  const v = segmentInputSchema.safeParse(await c.req.json())
+  if (!v.success) return c.json({ error: 'invalid_segment', errors: issues(v.error) }, 400)
+  const row = await db(c.env).insert(schema.segments).values({ name: v.data.name, rules: JSON.stringify(v.data.rules), mode: v.data.mode }).returning().get()
+  return c.json({ segment: parseSegment(row!) }, 201)
+})
+
+apiRoutes.put('/segments/:id', async (c) => {
+  const d = db(c.env)
+  const seg = await loadSegment(d, Number(c.req.param('id')))
+  if (!seg) return c.json({ error: 'not_found' }, 404)
+  const v = segmentInputSchema.safeParse(await c.req.json())
+  if (!v.success) return c.json({ error: 'invalid_segment', errors: issues(v.error) }, 400)
+  const row = await d.update(schema.segments).set({ name: v.data.name, rules: JSON.stringify(v.data.rules), mode: v.data.mode }).where(eq(schema.segments.id, seg.id)).returning().get()
+  return c.json({ segment: parseSegment(row!) })
+})
+
+apiRoutes.delete('/segments/:id', async (c) => {
+  const d = db(c.env)
+  const seg = await loadSegment(d, Number(c.req.param('id')))
+  if (!seg) return c.json({ error: 'not_found' }, 404)
+  await d.delete(schema.segments).where(eq(schema.segments.id, seg.id))
   return c.json({ ok: true })
 })
 

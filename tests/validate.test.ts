@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateFlow } from '../src/flows/validate'
+import { segmentInputSchema, validateFlow } from '../src/flows/validate'
 
 const validDef = {
   triggers: [{ type: 'keyword', keywords: ['price'], match: 'contains' }],
@@ -205,5 +205,21 @@ describe('validateFlow (sequences)', () => {
     expect(validateFlow(def({ type: 'subscribe', flowId: 3 })).ok).toBe(true)
     expect(validateFlow(def({ type: 'unsubscribe', flowId: 3 })).ok).toBe(true)
     expect(errorsOf(def({ type: 'subscribe' })).length).toBeGreaterThan(0)
+  })
+})
+
+describe('segmentInputSchema', () => {
+  const rule = { field: 'tag', op: 'has_tag', value: 'vip' }
+
+  it('defaults mode to all and trims the name', () => {
+    const r = segmentInputSchema.safeParse({ name: ' VIP ', rules: [rule] })
+    expect(r.success && r.data).toEqual({ name: 'VIP', rules: [rule], mode: 'all' })
+  })
+
+  it('rejects empty rules, more than 20 rules, a blank name and an unknown mode', () => {
+    expect(segmentInputSchema.safeParse({ name: 'VIP', rules: [] }).success).toBe(false)
+    expect(segmentInputSchema.safeParse({ name: 'VIP', rules: Array(21).fill(rule) }).success).toBe(false)
+    expect(segmentInputSchema.safeParse({ name: '  ', rules: [rule] }).success).toBe(false)
+    expect(segmentInputSchema.safeParse({ name: 'VIP', rules: [rule], mode: 'none' }).success).toBe(false)
   })
 })

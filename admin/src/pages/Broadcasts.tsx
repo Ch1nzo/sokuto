@@ -12,7 +12,7 @@ import {
   useToast,
   type BadgeVariant,
 } from '@channel.io/bezier-react'
-import { InfoFilledIcon, MegaphoneIcon } from '@channel.io/bezier-icons'
+import { FunnelIcon, InfoFilledIcon, MegaphoneIcon } from '@channel.io/bezier-icons'
 import { api, errorMessage } from '../lib/api'
 import { useLang, useT, type Key } from '../lib/i18n'
 import {
@@ -40,6 +40,7 @@ type Broadcast = {
   name: string
   channel: string
   tag: string | null
+  segmentId?: number | null
   text: string
   imageUrl?: string | null
   status: BroadcastStatus
@@ -52,9 +53,10 @@ type Broadcast = {
 
 type Reach = { total: number; reachable: number }
 type TagCount = { tag: string; n: number }
+type SegmentRef = { id: number; name: string }
 type Channel = 'any' | 'line' | 'messenger' | 'instagram'
 
-const emptyForm = { name: '', channel: 'any' as Channel, tag: '', text: '', imageUrl: '', scheduledAt: '' }
+const emptyForm = { name: '', channel: 'any' as Channel, tag: '', segmentId: '', text: '', imageUrl: '', scheduledAt: '' }
 
 /** Soft limit: warn (do not block) above this many characters. */
 const TEXT_SOFT_LIMIT = 1000
@@ -86,6 +88,7 @@ export default function Broadcasts() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [formError, setFormError] = useState<unknown>(null)
   const [tags, setTags] = useState<TagCount[]>([])
+  const [segments, setSegments] = useState<SegmentRef[]>([])
   const [reach, setReach] = useState<Reach | null | 'error'>(null)
   const [busy, setBusy] = useState(false)
   const [pendingCancel, setPendingCancel] = useState<Broadcast | null>(null)
@@ -112,6 +115,10 @@ export default function Broadcasts() {
       .get<{ tags: TagCount[] }>('/api/tags')
       .then((r) => setTags(r.tags))
       .catch(() => setTags([]))
+    api
+      .get<{ segments: SegmentRef[] }>('/api/segments')
+      .then((r) => setSegments(r.segments))
+      .catch(() => setSegments([]))
   }, [])
 
   useEffect(() => {
@@ -119,7 +126,8 @@ export default function Broadcasts() {
     setReach(null)
     const timer = setTimeout(() => {
       const params = new URLSearchParams({ channel: form.channel })
-      if (form.tag.trim()) params.set('tag', form.tag.trim())
+      if (form.segmentId) params.set('segmentId', form.segmentId)
+      else if (form.tag.trim()) params.set('tag', form.tag.trim())
       api
         .get<Reach>(`/api/broadcasts/reach?${params.toString()}`)
         .then((r) => !cancelled && setReach(r))
@@ -129,7 +137,7 @@ export default function Broadcasts() {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [form.channel, form.tag])
+  }, [form.channel, form.tag, form.segmentId])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -146,7 +154,8 @@ export default function Broadcasts() {
       await api.post('/api/broadcasts', {
         name: form.name.trim(),
         channel: form.channel,
-        tag: form.tag.trim(),
+        tag: form.segmentId ? '' : form.tag.trim(),
+        segmentId: form.segmentId ? Number(form.segmentId) : null,
         text: form.text,
         imageUrl: form.imageUrl.trim(),
         scheduledAt,
@@ -175,6 +184,9 @@ export default function Broadcasts() {
   const tooLong = chars > TEXT_SOFT_LIMIT
   const reachText =
     reach === null ? '…' : reach === 'error' ? t('bc_reach_unknown') : `${fmt(reach.total)} / ${fmt(reach.reachable)} ${t('bc_reachable')}`
+
+  const segmentName = (id: number) => segments.find((s) => s.id === id)?.name ?? `#${id}`
+  const segmentOptions = [{ value: '', label: t('bc_segment_none') }, ...segments.map((s) => ({ value: String(s.id), label: s.name }))]
 
   const channelOptions: { value: Channel; label: string }[] = [
     { value: 'any', label: t('channel_any') },
@@ -223,6 +235,11 @@ export default function Broadcasts() {
           {b.tag && (
             <Badge size="s" variant="blue" className="bc-tag" title={b.tag}>
               {b.tag}
+            </Badge>
+          )}
+          {b.segmentId != null && (
+            <Badge size="s" variant="purple" icon={FunnelIcon} className="bc-tag" title={segmentName(b.segmentId)}>
+              {segmentName(b.segmentId)}
             </Badge>
           )}
         </div>
@@ -277,13 +294,17 @@ export default function Broadcasts() {
             <TextInputField label={t('bc_name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} />
             <SelectField label={t('editor_channel')} value={form.channel} options={channelOptions} onChange={(v) => setForm({ ...form, channel: v })} />
           </div>
-          <TextInputField
-            label={t('bc_tag')}
-            value={form.tag}
-            onChange={(e) => setForm({ ...form, tag: e.target.value })}
-            list="bc-tags"
-            autoComplete="off"
-          />
+          <div className="bc-grid">
+            <SelectField label={t('bc_segment')} helperText={t('bc_segment_hint')} value={form.segmentId} options={segmentOptions} onChange={(v) => setForm({ ...form, segmentId: v })} />
+            <TextInputField
+              label={t('bc_tag')}
+              value={form.tag}
+              onChange={(e) => setForm({ ...form, tag: e.target.value })}
+              disabled={!!form.segmentId}
+              list="bc-tags"
+              autoComplete="off"
+            />
+          </div>
           <datalist id="bc-tags">
             {tags.slice(0, 500).map((x) => (
               <option key={x.tag} value={x.tag}>
