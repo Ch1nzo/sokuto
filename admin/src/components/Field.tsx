@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from 'react'
 import {
+  useModalContainerContext,
   FormControl,
   FormErrorMessage,
   FormHelperText,
@@ -84,6 +85,15 @@ export function SelectField<V extends string>({ value, options, onChange, placeh
 }
 
 /** The bare select control (no label), for toolbars / filters. Wrap with FormControl yourself if needed. */
+/**
+ * Where Select dropdowns render. Inside a Bezier modal they stay in the modal (outside clicks would close it);
+ * elsewhere they go to <body>, so a card's z-index or an ancestor's overflow can never hide or clip them.
+ */
+export function useDropdownContainer(): HTMLElement | undefined {
+  const modal = useModalContainerContext()
+  return modal ?? (typeof document === 'undefined' ? undefined : document.body)
+}
+
 export function SelectInput<V extends string>({
   value,
   options,
@@ -94,7 +104,7 @@ export function SelectInput<V extends string>({
   const ref = useRef<SelectRef>(null)
   const current = options.find((o) => o.value === value)
   return (
-    <Select ref={ref} text={current?.label} placeholder={placeholder} dropdownStyle={{ maxHeight: 320, overflowY: 'auto' }} {...rest}>
+    <Select ref={ref} text={current?.label} placeholder={placeholder} dropdownContainer={useDropdownContainer()} dropdownStyle={{ maxHeight: 320, overflowY: 'auto' }} {...rest}>
       {options.map((o) => (
         <ListItem
           key={o.value}

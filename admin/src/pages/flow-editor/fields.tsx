@@ -3,7 +3,7 @@ import { Button, FormControl, FormLabel, ListItem, Select, type SelectRef } from
 import { PlusIcon, type BezierIcon } from '@channel.io/bezier-icons'
 import type { Step } from '@shared/flows/types'
 import type { Key } from '../../lib/i18n'
-import { TextInputField } from '../../components'
+import { TextInputField, useDropdownContainer } from '../../components'
 import { splitList, stepSummary, type TFn } from './model'
 
 /** Comma separated text field bound to a string[]; keeps the raw text locally so typing "a, " is not swallowed. */
@@ -33,7 +33,7 @@ function PickSelect({ value, options, onChange, ...rest }: { value: string; opti
   const ref = useRef<SelectRef>(null)
   const current = options.find((o) => o.value === value)
   return (
-    <Select ref={ref} text={current?.label ?? value} dropdownStyle={{ maxHeight: 320, overflowY: 'auto' }} {...rest}>
+    <Select ref={ref} text={current?.label ?? value} dropdownContainer={useDropdownContainer()} dropdownStyle={{ maxHeight: 320, overflowY: 'auto' }} {...rest}>
       {options.map((o) => (
         <ListItem
           key={o.value}

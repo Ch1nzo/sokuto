@@ -14,6 +14,7 @@ export {
   TextAreaField,
   SelectField,
   SelectInput,
+  useDropdownContainer,
   type TextInputFieldProps,
   type TextAreaFieldProps,
   type SelectFieldProps,
